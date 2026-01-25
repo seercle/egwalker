@@ -1,0 +1,6 @@
+go/*.prof
+go/*.test
+go/*.out
+go/*.csv
+.direnv
+.envrc
