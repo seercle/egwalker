@@ -23,9 +23,9 @@ func printTree[T any](node Node[T], level int) {
 		println()
 	} else {
 		internal := node.(*InternalNode[T])
-		fmt.Printf("%sInternalNode(len=%d):\n", prefix, internal._len)
-		for i := 0; i < internal._len; i++ {
-			fmt.Printf("%s  Child %d (size=%d):\n", prefix, i, internal.sizes[i])
+		fmt.Printf("%sInternalNode(len=%d,size=%d):\n", prefix, internal.len, internal._size)
+		for i := 0; i < internal.len; i++ {
+			fmt.Printf("%s  Child %d:\n", prefix, i)
 			printTree(internal.children[i], level+2)
 		}
 	}
@@ -42,39 +42,34 @@ func (tree *BxTree[T]) Print() {
 //
 
 func getAt[T any](node Node[T], index int) (*LeafNode[T], int, error) {
-	if node.isLeaf() {
-		return node.(*LeafNode[T]).getAt(index)
-	}
-	return node.(*InternalNode[T]).getAt(index)
-}
-
-func (node *InternalNode[T]) getAt(index int) (*LeafNode[T], int, error) {
-	for i := 0; i < node._len; i++ {
-		i_size := node.sizes[i]
-		if index < i_size {
-			return getAt(node.children[i], index)
+	for !node.isLeaf() {
+		int_node := node.(*InternalNode[T])
+		found := false
+		for i := 0; i < int_node.len; i++ {
+			i_size := int_node.children[i].size()
+			if index < i_size {
+				node = int_node.children[i]
+				found = true
+				break
+			}
+			index -= i_size
 		}
-		index -= i_size
+		if !found {
+			return nil, -1, ErrIndexOutOfBounds
+		}
 	}
-	return nil, -1, ErrIndexOutOfBounds
-}
-
-func (node *LeafNode[T]) getAt(index int) (*LeafNode[T], int, error) {
-	if index < 0 || index >= node._len {
-		return nil, -1, ErrIndexOutOfBounds
-	}
-	return node, index, nil
+	return node.(*LeafNode[T]), index, nil
 }
 
 func (tree *BxTree[T]) GetAt(index int) (*T, error) {
 	if index < 0 || index >= tree.size {
 		return nil, ErrIndexOutOfBounds
 	}
-	leaf, pos, err := getAt(tree.root, index)
+	node, index, err := getAt(tree.root, index)
 	if err != nil {
 		return nil, err
 	}
-	return &leaf.items[pos], nil
+	return &node.items[index], nil
 }
 
 //
@@ -94,65 +89,59 @@ func (node *LeafNode[T]) split() (*LeafNode[T], *LeafNode[T]) {
 func (node *InternalNode[T]) split() (*InternalNode[T], *InternalNode[T]) {
 	right := &InternalNode[T]{
 		_parent: node._parent,
-		_len:    node._len / 2,
+		len:     node.len / 2,
+		_size:   0,
 	}
-	copy(right.children[0:right._len], node.children[node._len-right._len:node._len])
-	copy(right.sizes[0:right._len], node.sizes[node._len-right._len:node._len])
-	node._len = node._len - right._len
-	//update parent pointers for children
-	for i := 0; i < right._len; i++ {
+	for i := 0; i < right.len; i++ {
+		right.children[i] = node.children[node.len-right.len+i]
 		right.children[i].setParent(right)
+		right._size += right.children[i].size()
 	}
+	node.len = node.len - right.len
+	node._size = node._size - right._size
 	return node, right
 }
 
-func updateParentSizeUpwards[T any](node Node[T]) {
-	for ; node.parent() != nil; node = node.parent() {
-		for i := range node.parent()._len {
-			if node.parent().children[i] == node {
-				node.parent().sizes[i] = node.count()
-				break
-			}
-		}
+func updateParentSizeUpwards[T any](node Node[T], delta int) {
+	for parent := node.parent(); parent != nil; parent = parent._parent {
+		parent._size += delta
 	}
 }
 
 func (node *InternalNode[T]) insertAt(children_index int, new_node Node[T]) (*InternalNode[T], bool) {
 	insert := func(_node *InternalNode[T], _children_index int) {
-		copy(_node.children[_children_index+1:_node._len+1], _node.children[_children_index:_node._len])
-		copy(_node.sizes[_children_index+1:_node._len+1], _node.sizes[_children_index:_node._len])
+		copy(_node.children[_children_index+1:_node.len+1], _node.children[_children_index:_node.len])
 		_node.children[_children_index] = new_node
-		_node.sizes[_children_index] = new_node.count()
+		_node._size += new_node.size()
+		_node.len++
 		new_node.setParent(_node)
-		_node._len++
 	}
-	if node._len < INTERNAL_MAX_SIZE {
+	if node.len < INTERNAL_MAX_SIZE {
 		insert(node, children_index)
-		updateParentSizeUpwards(node)
+		updateParentSizeUpwards(node, new_node.size())
 		return node, false
 	} else {
 		_, right := node.split()
-		if children_index <= node._len {
+		if children_index <= node.len {
 			insert(node, children_index)
+			updateParentSizeUpwards(node, -right._size+new_node.size())
 		} else {
-			insert(right, children_index-node._len)
+			updateParentSizeUpwards(node, -right._size)
+			insert(right, children_index-node.len)
 		}
-		updateParentSizeUpwards(node)
-
 		if node._parent == nil {
 			new_root := &InternalNode[T]{
 				_parent: nil,
-				_len:    2,
+				len:     2,
 			}
 			new_root.children[0] = node
-			new_root.sizes[0] = node.count()
 			new_root.children[1] = right
-			new_root.sizes[1] = right.count()
+			new_root._size = node._size + right._size
 			node._parent = new_root
 			right._parent = new_root
 			return new_root, true
 		} else {
-			for i := range node._parent._len {
+			for i := range node._parent.len {
 				if node._parent.children[i] == node {
 					return node._parent.insertAt(i+1, right)
 				}
@@ -170,31 +159,31 @@ func (node *LeafNode[T]) insertAt(pos int, item T) (*InternalNode[T], bool) {
 	}
 	if node._len < LEAF_MAX_SIZE {
 		insert(node, pos)
-		updateParentSizeUpwards(node)
+		updateParentSizeUpwards(node, 1)
 		return nil, false
 	} else {
 		_, right := node.split()
 		if pos <= node._len {
 			insert(node, pos)
+			updateParentSizeUpwards(node, -right._len+1)
 		} else {
+			updateParentSizeUpwards(node, -right._len)
 			insert(right, pos-node._len)
 		}
-		updateParentSizeUpwards(node)
 
 		if node._parent == nil {
 			new_root := &InternalNode[T]{
 				_parent: nil,
-				_len:    2,
+				len:     2,
 			}
 			new_root.children[0] = node
-			new_root.sizes[0] = node.count()
 			new_root.children[1] = right
-			new_root.sizes[1] = right.count()
+			new_root._size = node._len + right._len
 			node._parent = new_root
 			right._parent = new_root
 			return new_root, true
 		} else {
-			for i := range node._parent._len {
+			for i := range node._parent.len {
 				if node._parent.children[i] == node {
 					return node._parent.insertAt(i+1, right)
 				}
