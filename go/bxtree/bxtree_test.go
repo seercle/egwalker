@@ -8,7 +8,6 @@ import (
 func TestFirstLastPointers(t *testing.T) {
 	tree := New[int]()
 
-	// 1. Initial Insert
 	tree.InsertAt(0, 100)
 	if tree.first == nil || tree.last == nil {
 		t.Fatal("First or Last pointer is nil after first insert")
@@ -17,8 +16,6 @@ func TestFirstLastPointers(t *testing.T) {
 		t.Fatal("First and Last should point to the same node after single insert")
 	}
 
-	// 2. Append elements to trigger splits (updates Last)
-	// LEAF_MAX_SIZE is 128 (64*2). Let's insert enough to split a few times.
 	count := 500
 	for i := 1; i < count; i++ {
 		err := tree.InsertAt(tree.Size(), 100+i)
@@ -26,8 +23,6 @@ func TestFirstLastPointers(t *testing.T) {
 			t.Fatalf("Insert failed at %d: %v", i, err)
 		}
 
-		// Verify Last pointer invariant
-		// The last node should contain the last element
 		lastNode := tree.last
 		if lastNode == nil {
 			t.Fatalf("Last pointer is nil at iteration %d", i)
@@ -35,7 +30,7 @@ func TestFirstLastPointers(t *testing.T) {
 		if !lastNode.isLeaf {
 			t.Fatalf("Last pointer points to internal node at iteration %d", i)
 		}
-		// The last item in the last node should be the item we just inserted
+
 		if len(lastNode.items) == 0 {
 			t.Fatalf("Last node is empty at iteration %d", i)
 		}
@@ -44,8 +39,6 @@ func TestFirstLastPointers(t *testing.T) {
 		}
 	}
 
-	// 3. Prepend elements (updates/verifies First)
-	// We are inserting at 0.
 	for i := 1; i < count; i++ {
 		val := 100 - i
 		err := tree.InsertAt(0, val)
@@ -53,7 +46,6 @@ func TestFirstLastPointers(t *testing.T) {
 			t.Fatalf("Prepend failed at %d: %v", i, err)
 		}
 
-		// Verify First pointer invariant
 		firstNode := tree.first
 		if firstNode == nil {
 			t.Fatalf("First pointer is nil at prepend iteration %d", i)
@@ -69,8 +61,6 @@ func TestFirstLastPointers(t *testing.T) {
 		}
 	}
 
-	// 4. Verify structural integrity by traversing to edges
-	// Check Leftmost
 	curr := tree.root
 	for !curr.isLeaf {
 		curr = curr.children[0]
@@ -79,7 +69,6 @@ func TestFirstLastPointers(t *testing.T) {
 		t.Errorf("Root traversal to leftmost leaf does not match tree.first")
 	}
 
-	// Check Rightmost
 	curr = tree.root
 	for !curr.isLeaf {
 		curr = curr.children[len(curr.children)-1]
@@ -87,16 +76,6 @@ func TestFirstLastPointers(t *testing.T) {
 	if curr != tree.last {
 		t.Errorf("Root traversal to rightmost leaf does not match tree.last")
 	}
-
-	// 5. Verify data integrity
-	// We inserted 100..599 (append) and 99..-399 (prepend)
-	// Range is 100 to 599 (500 items)
-	// Range is 99 down to 100-499 = -399 (499 items)
-	// Total items = 1 + 499 + 499 = 999 items?
-	// Initial: 100.
-	// Append loop: 1 to 499. Inserted 101, 102... 100+499=599.
-	// Prepend loop: 1 to 499. Inserted 99, 98... 100-499=-399.
-	// Expected min: -399. Expected max: 599.
 
 	val, err := tree.GetAt(0)
 	if err != nil {
@@ -115,12 +94,170 @@ func TestFirstLastPointers(t *testing.T) {
 	}
 }
 
-//
+func TestDeleteEmpty(t *testing.T) {
+	tree := New[int]()
+	err := tree.DeleteAt(0)
+	if err != ErrIndexOutOfBounds {
+		t.Errorf("Expected ErrIndexOutOfBounds when deleting from empty tree, got %v", err)
+	}
+}
+
+func TestDeleteOutOfBounds(t *testing.T) {
+	tree := New[int]()
+	tree.InsertAt(0, 1)
+
+	tests := []int{-1, 1, 5}
+	for _, idx := range tests {
+		err := tree.DeleteAt(idx)
+		if err != ErrIndexOutOfBounds {
+			t.Errorf("Expected ErrIndexOutOfBounds for index %d, got %v", idx, err)
+		}
+	}
+}
+
+func TestDeleteSingleItem(t *testing.T) {
+	tree := New[int]()
+	tree.InsertAt(0, 10)
+
+	err := tree.DeleteAt(0)
+	if err != nil {
+		t.Fatalf("DeleteAt(0) failed: %v", err)
+	}
+
+	if tree.Size() != 0 {
+		t.Errorf("Expected size 0, got %d", tree.Size())
+	}
+
+	err = tree.InsertAt(0, 20)
+	if err != nil {
+		t.Fatalf("Re-insertion after emptying failed: %v", err)
+	}
+	if val, _ := tree.GetAt(0); *val != 20 {
+		t.Errorf("Re-insertion failed value check")
+	}
+}
+
+func TestDeleteFromLeavesSimple(t *testing.T) {
+	tree := New[int]()
+	for i := 0; i < 5; i++ {
+		tree.InsertAt(i, i)
+	}
+
+	tree.DeleteAt(2) // [0, 1, 3, 4]
+	if tree.Size() != 4 {
+		t.Errorf("Size incorrect after delete")
+	}
+	if v, _ := tree.GetAt(2); *v != 3 {
+		t.Errorf("Index 2 is wrong after delete, expected 3, got %d", *v)
+	}
+
+	tree.DeleteAt(3) // [0, 1, 3]
+	if v, _ := tree.GetAt(2); *v != 3 {
+		t.Errorf("Last element wrong, expected 3, got %d", *v)
+	}
+
+	tree.DeleteAt(0) // [1, 3]
+	if v, _ := tree.GetAt(0); *v != 1 {
+		t.Errorf("First element wrong, expected 1, got %d", *v)
+	}
+}
+
+func TestDeleteMergesAndBorrows(t *testing.T) {
+	tree := New[int]()
+	count := 50
+
+	for i := 0; i < count; i++ {
+		tree.InsertAt(i, i)
+	}
+
+	initialSize := tree.Size()
+
+	for i := 0; i < count; i++ {
+		err := tree.DeleteAt(0)
+		if err != nil {
+			t.Fatalf("DeleteAt(0) iteration %d failed: %v", i, err)
+		}
+
+		expectedSize := initialSize - 1 - i
+		if tree.Size() != expectedSize {
+			t.Fatalf("Size mismatch at iteration %d. Expected %d, got %d", i, expectedSize, tree.Size())
+		}
+
+		if expectedSize > 0 {
+			val, _ := tree.GetAt(0)
+			if *val != i+1 {
+				t.Fatalf("Data corruption at iteration %d. Expected head to be %d, got %d", i, i+1, *val)
+			}
+		}
+	}
+}
+
+func TestDeleteReverse(t *testing.T) {
+	tree := New[int]()
+	count := 50
+	for i := 0; i < count; i++ {
+		tree.InsertAt(i, i)
+	}
+
+	for i := 0; i < count; i++ {
+		err := tree.DeleteAt(tree.Size() - 1)
+		if err != nil {
+			t.Fatalf("DeleteAt(last) iteration %d failed: %v", i, err)
+		}
+
+		if tree.Size() > 0 {
+			val, _ := tree.GetAt(tree.Size() - 1)
+			expected := count - i - 2
+			if *val != expected {
+				t.Errorf("Data corruption deleting from end. Expected last %d, got %d", expected, *val)
+			}
+		}
+	}
+}
+
+func TestFirstLastPointersAfterDelete(t *testing.T) {
+	tree := New[int]()
+	count := 20
+	for i := 0; i < count; i++ {
+		tree.InsertAt(i, i)
+	}
+
+	for i := 0; i < 5; i++ {
+		tree.DeleteAt(0)
+	}
+
+	if tree.first == nil {
+		t.Fatal("tree.first is nil after deletions")
+	}
+	if tree.first.size == 0 {
+		t.Fatal("tree.first is empty")
+	}
+	if tree.first.items[0] != 5 {
+		t.Errorf("tree.first item mismatch. Expected 5, got %d", tree.first.items[0])
+	}
+
+	currentSize := tree.Size()
+	for i := 0; i < 5; i++ {
+		tree.DeleteAt(currentSize - 1 - i)
+	}
+
+	if tree.last == nil {
+		t.Fatal("tree.last is nil after deletions")
+	}
+	if tree.last.size == 0 {
+		t.Fatal("tree.last is empty")
+	}
+	expectedLast := count - 1 - 5
+	actualLast := tree.last.items[tree.last.size-1]
+	if actualLast != expectedLast {
+		t.Errorf("tree.last item mismatch. Expected %d, got %d", expectedLast, actualLast)
+	}
+}
 
 const (
 	SmallSize  = 100
 	MediumSize = 1_000
-	LargeSize  = 100_000
+	LargeSize  = 10_000
 )
 
 type List[T any] struct {
@@ -131,7 +268,6 @@ func NewList[T any]() *List[T] {
 	return &List[T]{items: make([]T, 0)}
 }
 
-// Slice InsertAt: Requires shifting all elements after index
 func (l *List[T]) InsertAt(index int, item T) {
 	if index == len(l.items) {
 		l.items = append(l.items, item)
@@ -145,16 +281,10 @@ func (l *List[T]) GetAt(index int) T {
 	return l.items[index]
 }
 
-// --- Benchmarks ---
-
-// 1. Insert at Random Positions (The B-Tree Killer Feature)
-// Slices are O(N) for insert-at-middle. B-Trees are O(log N).
-
 func BenchmarkInsertRandom_Slice_Medium(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		list := NewList[int]()
 		for i := 0; i < MediumSize; i++ {
-			// Insert at random position between 0 and current length
 			pos := 0
 			if len(list.items) > 0 {
 				pos = rand.Intn(len(list.items))
@@ -203,9 +333,6 @@ func BenchmarkInsertRandom_BxTree_Large(b *testing.B) {
 	}
 }
 
-// 2. Append (Insert at End)
-// Slices are extremely fast at this (amortized O(1)). B-Trees are slower.
-
 func BenchmarkAppend_Slice_Large(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		list := NewList[int]()
@@ -224,11 +351,7 @@ func BenchmarkAppend_BxTree_Large(b *testing.B) {
 	}
 }
 
-// 3. Random Read Access
-// Slices are O(1). B-Trees are O(log N).
-
 func BenchmarkReadRandom_Slice_Large(b *testing.B) {
-	// Setup
 	list := NewList[int]()
 	for i := 0; i < LargeSize; i++ {
 		list.InsertAt(len(list.items), i)
@@ -242,7 +365,6 @@ func BenchmarkReadRandom_Slice_Large(b *testing.B) {
 }
 
 func BenchmarkReadRandom_BxTree_Large(b *testing.B) {
-	// Setup
 	tree := New[int]()
 	for i := 0; i < LargeSize; i++ {
 		tree.InsertAt(tree.Size(), i)
