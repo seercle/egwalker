@@ -48,14 +48,24 @@ func (node *node[T]) printTree(level int) {
 //
 
 func (tree *BxTree[T]) GetAt(index int) (*T, error) {
-	if index < 0 || index >= tree.Size() {
-		return nil, ErrIndexOutOfBounds
-	}
-	node, index, err := tree.root.getAt(index)
+	node, index, err := tree.getAt(index)
 	if err != nil {
 		return nil, err
 	}
 	return &node.items[index], nil
+}
+
+func (tree *BxTree[T]) getAt(index int) (*node[T], int, error) {
+	if index < 0 || index >= tree.Size() {
+		return nil, -1, ErrIndexOutOfBounds
+	}
+	if index < tree.first.size {
+		return tree.first, index, nil
+	} else if index >= tree.Size()-tree.last.size {
+		return tree.last, index - tree.Size() + tree.last.size, nil
+	} else {
+		return tree.root.getAt(index)
+	}
 }
 
 func (node *node[T]) getAt(index int) (*node[T], int, error) {
@@ -96,20 +106,12 @@ func (tree *BxTree[T]) InsertAt(index int, item T) error {
 		return nil
 	}
 
-	var leaf *node[T]
-	var position int
-	if index < tree.first.size {
-		leaf = tree.first
-		position = index
-	} else if index >= tree.Size()-tree.last.size {
-		leaf = tree.last
-		position = index - tree.Size() + tree.last.size
-	} else {
-		var err error
-		leaf, position, err = tree.root.getAt(index)
-		if err != nil {
-			return err
-		}
+	if index == tree.Size() {
+		return tree.insertLeaf(tree.last, item, tree.last.size)
+	}
+	leaf, position, err := tree.getAt(index)
+	if err != nil {
+		return err
 	}
 	return tree.insertLeaf(leaf, item, position)
 }
@@ -232,25 +234,47 @@ func (tree *BxTree[T]) insertLeaf(_node *node[T], item T, index int) error {
 
 //
 
+func (tree *BxTree[T]) DeleteRange(index int, length int) error {
+	if length == 0 {
+		return nil
+	}
+	if index < 0 || index+length > tree.Size() {
+		return ErrIndexOutOfBounds
+	}
+
+	for length > 0 {
+		leaf, position, err := tree.getAt(index)
+		if err != nil {
+			return err
+		}
+		can_delete := leaf.size - position
+		can_delete = min(can_delete, length)
+		for range can_delete {
+			has_rebalanced := false
+			if shouldRebalance(leaf) {
+				has_rebalanced = true
+			}
+			err := tree.deleteLeaf(leaf, position)
+			if err != nil {
+				return err
+			}
+			length--
+			if has_rebalanced {
+				goto outer
+			}
+		}
+	outer:
+	}
+	return nil
+}
+
 func (tree *BxTree[T]) DeleteAt(index int) error {
 	if index < 0 || index >= tree.Size() {
 		return ErrIndexOutOfBounds
 	}
-
-	var leaf *node[T]
-	var position int
-	if index < tree.first.size {
-		leaf = tree.first
-		position = index
-	} else if index >= tree.Size()-tree.last.size {
-		leaf = tree.last
-		position = index - tree.Size() + tree.last.size
-	} else {
-		var err error
-		leaf, position, err = tree.root.getAt(index)
-		if err != nil {
-			return err
-		}
+	leaf, position, err := tree.getAt(index)
+	if err != nil {
+		return err
 	}
 	return tree.deleteLeaf(leaf, position)
 }
@@ -309,7 +333,7 @@ func (tree *BxTree[T]) deleteInternal(_node *node[T], index int) error {
 	_node.children = _node.children[:len(_node.children)-1]
 	_node.size -= delta
 
-	if len(_node.children) > INTERNAL_MIN_SIZE || (_node.parent == nil && len(_node.children) > 1) {
+	if !shouldRebalance(_node) {
 		_node.updateParentSizeUpwards(-delta)
 		return nil
 	}
@@ -351,7 +375,7 @@ func (tree *BxTree[T]) deleteLeaf(leaf *node[T], index int) error {
 	leaf.items = leaf.items[:leaf.size-1]
 	leaf.size -= 1
 
-	if len(leaf.items) >= LEAF_MIN_SIZE || leaf.parent == nil {
+	if !shouldRebalance(leaf) {
 		leaf.updateParentSizeUpwards(-1)
 		return nil
 	} else {
@@ -381,6 +405,14 @@ func (tree *BxTree[T]) deleteLeaf(leaf *node[T], index int) error {
 			}
 		}
 		return ErrNotRootAndOneChild
+	}
+}
+
+func shouldRebalance[T any](_node *node[T]) bool {
+	if _node.isLeaf {
+		return _node.size < LEAF_MIN_SIZE && _node.parent != nil
+	} else {
+		return len(_node.children) < INTERNAL_MIN_SIZE && (_node.parent != nil || len(_node.children) == 1)
 	}
 }
 

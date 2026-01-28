@@ -5,6 +5,16 @@ import (
 	"testing"
 )
 
+func TestTest(t *testing.T) {
+	tree := New[int]()
+	for i := 0; i < 8; i++ {
+		tree.InsertAt(i, i)
+	}
+	tree.DeleteRange(1, 5)
+
+	tree.Print()
+}
+
 func TestFirstLastPointers(t *testing.T) {
 	tree := New[int]()
 
