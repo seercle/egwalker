@@ -265,9 +265,9 @@ func TestFirstLastPointersAfterDelete(t *testing.T) {
 }
 
 const (
-	SmallSize  = 100
-	MediumSize = 1_000
-	LargeSize  = 10_000
+	SmallSize  = 1_000
+	MediumSize = 10_000
+	LargeSize  = 100_000
 )
 
 type List[T any] struct {

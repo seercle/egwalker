@@ -89,6 +89,18 @@ func (node *node[T]) getAt(index int) (*node[T], int, error) {
 
 //
 
+// OPTIMIZE: do not go down the tree for each insert, but adapt
+// the leaf & position if the insert caused a rebalance
+func (tree *BxTree[T]) InsertRange(index int, items []T) error {
+	for i, item := range items {
+		err := tree.InsertAt(index+i, item)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (tree *BxTree[T]) InsertAt(index int, item T) error {
 	if index < 0 || index > tree.Size() {
 		return ErrIndexOutOfBounds
@@ -148,7 +160,7 @@ func (_node *node[T]) split() (*node[T], *node[T]) {
 	return _node, right
 }
 
-func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index int) error {
+func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index int, upward_change int) error {
 	insert := func(n *node[T], at int) {
 		n.children = append(n.children, new(node[T]))
 		copy(n.children[at+1:], n.children[at:])
@@ -156,17 +168,20 @@ func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index i
 		n.size += new_node.size
 		new_node.parent = n
 	}
+
+	_node.size += upward_change
 	if len(_node.children) < INTERNAL_MAX_SIZE {
 		insert(_node, index)
-		_node.updateParentSizeUpwards(new_node.size)
+		_node.updateParentSizeUpwards(upward_change + new_node.size)
 		return nil
 	}
+
 	_, right := _node.split()
+	upward_change -= right.size
 	if index <= len(_node.children) {
 		insert(_node, index)
-		_node.updateParentSizeUpwards(-right.size + new_node.size)
+		upward_change += new_node.size
 	} else {
-		_node.updateParentSizeUpwards(-right.size)
 		insert(right, index-len(_node.children))
 	}
 	if _node.parent == nil {
@@ -185,85 +200,63 @@ func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index i
 	if parent_index == -1 {
 		return ErrParentDoesNotHaveChild
 	}
-	return tree.insertInternal(_node.parent, right, _node.getParentIndex()+1)
+	return tree.insertInternal(_node.parent, right, _node.getParentIndex()+1, upward_change)
 }
 
-func (tree *BxTree[T]) insertLeaf(_node *node[T], item T, index int) error {
+func (tree *BxTree[T]) insertLeaf(leaf *node[T], item T, index int) error {
 	insert := func(node *node[T], at int) {
 		node.items = append(node.items, *new(T))
 		copy(node.items[at+1:], node.items[at:])
 		node.items[at] = item
 		node.size++
 	}
-	if _node.size < LEAF_MAX_SIZE {
-		insert(_node, index)
-		_node.updateParentSizeUpwards(1)
+	if leaf.size < LEAF_MAX_SIZE {
+		insert(leaf, index)
+		leaf.updateParentSizeUpwards(1)
 		return nil
 	}
-	_, right := _node.split()
-	if tree.last == _node {
+	_, right := leaf.split()
+	if tree.last == leaf {
 		tree.last = right
 	}
 
-	if index <= _node.size {
-		insert(_node, index)
-		_node.updateParentSizeUpwards(-right.size + 1)
+	upward_change := -right.size
+	if index <= leaf.size {
+		insert(leaf, index)
+		upward_change += 1
 	} else {
-		_node.updateParentSizeUpwards(-right.size)
-		insert(right, index-_node.size)
+		insert(right, index-leaf.size)
 	}
 
-	if _node.parent == nil {
+	if leaf.parent == nil {
 		new_root := &node[T]{
 			isLeaf:   false,
 			parent:   nil,
-			size:     _node.size + right.size,
-			children: []*node[T]{_node, right},
+			size:     leaf.size + right.size,
+			children: []*node[T]{leaf, right},
 		}
-		_node.parent = new_root
+		leaf.parent = new_root
 		right.parent = new_root
 		tree.root = new_root
 		return nil
 	}
-	parent_index := _node.getParentIndex()
+	parent_index := leaf.getParentIndex()
 	if parent_index == -1 {
 		return ErrParentDoesNotHaveChild
 	}
-	return tree.insertInternal(_node.parent, right, parent_index+1)
+	return tree.insertInternal(leaf.parent, right, parent_index+1, upward_change)
 }
 
 //
 
+// OPTIMIZE: do not go down the tree for each delete, but adapt
+// the leaf & position if the delete caused a rebalance
 func (tree *BxTree[T]) DeleteRange(index int, length int) error {
-	if length == 0 {
-		return nil
-	}
-	if index < 0 || index+length > tree.Size() {
-		return ErrIndexOutOfBounds
-	}
-
-	for length > 0 {
-		leaf, position, err := tree.getAt(index)
+	for range length {
+		err := tree.DeleteAt(index)
 		if err != nil {
 			return err
 		}
-		can_delete := leaf.size - position
-		can_delete = min(can_delete, length)
-		for range can_delete {
-			has_rebalanced := false
-			if shouldRebalance(leaf) {
-				has_rebalanced = true
-			}
-			err := tree.deleteLeaf(leaf, position)
-			if err != nil {
-				return err
-			}
-			length--
-			if has_rebalanced {
-				goto outer
-			}
-		}
-	outer:
 	}
 	return nil
 }
@@ -277,6 +270,79 @@ func (tree *BxTree[T]) DeleteAt(index int) error {
 		return err
 	}
 	return tree.deleteLeaf(leaf, position)
+}
+
+func (tree *BxTree[T]) deleteInternal(_node *node[T], index int, upward_change int) error {
+	del_size := _node.children[index].size
+	copy(_node.children[index:], _node.children[index+1:])
+	_node.children = _node.children[:len(_node.children)-1]
+	_node.size -= del_size
+
+	upward_change -= del_size
+	if len(_node.children) >= INTERNAL_MIN_SIZE || (_node.parent == nil && len(_node.children) > 1) {
+		_node.updateParentSizeUpwards(upward_change)
+		return nil
+	}
+	if _node.parent == nil && len(_node.children) == 1 {
+		tree.root = _node.children[0]
+		tree.root.parent = nil
+		return nil
+	}
+	parent_index := _node.getParentIndex()
+	if parent_index > 0 {
+		left_sibling := _node.parent.children[parent_index-1]
+		if tryBorrowFromLeftSibling(_node, left_sibling) {
+			_node.updateParentSizeUpwards(upward_change)
+			return nil
+		} else {
+			tree.merge(left_sibling, _node)
+			return tree.deleteInternal(left_sibling.parent, parent_index, upward_change+_node.size)
+		}
+	}
+	if parent_index < len(_node.parent.children)-1 {
+		right_sibling := _node.parent.children[parent_index+1]
+		if tryBorrowFromRightSibling(_node, right_sibling) {
+			_node.updateParentSizeUpwards(upward_change)
+			return nil
+		} else {
+			tree.merge(_node, right_sibling)
+			return tree.deleteInternal(_node.parent, parent_index+1, upward_change+right_sibling.size)
+		}
+	}
+	return ErrNotRootAndOneChild
+}
+
+func (tree *BxTree[T]) deleteLeaf(leaf *node[T], index int) error {
+	copy(leaf.items[index:], leaf.items[index+1:])
+	leaf.items = leaf.items[:leaf.size-1]
+	leaf.size -= 1
+
+	if leaf.size >= LEAF_MIN_SIZE || leaf.parent == nil {
+		leaf.updateParentSizeUpwards(-1)
+		return nil
+	}
+	parent_index := leaf.getParentIndex()
+	if parent_index > 0 {
+		left_sibling := leaf.parent.children[parent_index-1]
+		if tryBorrowFromLeftSibling(leaf, left_sibling) {
+			leaf.updateParentSizeUpwards(-1)
+			return nil
+		} else {
+			tree.merge(left_sibling, leaf)
+			return tree.deleteInternal(left_sibling.parent, parent_index, leaf.size-1)
+		}
+	}
+	if parent_index < len(leaf.parent.children)-1 {
+		right_sibling := leaf.parent.children[parent_index+1]
+		if tryBorrowFromRightSibling(leaf, right_sibling) {
+			leaf.updateParentSizeUpwards(-1)
+			return nil
+		} else {
+			tree.merge(leaf, right_sibling)
+			return tree.deleteInternal(leaf.parent, parent_index+1, right_sibling.size-1)
+		}
+	}
+	return ErrNotRootAndOneChild
 }
 
 func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
@@ -294,125 +360,54 @@ func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
 	}
 }
 
-func borrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) {
+// OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
+func tryBorrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) bool {
 	if _node.isLeaf {
+		if _node.size <= LEAF_MIN_SIZE {
+			return false
+		}
 		borrowed := sibling.items[sibling.size-1]
 		sibling.items = sibling.items[:sibling.size-1]
 		_node.items = append([]T{borrowed}, _node.items...)
 		sibling.size -= 1
 		_node.size += 1
+		return true
 	} else {
+		if len(_node.children) <= INTERNAL_MIN_SIZE {
+			return false
+		}
 		borrowed := sibling.children[len(sibling.children)-1]
 		sibling.children = sibling.children[:len(sibling.children)-1]
 		_node.children = append([]*node[T]{borrowed}, _node.children...)
 		sibling.size -= borrowed.size
 		_node.size += borrowed.size
+		return true
 	}
 
 }
 
-func borrowFromRightSibling[T any](_node *node[T], sibling *node[T]) {
+// OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
+func tryBorrowFromRightSibling[T any](_node *node[T], sibling *node[T]) bool {
 	if _node.isLeaf {
+		if _node.size <= LEAF_MIN_SIZE {
+			return false
+		}
 		borrowed := sibling.items[0]
 		sibling.items = sibling.items[1:]
 		_node.items = append(_node.items, borrowed)
 		sibling.size -= 1
 		_node.size += 1
+		return true
 	} else {
+		if len(_node.children) <= INTERNAL_MIN_SIZE {
+			return false
+		}
 		borrowed := sibling.children[0]
 		sibling.children = sibling.children[1:]
 		_node.children = append(_node.children, borrowed)
 		sibling.size -= borrowed.size
 		_node.size += borrowed.size
-	}
-}
-
-func (tree *BxTree[T]) deleteInternal(_node *node[T], index int) error {
-	delta := _node.children[index].size
-	copy(_node.children[index:], _node.children[index+1:])
-	_node.children = _node.children[:len(_node.children)-1]
-	_node.size -= delta
-
-	if !shouldRebalance(_node) {
-		_node.updateParentSizeUpwards(-delta)
-		return nil
-	}
-	if _node.parent == nil && len(_node.children) == 1 {
-		tree.root = _node.children[0]
-		tree.root.parent = nil
-		return nil
-	}
-	parent_index := _node.getParentIndex()
-	if parent_index > 0 {
-		left_sibling := _node.parent.children[parent_index-1]
-		if len(left_sibling.children) > INTERNAL_MIN_SIZE {
-			borrowFromLeftSibling(_node, left_sibling)
-			_node.updateParentSizeUpwards(-delta)
-			return nil
-		} else {
-			tree.merge(left_sibling, _node)
-			_node.updateParentSizeUpwards(_node.size - delta)
-			return tree.deleteInternal(left_sibling.parent, parent_index)
-		}
-	}
-	if parent_index < len(_node.parent.children)-1 {
-		right_sibling := _node.parent.children[parent_index+1]
-		if len(right_sibling.children) > INTERNAL_MIN_SIZE {
-			borrowFromRightSibling(_node, right_sibling)
-			_node.updateParentSizeUpwards(-delta)
-			return nil
-		} else {
-			tree.merge(_node, right_sibling)
-			_node.updateParentSizeUpwards(right_sibling.size - delta)
-			return tree.deleteInternal(_node.parent, parent_index+1)
-		}
-	}
-	return ErrNotRootAndOneChild
-}
-
-func (tree *BxTree[T]) deleteLeaf(leaf *node[T], index int) error {
-	copy(leaf.items[index:], leaf.items[index+1:])
-	leaf.items = leaf.items[:leaf.size-1]
-	leaf.size -= 1
-
-	if !shouldRebalance(leaf) {
-		leaf.updateParentSizeUpwards(-1)
-		return nil
-	} else {
-		parent_index := leaf.getParentIndex()
-		if parent_index > 0 {
-			left_sibling := leaf.parent.children[parent_index-1]
-			if left_sibling.size > LEAF_MIN_SIZE {
-				borrowFromLeftSibling(leaf, left_sibling)
-				leaf.updateParentSizeUpwards(-1)
-				return nil
-			} else {
-				tree.merge(left_sibling, leaf)
-				leaf.updateParentSizeUpwards(leaf.size - 1)
-				return tree.deleteInternal(left_sibling.parent, parent_index)
-			}
-		}
-		if parent_index < len(leaf.parent.children)-1 {
-			right_sibling := leaf.parent.children[parent_index+1]
-			if right_sibling.size > LEAF_MIN_SIZE {
-				borrowFromRightSibling(leaf, right_sibling)
-				leaf.updateParentSizeUpwards(-1)
-				return nil
-			} else {
-				tree.merge(leaf, right_sibling)
-				leaf.updateParentSizeUpwards(right_sibling.size - 1)
-				return tree.deleteInternal(leaf.parent, parent_index+1)
-			}
-		}
-		return ErrNotRootAndOneChild
-	}
-}
-
-func shouldRebalance[T any](_node *node[T]) bool {
-	if _node.isLeaf {
-		return _node.size < LEAF_MIN_SIZE && _node.parent != nil
-	} else {
-		return len(_node.children) < INTERNAL_MIN_SIZE && (_node.parent != nil || len(_node.children) == 1)
+		return true
 	}
 }
 

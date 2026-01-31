@@ -3,7 +3,7 @@ package bxtree
 const (
 	INTERNAL_MIN_SIZE = 16
 	INTERNAL_MAX_SIZE = INTERNAL_MIN_SIZE * 2
-	LEAF_MIN_SIZE     = 2
+	LEAF_MIN_SIZE     = 64
 	LEAF_MAX_SIZE     = LEAF_MIN_SIZE * 2
 )
 
