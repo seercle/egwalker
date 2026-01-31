@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // ==========================================
@@ -327,6 +328,7 @@ func FindItemIdxAtLV(items []*CRDTItem, lv LV) int {
 }
 
 func Integrate[T any](doc *CRDTDoc, log *OpLog[T], newItem *CRDTItem, idx int, endPos int, snapshot *[]T) {
+	//func Integrate[T any](doc *CRDTDoc, log *OpLog[T], newItem *CRDTItem, idx int, endPos int, snapshot *bxtree.BxTree[T]) {
 	scanIdx := idx
 	scanEndPos := endPos
 
@@ -390,6 +392,10 @@ func Integrate[T any](doc *CRDTDoc, log *OpLog[T], newItem *CRDTItem, idx int, e
 	if snapshot != nil {
 		// snapshot splice
 		*snapshot = append((*snapshot)[:endPos], append([]T{op.Content}, (*snapshot)[endPos:]...)...)
+		//err := snapshot.InsertAt(endPos, op.Content)
+		//if err != nil {
+		//	panic("Snapshot insert failed")
+		//}
 	}
 }
 
@@ -414,6 +420,7 @@ func FindByCurrentPos(items []*CRDTItem, targetPos int) (int, int) {
 }
 
 func Apply[T any](doc *CRDTDoc, log *OpLog[T], snapshot *[]T, opLv LV) {
+	//func Apply[T any](doc *CRDTDoc, log *OpLog[T], snapshot *bxtree.BxTree[T], opLv LV) {
 	op := log.Ops[opLv]
 
 	if op.Type == OpTypeDel {
@@ -435,6 +442,10 @@ func Apply[T any](doc *CRDTDoc, log *OpLog[T], snapshot *[]T, opLv LV) {
 			if snapshot != nil {
 				// snapshot splice remove 1
 				*snapshot = append((*snapshot)[:endPos], (*snapshot)[endPos+1:]...)
+				//err := snapshot.DeleteAt(endPos)
+				//if err != nil {
+				//	panic("Snapshot delete failed")
+				//}
 			}
 		}
 
@@ -475,8 +486,8 @@ func Apply[T any](doc *CRDTDoc, log *OpLog[T], snapshot *[]T, opLv LV) {
 		Integrate(doc, log, item, idx, endPos, snapshot)
 	}
 }
-
 func Do1Operation[T any](doc *CRDTDoc, log *OpLog[T], lv LV, snapshot *[]T) {
+	//func Do1Operation[T any](doc *CRDTDoc, log *OpLog[T], lv LV, snapshot *bxtree.BxTree[T]) {
 	op := log.Ops[lv]
 	diffRes := Diff(log, doc.CurrentVersion, op.Parents)
 
@@ -492,6 +503,7 @@ func Do1Operation[T any](doc *CRDTDoc, log *OpLog[T], lv LV, snapshot *[]T) {
 }
 
 func Checkout[T any](log *OpLog[T]) []T {
+	//func Checkout[T any](log *OpLog[T]) *bxtree.BxTree[T] {
 	doc := &CRDTDoc{
 		Items:          []*CRDTItem{},
 		CurrentVersion: []LV{},
@@ -500,9 +512,11 @@ func Checkout[T any](log *OpLog[T]) []T {
 	}
 
 	snapshot := []T{}
+	//snapshot := bxtree.New[T]()
 
 	for lv := 0; lv < len(log.Ops); lv++ {
 		Do1Operation(doc, log, LV(lv), &snapshot)
+		//Do1Operation(doc, log, LV(lv), snapshot)
 	}
 	return snapshot
 }
@@ -651,12 +665,14 @@ func FindOpsToVisit[T any](log *OpLog[T], a []LV, b []LV) OpsToVisit {
 
 type Branch[T any] struct {
 	Snapshot []T
+	//Snapshot *bxtree.BxTree[T]
 	Frontier []LV
 }
 
 func NewBranch[T any]() *Branch[T] {
 	return &Branch[T]{
 		Snapshot: []T{},
+		//Snapshot: bxtree.New[T](),
 		Frontier: []LV{},
 	}
 }
@@ -704,6 +720,7 @@ func CheckoutFancy[T any](log *OpLog[T], branch *Branch[T], mergeFrontier []LV) 
 	// Process B-only ops (modify doc state and branch snapshot)
 	for _, lv := range visit.BOnlyOps {
 		Do1Operation(doc, log, lv, &branch.Snapshot)
+		//Do1Operation(doc, log, lv, branch.Snapshot)
 		op := log.Ops[lv]
 		branch.Frontier = AdvanceFrontier(branch.Frontier, lv, op.Parents)
 	}
@@ -714,34 +731,33 @@ func CheckoutFancy[T any](log *OpLog[T], branch *Branch[T], mergeFrontier []LV) 
 // ==========================================
 
 type CRDTDocument struct {
-	OpLog  *OpLog[string]
+	OpLog  *OpLog[rune]
 	Agent  int
-	Branch *Branch[string]
+	Branch *Branch[rune]
 }
 
 func NewCRDTDocument(agent int) *CRDTDocument {
 	return &CRDTDocument{
-		OpLog:  NewOpLog[string](),
+		OpLog:  NewOpLog[rune](),
 		Agent:  agent,
-		Branch: NewBranch[string](),
+		Branch: NewBranch[rune](),
 	}
 }
 
 func (doc *CRDTDocument) Check() {
 	actualDoc := Checkout(doc.OpLog)
 	s1 := fmt.Sprint(actualDoc)
-	s2 := fmt.Sprint(doc.Branch.Snapshot)
+	s2 := doc.GetString()
 	if s1 != s2 {
 		panic("Document out of sync: " + s1 + " vs " + s2)
 	}
 }
 
 func (doc *CRDTDocument) Ins(pos int, text string) {
-	chars := []string{}
+	chars := []rune{}
 	for _, r := range text {
-		chars = append(chars, string(r))
+		chars = append(chars, r)
 	}
-
 	LocalInsert(doc.OpLog, doc.Agent, pos, chars)
 
 	// Splice snapshot
@@ -749,6 +765,11 @@ func (doc *CRDTDocument) Ins(pos int, text string) {
 	doc.Branch.Snapshot = append(doc.Branch.Snapshot, chars...)
 	copy(doc.Branch.Snapshot[pos+len(chars):], doc.Branch.Snapshot[pos:len(doc.Branch.Snapshot)-len(chars)])
 	copy(doc.Branch.Snapshot[pos:], chars)
+	//err := doc.Branch.Snapshot.InsertRange(pos, chars)
+	//if err != nil {
+	//	println(doc.Branch.Snapshot.Size(), pos, len(chars))
+	//	panic("Snapshot insert failed")
+	//}
 
 	// Copy frontier
 	doc.Branch.Frontier = make([]LV, len(doc.OpLog.Frontier))
@@ -761,17 +782,24 @@ func (doc *CRDTDocument) Del(pos int, delLen int) {
 	// Splice snapshot remove
 	// snapshot.splice(pos, delLen)
 	doc.Branch.Snapshot = append(doc.Branch.Snapshot[:pos], doc.Branch.Snapshot[pos+delLen:]...)
+	//err := doc.Branch.Snapshot.DeleteRange(pos, delLen)
+	//if err != nil {
+	//	panic("Snapshot delete failed")
+	//}
 
 	doc.Branch.Frontier = make([]LV, len(doc.OpLog.Frontier))
 	copy(doc.Branch.Frontier, doc.OpLog.Frontier)
 }
 
 func (doc *CRDTDocument) GetString() string {
-	res := ""
-	for _, s := range doc.Branch.Snapshot {
-		res += s
+	var sb strings.Builder
+	for _, r := range doc.Branch.Snapshot {
+		sb.WriteRune(r)
 	}
-	return res
+	//doc.Branch.Snapshot.ForEach(func(r rune) {
+	//	sb.WriteRune(r)
+	//})
+	return sb.String()
 }
 
 func (doc *CRDTDocument) MergeFrom(other *CRDTDocument) {
@@ -780,6 +808,6 @@ func (doc *CRDTDocument) MergeFrom(other *CRDTDocument) {
 }
 
 func (doc *CRDTDocument) Reset() {
-	doc.OpLog = NewOpLog[string]()
-	doc.Branch = NewBranch[string]()
+	doc.OpLog = NewOpLog[rune]()
+	doc.Branch = NewBranch[rune]()
 }

@@ -3,7 +3,11 @@ package bxtree
 import "fmt"
 
 func New[T any]() *BxTree[T] {
-	return &BxTree[T]{}
+	return &BxTree[T]{
+		root:  nil,
+		first: nil,
+		last:  nil,
+	}
 }
 
 func (tree *BxTree[T]) Size() int {
@@ -11,6 +15,17 @@ func (tree *BxTree[T]) Size() int {
 		return 0
 	}
 	return tree.root.size
+}
+
+func (tree *BxTree[T]) ForEach(f func(item T)) {
+	if tree.first == nil {
+		return
+	}
+	for leaf := tree.first; leaf != nil; leaf = leaf.next {
+		for _, item := range leaf.items {
+			f(item)
+		}
+	}
 }
 
 //
@@ -107,10 +122,12 @@ func (tree *BxTree[T]) InsertAt(index int, item T) error {
 	}
 	if tree.root == nil {
 		leaf := &node[T]{
-			isLeaf: true,
-			parent: nil,
-			size:   1,
-			items:  []T{item},
+			isLeaf:   true,
+			parent:   nil,
+			next:     nil,
+			children: nil,
+			size:     1,
+			items:    []T{item},
 		}
 		tree.root = leaf
 		tree.first = leaf
@@ -132,20 +149,21 @@ func (_node *node[T]) split() (*node[T], *node[T]) {
 	right := &node[T]{
 		parent:   _node.parent,
 		isLeaf:   _node.isLeaf,
+		next:     nil,
 		size:     0,
 		items:    nil,
 		children: nil,
 	}
 	if _node.isLeaf {
-
 		right_len := len(_node.items) / 2
 		right.items = make([]T, right_len)
 		copy(right.items, _node.items[right_len:])
 		right.size = len(right.items)
 		_node.items = _node.items[:right_len]
 		_node.size = len(_node.items)
+		right.next = _node.next
+		_node.next = right
 	} else {
-
 		right_len := len(_node.children) / 2
 		right.children = make([]*node[T], right_len)
 		for i := range len(right.children) {
@@ -190,6 +208,9 @@ func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index i
 			parent:   nil,
 			size:     _node.size + right.size,
 			children: []*node[T]{_node, right},
+
+			items: nil,
+			next:  nil,
 		}
 		_node.parent = new_root
 		right.parent = new_root
@@ -234,6 +255,9 @@ func (tree *BxTree[T]) insertLeaf(leaf *node[T], item T, index int) error {
 			parent:   nil,
 			size:     leaf.size + right.size,
 			children: []*node[T]{leaf, right},
+
+			items: nil,
+			next:  nil,
 		}
 		leaf.parent = new_root
 		right.parent = new_root
@@ -349,6 +373,7 @@ func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
 	left.size += right.size
 	if left.isLeaf {
 		left.items = append(left.items, right.items...)
+		left.next = right.next
 		if tree.last == right {
 			tree.last = left
 		}

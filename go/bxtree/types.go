@@ -12,6 +12,7 @@ type node[T any] struct {
 	parent   *node[T]
 	size     int
 	items    []T        // only for leaf nodes
+	next     *node[T]   // only for leaf nodes
 	children []*node[T] // only for internal nodes
 }
 

@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+func TestTest(t *testing.T) {
+	doc := NewCRDTDocument(0)
+	doc.Ins(0, "a")
+	doc.Ins(1, "b")
+	doc.Ins(2, "c")
+	println(doc.GetString())
+}
+
 func TestFuzzerMerge(t *testing.T) {
 	// Initialize deterministic random source
 	seed_count := 100
@@ -29,8 +37,8 @@ func TestFuzzerMerge(t *testing.T) {
 		}
 
 		alphabet := []rune(" abcdefghijklmnopqrstuvwxyz")
-		randChar := func() string {
-			return string(alphabet[randInt(len(alphabet))])
+		randChar := func() rune {
+			return alphabet[randInt(len(alphabet))]
 		}
 
 		// Initialize documents
@@ -53,6 +61,7 @@ func TestFuzzerMerge(t *testing.T) {
 
 				// Accessing the snapshot length.
 				length := len(doc.Branch.Snapshot)
+				//length := doc.Branch.Snapshot.Size()
 
 				insertWeight := 0.35
 				if length < 100 {
@@ -63,7 +72,7 @@ func TestFuzzerMerge(t *testing.T) {
 					// Insert
 					content := randChar()
 					pos := randInt(length + 1)
-					doc.Ins(pos, content)
+					doc.Ins(pos, string(content))
 				} else {
 					// Delete
 					pos := randInt(length)
@@ -90,8 +99,8 @@ func TestFuzzerMerge(t *testing.T) {
 			a.MergeFrom(b)
 			b.MergeFrom(a)
 
-			// Assert deep equality
-			if !reflect.DeepEqual(a.Branch.Snapshot, b.Branch.Snapshot) {
+			// Assert equality
+			if a.GetString() != b.GetString() {
 				log.Fatalf("Assertion Failed at seed %d, iteration %d: Documents are not equal", seed, i)
 			}
 		}
@@ -119,14 +128,14 @@ func TestFuzzerSlice(t *testing.T) {
 		}
 
 		alphabet := []rune(" abcdefghijklmnopqrstuvwxyz")
-		randChar := func() string {
-			return string(alphabet[randInt(len(alphabet))])
+		randChar := func() rune {
+			return alphabet[randInt(len(alphabet))]
 		}
 
 		document := NewCRDTDocument(0)
-		slice := []string{}
+		slice := []rune{}
 
-		for i := range 100 {
+		for i := range 10000 {
 			// Accessing the snapshot length.
 			length := len(slice)
 			insertWeight := 0.35
@@ -137,8 +146,8 @@ func TestFuzzerSlice(t *testing.T) {
 				// Insert
 				content := randChar()
 				pos := randInt(length + 1)
-				document.Ins(pos, content)
-				slice = append(slice[:pos], append([]string{content}, slice[pos:]...)...)
+				document.Ins(pos, string(content))
+				slice = append(slice[:pos], append([]rune{content}, slice[pos:]...)...)
 			} else {
 				// Delete
 				pos := randInt(length)
@@ -154,6 +163,13 @@ func TestFuzzerSlice(t *testing.T) {
 			if !reflect.DeepEqual(document.Branch.Snapshot, slice) {
 				log.Fatalf("Assertion Failed at seed %d, iteration %d: Documents are not equal", seed, i)
 			}
+			//j := 0
+			//document.Branch.Snapshot.ForEach(func(r rune) {
+			//	if r != slice[j] {
+			//		log.Fatalf("Assertion Failed at seed %d, iteration %d: Documents are not equal", seed, i)
+			//	}
+			//	j++
+			//})
 		}
 	}
 }

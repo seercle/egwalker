@@ -97,6 +97,6 @@ func TestTrace(t *testing.T) {
 	fmt.Printf("Final memory usage: %.2f MB\n", float64(m.Alloc)/1024.0/1024.0)
 
 	if trace.FinalText != document.GetString() {
-		t.Fatalf("Mismatch, got '%s'", document.GetString())
+		t.Fatalf("Mismatch, got '%q'", document.GetString())
 	}
 }

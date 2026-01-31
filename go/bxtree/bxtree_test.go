@@ -7,11 +7,12 @@ import (
 
 func TestTest(t *testing.T) {
 	tree := New[int]()
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 129; i++ {
 		tree.InsertAt(i, i)
 	}
 	tree.DeleteRange(1, 5)
-
+	tree.Print()
+	tree.InsertRange(1, []int{100, 101, 102, 103, 104})
 	tree.Print()
 }
 
