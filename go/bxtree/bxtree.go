@@ -297,6 +297,8 @@ func (tree *BxTree[T]) DeleteAt(index int) error {
 }
 
 func (tree *BxTree[T]) deleteInternal(_node *node[T], index int, upward_change int) error {
+	_node.size += upward_change
+
 	del_size := _node.children[index].size
 	copy(_node.children[index:], _node.children[index+1:])
 	_node.children = _node.children[:len(_node.children)-1]
@@ -388,7 +390,7 @@ func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
 // OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
 func tryBorrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) bool {
 	if _node.isLeaf {
-		if _node.size <= LEAF_MIN_SIZE {
+		if sibling.size <= LEAF_MIN_SIZE {
 			return false
 		}
 		borrowed := sibling.items[sibling.size-1]
@@ -398,12 +400,13 @@ func tryBorrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) bool {
 		_node.size += 1
 		return true
 	} else {
-		if len(_node.children) <= INTERNAL_MIN_SIZE {
+		if len(sibling.children) <= INTERNAL_MIN_SIZE {
 			return false
 		}
 		borrowed := sibling.children[len(sibling.children)-1]
 		sibling.children = sibling.children[:len(sibling.children)-1]
 		_node.children = append([]*node[T]{borrowed}, _node.children...)
+		borrowed.parent = _node
 		sibling.size -= borrowed.size
 		_node.size += borrowed.size
 		return true
@@ -414,7 +417,7 @@ func tryBorrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) bool {
 // OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
 func tryBorrowFromRightSibling[T any](_node *node[T], sibling *node[T]) bool {
 	if _node.isLeaf {
-		if _node.size <= LEAF_MIN_SIZE {
+		if sibling.size <= LEAF_MIN_SIZE {
 			return false
 		}
 		borrowed := sibling.items[0]
@@ -424,12 +427,13 @@ func tryBorrowFromRightSibling[T any](_node *node[T], sibling *node[T]) bool {
 		_node.size += 1
 		return true
 	} else {
-		if len(_node.children) <= INTERNAL_MIN_SIZE {
+		if len(sibling.children) <= INTERNAL_MIN_SIZE {
 			return false
 		}
 		borrowed := sibling.children[0]
 		sibling.children = sibling.children[1:]
 		_node.children = append(_node.children, borrowed)
+		borrowed.parent = _node
 		sibling.size -= borrowed.size
 		_node.size += borrowed.size
 		return true

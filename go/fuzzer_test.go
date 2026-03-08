@@ -60,8 +60,8 @@ func TestFuzzerMerge(t *testing.T) {
 				doc := randDoc()
 
 				// Accessing the snapshot length.
-				length := len(doc.Branch.Snapshot)
-				//length := doc.Branch.Snapshot.Size()
+				//length := len(doc.Branch.Snapshot)
+				length := doc.Branch.Snapshot.Size()
 
 				insertWeight := 0.35
 				if length < 100 {
