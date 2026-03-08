@@ -31,12 +31,14 @@ func (h *PairingHeap[T]) meld(a, b *node[T]) *node[T] {
 }
 
 func (h *PairingHeap[T]) mergePair(l []*node[T]) *node[T] {
-	if (len(l)) == 0 {
+	switch len(l) {
+	case 0:
 		return nil
-	} else if len(l) == 1 {
+	case 1:
 		return l[0]
+	default:
+		return h.meld(h.meld(l[0], l[1]), h.mergePair(l[2:]))
 	}
-	return h.meld(h.meld(l[0], l[1]), h.mergePair(l[2:]))
 }
 
 //

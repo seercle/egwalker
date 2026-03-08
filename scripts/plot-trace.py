@@ -24,7 +24,7 @@ with open(filename, "r") as f:
 plt.figure(figsize=(10, 6))
 plt.plot(x, y, label="Average Time per Change")
 plt.xlabel("Total Changes")
-plt.ylabel("Average Time (Milliseconds)")
+plt.ylabel("Average Time (Nanoseconds)")
 plt.title("CRDT Benchmark: Average Time per Change vs Total Changes")
 ax = plt.gca()
 # 'nbins=20' tells matplotlib to try to fit roughly 20 numbers on the axis

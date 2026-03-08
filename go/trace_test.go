@@ -82,7 +82,7 @@ func TestTrace(t *testing.T) {
 		}
 		time_sum += time.Since(start)
 		if i%plot_every == 0 {
-			avg_time := float64(time_sum.Milliseconds()) / float64(plot_every)
+			avg_time := float64(time_sum.Nanoseconds()) / float64(plot_every)
 			fmt.Fprintf(csv, "%d,%d,%t,%q,%.5f\n", i, edit.Position, edit.IsInsert, edit.Char, avg_time)
 			time_sum = 0
 		}
