@@ -18,56 +18,51 @@ func (tree *BxTree[T]) Size() int {
 }
 
 func (tree *BxTree[T]) ForEach(f func(item T)) {
-	if tree.first == nil {
-		return
-	}
-	for leaf := tree.first; leaf != nil; leaf = leaf.next {
-		for _, item := range leaf.items {
+	curr := tree.first
+	for curr != nil {
+		for _, item := range curr.items {
 			f(item)
 		}
+		curr = curr.next
 	}
 }
-
-//
 
 func (tree *BxTree[T]) Print() {
 	if tree.root != nil {
 		fmt.Printf("Tree size: %d\n", tree.root.size)
 		tree.root.printTree(0)
 	} else {
-		println("Empty tree")
+		fmt.Println("Empty tree")
 	}
 }
 
-func (node *node[T]) printTree(level int) {
+func (n *node[T]) printTree(level int) {
 	prefix := ""
-	for range level {
+	for i := 0; i < level; i++ {
 		prefix += "  "
 	}
-	if node.isLeaf {
-		fmt.Printf("%sLeafNode(len=%d):\n", prefix, len(node.items))
-		print(prefix)
-		for _, item := range node.items {
+	if n.isLeaf {
+		fmt.Printf("%sLeafNode(len=%d):\n", prefix, len(n.items))
+		fmt.Print(prefix)
+		for _, item := range n.items {
 			fmt.Printf(" %v", item)
 		}
-		println()
+		fmt.Println()
 	} else {
-		fmt.Printf("%sInternalNode(len=%d,size=%d):\n", prefix, len(node.children), node.size)
-		for i, child := range node.children {
+		fmt.Printf("%sInternalNode(len=%d,size=%d):\n", prefix, len(n.children), n.size)
+		for i, child := range n.children {
 			fmt.Printf("%s  Child %d:\n", prefix, i)
-			child.printTree(level + 2)
+			child.printTree(level + 1)
 		}
 	}
 }
 
-//
-
 func (tree *BxTree[T]) GetAt(index int) (*T, error) {
-	node, index, err := tree.getAt(index)
+	leaf, pos, err := tree.getAt(index)
 	if err != nil {
 		return nil, err
 	}
-	return &node.items[index], nil
+	return &leaf.items[pos], nil
 }
 
 func (tree *BxTree[T]) getAt(index int) (*node[T], int, error) {
@@ -76,40 +71,32 @@ func (tree *BxTree[T]) getAt(index int) (*node[T], int, error) {
 	}
 	if index < tree.first.size {
 		return tree.first, index, nil
-	} else if index >= tree.Size()-tree.last.size {
-		return tree.last, index - tree.Size() + tree.last.size, nil
-	} else {
-		return tree.root.getAt(index)
 	}
-}
+	if index >= tree.Size()-tree.last.size {
+		return tree.last, index - (tree.Size() - tree.last.size), nil
+	}
 
-func (node *node[T]) getAt(index int) (*node[T], int, error) {
-	for !node.isLeaf {
+	curr := tree.root
+	for !curr.isLeaf {
 		found := false
-		for i := 0; i < len(node.children); i++ {
-			i_size := node.children[i].size
-			if index < i_size {
-				node = node.children[i]
+		for _, child := range curr.children {
+			if index < child.size {
+				curr = child
 				found = true
 				break
 			}
-			index -= i_size
+			index -= child.size
 		}
 		if !found {
 			return nil, -1, ErrIndexOutOfBounds
 		}
 	}
-	return node, index, nil
+	return curr, index, nil
 }
 
-//
-
-// OPTIMIZE: do not go down the tree for each insert, but adapt
-// the leaf & position if the insert caused a rebalance
 func (tree *BxTree[T]) InsertRange(index int, items []T) error {
 	for i, item := range items {
-		err := tree.InsertAt(index+i, item)
-		if err != nil {
+		if err := tree.InsertAt(index+i, item); err != nil {
 			return err
 		}
 	}
@@ -120,165 +107,103 @@ func (tree *BxTree[T]) InsertAt(index int, item T) error {
 	if index < 0 || index > tree.Size() {
 		return ErrIndexOutOfBounds
 	}
+
 	if tree.root == nil {
-		leaf := &node[T]{
-			isLeaf:   true,
-			parent:   nil,
-			next:     nil,
-			children: nil,
-			size:     1,
-			items:    []T{item},
+		n := &node[T]{
+			isLeaf: true,
+			size:   1,
+			items:  []T{item},
 		}
-		tree.root = leaf
-		tree.first = leaf
-		tree.last = leaf
+		tree.root = n
+		tree.first = n
+		tree.last = n
 		return nil
 	}
 
+	var leaf *node[T]
+	var pos int
 	if index == tree.Size() {
-		return tree.insertLeaf(tree.last, item, tree.last.size)
+		leaf, pos = tree.last, tree.last.size
+	} else {
+		var err error
+		leaf, pos, err = tree.getAt(index)
+		if err != nil {
+			return err
+		}
 	}
-	leaf, position, err := tree.getAt(index)
-	if err != nil {
-		return err
+
+	leaf.items = append(leaf.items, *new(T))
+	copy(leaf.items[pos+1:], leaf.items[pos:])
+	leaf.items[pos] = item
+	leaf.size++
+	leaf.updateParentSizeUpwards(1)
+
+	if len(leaf.items) > LeafMaxSize {
+		tree.split(leaf)
 	}
-	return tree.insertLeaf(leaf, item, position)
+	return nil
 }
 
-func (_node *node[T]) split() (*node[T], *node[T]) {
-	right := &node[T]{
-		parent:   _node.parent,
-		isLeaf:   _node.isLeaf,
-		next:     nil,
-		size:     0,
-		items:    nil,
-		children: nil,
+func (tree *BxTree[T]) split(n *node[T]) {
+	if n.parent == nil {
+		newRoot := &node[T]{
+			isLeaf: false,
+			size:   n.size,
+		}
+		tree.root = newRoot
+		n.parent = newRoot
+		newRoot.children = []*node[T]{n}
 	}
-	if _node.isLeaf {
-		right_len := len(_node.items) / 2
-		right.items = make([]T, right_len)
-		copy(right.items, _node.items[right_len:])
+
+	parent := n.parent
+	right := &node[T]{
+		isLeaf: n.isLeaf,
+		parent: parent,
+	}
+
+	if n.isLeaf {
+		mid := len(n.items) / 2
+		right.items = make([]T, len(n.items)-mid)
+		copy(right.items, n.items[mid:])
+		n.items = n.items[:mid]
+		n.size = len(n.items)
 		right.size = len(right.items)
-		_node.items = _node.items[:right_len]
-		_node.size = len(_node.items)
-		right.next = _node.next
-		_node.next = right
+
+		right.next = n.next
+		n.next = right
+		if tree.last == n {
+			tree.last = right
+		}
 	} else {
-		right_len := len(_node.children) / 2
-		right.children = make([]*node[T], right_len)
-		for i := range len(right.children) {
-			child := _node.children[len(_node.children)-right_len+i]
-			right.children[i] = child
+		mid := len(n.children) / 2
+		right.children = make([]*node[T], len(n.children)-mid)
+		copy(right.children, n.children[mid:])
+		n.children = n.children[:mid]
+
+		n.size = 0
+		for _, child := range n.children {
+			n.size += child.size
+		}
+		right.size = 0
+		for _, child := range right.children {
 			child.parent = right
 			right.size += child.size
 		}
-		_node.children = _node.children[:len(_node.children)-right_len]
-		_node.size -= right.size
 	}
-	return _node, right
+
+	idx := n.getParentIndex()
+	parent.children = append(parent.children, nil)
+	copy(parent.children[idx+2:], parent.children[idx+1:])
+	parent.children[idx+1] = right
+
+	if len(parent.children) > InternalMaxSize {
+		tree.split(parent)
+	}
 }
 
-func (tree *BxTree[T]) insertInternal(_node *node[T], new_node *node[T], index int, upward_change int) error {
-	insert := func(n *node[T], at int) {
-		n.children = append(n.children, new(node[T]))
-		copy(n.children[at+1:], n.children[at:])
-		n.children[at] = new_node
-		n.size += new_node.size
-		new_node.parent = n
-	}
-
-	_node.size += upward_change
-	if len(_node.children) < INTERNAL_MAX_SIZE {
-		insert(_node, index)
-		_node.updateParentSizeUpwards(upward_change + new_node.size)
-		return nil
-	}
-
-	_, right := _node.split()
-	upward_change -= right.size
-	if index <= len(_node.children) {
-		insert(_node, index)
-		upward_change += new_node.size
-	} else {
-		insert(right, index-len(_node.children))
-	}
-	if _node.parent == nil {
-		new_root := &node[T]{
-			isLeaf:   false,
-			parent:   nil,
-			size:     _node.size + right.size,
-			children: []*node[T]{_node, right},
-
-			items: nil,
-			next:  nil,
-		}
-		_node.parent = new_root
-		right.parent = new_root
-		tree.root = new_root
-		return nil
-	}
-	parent_index := _node.getParentIndex()
-	if parent_index == -1 {
-		return ErrParentDoesNotHaveChild
-	}
-	return tree.insertInternal(_node.parent, right, _node.getParentIndex()+1, upward_change)
-}
-
-func (tree *BxTree[T]) insertLeaf(leaf *node[T], item T, index int) error {
-	insert := func(node *node[T], at int) {
-		node.items = append(node.items, *new(T))
-		copy(node.items[at+1:], node.items[at:])
-		node.items[at] = item
-		node.size++
-	}
-	if leaf.size < LEAF_MAX_SIZE {
-		insert(leaf, index)
-		leaf.updateParentSizeUpwards(1)
-		return nil
-	}
-	_, right := leaf.split()
-	if tree.last == leaf {
-		tree.last = right
-	}
-
-	upward_change := -right.size
-	if index <= leaf.size {
-		insert(leaf, index)
-		upward_change += 1
-	} else {
-		insert(right, index-leaf.size)
-	}
-
-	if leaf.parent == nil {
-		new_root := &node[T]{
-			isLeaf:   false,
-			parent:   nil,
-			size:     leaf.size + right.size,
-			children: []*node[T]{leaf, right},
-
-			items: nil,
-			next:  nil,
-		}
-		leaf.parent = new_root
-		right.parent = new_root
-		tree.root = new_root
-		return nil
-	}
-	parent_index := leaf.getParentIndex()
-	if parent_index == -1 {
-		return ErrParentDoesNotHaveChild
-	}
-	return tree.insertInternal(leaf.parent, right, parent_index+1, upward_change)
-}
-
-//
-
-// OPTIMIZE: do not go down the tree for each delete, but adapt
-// the leaf & position if the delete caused a rebalance
 func (tree *BxTree[T]) DeleteRange(index int, length int) error {
-	for range length {
-		err := tree.DeleteAt(index)
-		if err != nil {
+	for i := 0; i < length; i++ {
+		if err := tree.DeleteAt(index); err != nil {
 			return err
 		}
 	}
@@ -289,92 +214,118 @@ func (tree *BxTree[T]) DeleteAt(index int) error {
 	if index < 0 || index >= tree.Size() {
 		return ErrIndexOutOfBounds
 	}
-	leaf, position, err := tree.getAt(index)
+	leaf, pos, err := tree.getAt(index)
 	if err != nil {
 		return err
 	}
-	return tree.deleteLeaf(leaf, position)
+
+	copy(leaf.items[pos:], leaf.items[pos+1:])
+	leaf.items = leaf.items[:len(leaf.items)-1]
+	leaf.size--
+	leaf.updateParentSizeUpwards(-1)
+
+	tree.rebalance(leaf)
+	return nil
 }
 
-func (tree *BxTree[T]) deleteInternal(_node *node[T], index int, upward_change int) error {
-	_node.size += upward_change
-
-	del_size := _node.children[index].size
-	copy(_node.children[index:], _node.children[index+1:])
-	_node.children = _node.children[:len(_node.children)-1]
-	_node.size -= del_size
-
-	upward_change -= del_size
-	if len(_node.children) >= INTERNAL_MIN_SIZE || (_node.parent == nil && len(_node.children) > 1) {
-		_node.updateParentSizeUpwards(upward_change)
-		return nil
+func (tree *BxTree[T]) rebalance(n *node[T]) {
+	if n.parent == nil {
+		if !n.isLeaf && len(n.children) == 1 {
+			tree.root = n.children[0]
+			tree.root.parent = nil
+		} else if n.isLeaf && n.size == 0 {
+			tree.root = nil
+			tree.first = nil
+			tree.last = nil
+		}
+		return
 	}
-	if _node.parent == nil && len(_node.children) == 1 {
-		tree.root = _node.children[0]
-		tree.root.parent = nil
-		return nil
+
+	minSize := InternalMinSize
+	if n.isLeaf {
+		minSize = LeafMinSize
 	}
-	parent_index := _node.getParentIndex()
-	if parent_index > 0 {
-		left_sibling := _node.parent.children[parent_index-1]
-		if tryBorrowFromLeftSibling(_node, left_sibling) {
-			_node.updateParentSizeUpwards(upward_change)
-			return nil
+
+	currLen := len(n.children)
+	if n.isLeaf {
+		currLen = len(n.items)
+	}
+
+	if currLen >= minSize {
+		return
+	}
+
+	idx := n.getParentIndex()
+	parent := n.parent
+
+	if idx > 0 {
+		left := parent.children[idx-1]
+		if n.isLeaf {
+			if len(left.items) > LeafMinSize {
+				item := left.items[len(left.items)-1]
+				left.items = left.items[:len(left.items)-1]
+				left.size--
+				n.items = append([]T{item}, n.items...)
+				n.size++
+				left.updateParentSizeUpwards(-1)
+				n.updateParentSizeUpwards(1)
+				return
+			}
 		} else {
-			tree.merge(left_sibling, _node)
-			return tree.deleteInternal(left_sibling.parent, parent_index, upward_change+_node.size)
+			if len(left.children) > InternalMinSize {
+				child := left.children[len(left.children)-1]
+				left.children = left.children[:len(left.children)-1]
+				left.size -= child.size
+				n.children = append([]*node[T]{child}, n.children...)
+				n.size += child.size
+				child.parent = n
+				left.updateParentSizeUpwards(-child.size)
+				n.updateParentSizeUpwards(child.size)
+				return
+			}
 		}
 	}
-	if parent_index < len(_node.parent.children)-1 {
-		right_sibling := _node.parent.children[parent_index+1]
-		if tryBorrowFromRightSibling(_node, right_sibling) {
-			_node.updateParentSizeUpwards(upward_change)
-			return nil
+
+	if idx < len(parent.children)-1 {
+		right := parent.children[idx+1]
+		if n.isLeaf {
+			if len(right.items) > LeafMinSize {
+				item := right.items[0]
+				right.items = right.items[1:]
+				right.size--
+				n.items = append(n.items, item)
+				n.size++
+				right.updateParentSizeUpwards(-1)
+				n.updateParentSizeUpwards(1)
+				return
+			}
 		} else {
-			tree.merge(_node, right_sibling)
-			return tree.deleteInternal(_node.parent, parent_index+1, upward_change+right_sibling.size)
+			if len(right.children) > InternalMinSize {
+				child := right.children[0]
+				right.children = right.children[1:]
+				right.size -= child.size
+				n.children = append(n.children, child)
+				n.size += child.size
+				child.parent = n
+				right.updateParentSizeUpwards(-child.size)
+				n.updateParentSizeUpwards(child.size)
+				return
+			}
 		}
 	}
-	return ErrNotRootAndOneChild
+
+	if idx > 0 {
+		tree.merge(parent.children[idx-1], n)
+	} else {
+		tree.merge(n, parent.children[idx+1])
+	}
 }
 
-func (tree *BxTree[T]) deleteLeaf(leaf *node[T], index int) error {
-	copy(leaf.items[index:], leaf.items[index+1:])
-	leaf.items = leaf.items[:leaf.size-1]
-	leaf.size -= 1
-
-	if leaf.size >= LEAF_MIN_SIZE || leaf.parent == nil {
-		leaf.updateParentSizeUpwards(-1)
-		return nil
-	}
-	parent_index := leaf.getParentIndex()
-	if parent_index > 0 {
-		left_sibling := leaf.parent.children[parent_index-1]
-		if tryBorrowFromLeftSibling(leaf, left_sibling) {
-			leaf.updateParentSizeUpwards(-1)
-			return nil
-		} else {
-			tree.merge(left_sibling, leaf)
-			return tree.deleteInternal(left_sibling.parent, parent_index, leaf.size-1)
-		}
-	}
-	if parent_index < len(leaf.parent.children)-1 {
-		right_sibling := leaf.parent.children[parent_index+1]
-		if tryBorrowFromRightSibling(leaf, right_sibling) {
-			leaf.updateParentSizeUpwards(-1)
-			return nil
-		} else {
-			tree.merge(leaf, right_sibling)
-			return tree.deleteInternal(leaf.parent, parent_index+1, right_sibling.size-1)
-		}
-	}
-	return ErrNotRootAndOneChild
-}
-
-func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
-	left.size += right.size
+func (tree *BxTree[T]) merge(left, right *node[T]) {
+	parent := left.parent
 	if left.isLeaf {
 		left.items = append(left.items, right.items...)
+		left.size = len(left.items)
 		left.next = right.next
 		if tree.last == right {
 			tree.last = left
@@ -383,79 +334,33 @@ func (tree *BxTree[T]) merge(left *node[T], right *node[T]) {
 		for _, child := range right.children {
 			child.parent = left
 			left.children = append(left.children, child)
+			left.size += child.size
 		}
+	}
+
+	idx := right.getParentIndex()
+	copy(parent.children[idx:], parent.children[idx+1:])
+	parent.children = parent.children[:len(parent.children)-1]
+
+	tree.rebalance(parent)
+}
+
+func (n *node[T]) updateParentSizeUpwards(delta int) {
+	curr := n.parent
+	for curr != nil {
+		curr.size += delta
+		curr = curr.parent
 	}
 }
 
-// OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
-func tryBorrowFromLeftSibling[T any](_node *node[T], sibling *node[T]) bool {
-	if _node.isLeaf {
-		if sibling.size <= LEAF_MIN_SIZE {
-			return false
-		}
-		borrowed := sibling.items[sibling.size-1]
-		sibling.items = sibling.items[:sibling.size-1]
-		_node.items = append([]T{borrowed}, _node.items...)
-		sibling.size -= 1
-		_node.size += 1
-		return true
-	} else {
-		if len(sibling.children) <= INTERNAL_MIN_SIZE {
-			return false
-		}
-		borrowed := sibling.children[len(sibling.children)-1]
-		sibling.children = sibling.children[:len(sibling.children)-1]
-		_node.children = append([]*node[T]{borrowed}, _node.children...)
-		borrowed.parent = _node
-		sibling.size -= borrowed.size
-		_node.size += borrowed.size
-		return true
-	}
-
-}
-
-// OPTIMIZE: do not borrow only 1 element but make both nodes of equal length
-func tryBorrowFromRightSibling[T any](_node *node[T], sibling *node[T]) bool {
-	if _node.isLeaf {
-		if sibling.size <= LEAF_MIN_SIZE {
-			return false
-		}
-		borrowed := sibling.items[0]
-		sibling.items = sibling.items[1:]
-		_node.items = append(_node.items, borrowed)
-		sibling.size -= 1
-		_node.size += 1
-		return true
-	} else {
-		if len(sibling.children) <= INTERNAL_MIN_SIZE {
-			return false
-		}
-		borrowed := sibling.children[0]
-		sibling.children = sibling.children[1:]
-		_node.children = append(_node.children, borrowed)
-		borrowed.parent = _node
-		sibling.size -= borrowed.size
-		_node.size += borrowed.size
-		return true
-	}
-}
-
-//
-
-func (_node *node[T]) getParentIndex() int {
-	if _node.parent == nil {
+func (n *node[T]) getParentIndex() int {
+	if n.parent == nil {
 		return -1
 	}
-	for i, child := range _node.parent.children {
-		if child == _node {
+	for i, child := range n.parent.children {
+		if child == n {
 			return i
 		}
 	}
 	return -1
-}
-
-func (node *node[T]) updateParentSizeUpwards(delta int) {
-	for parent := node.parent; parent != nil; parent = parent.parent {
-		parent.size += delta
-	}
 }

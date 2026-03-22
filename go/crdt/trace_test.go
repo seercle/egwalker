@@ -1,4 +1,4 @@
-package main
+package crdt
 
 import (
 	"encoding/json"
@@ -44,22 +44,18 @@ func (e *Edit) UnmarshalJSON(buf []byte) error {
 }
 
 func TestTrace(t *testing.T) {
-	json_file, err := os.Open("../resources/editing-trace.json")
+	jsonFile, err := os.Open("../../resources/editing-trace.json")
 	if err != nil {
 		t.Fatalf("Failed to open JSON file: %v", err)
 	}
-	defer json_file.Close()
+	defer jsonFile.Close()
 
 	var trace Trace
-	decoder := json.NewDecoder(json_file)
+	decoder := json.NewDecoder(jsonFile)
 	err = decoder.Decode(&trace)
 	if err != nil {
 		t.Fatalf("Failed to decode JSON file: %v", err)
 	}
-
-	//for _, edit := range trace.Edits[10050:10090] {
-	//	fmt.Printf("Position: %d, IsInsert: %v, Char: %s\n", edit.Position, edit.IsInsert, edit.Char)
-	//}
 
 	csv, err := os.Create("trace-data.csv")
 	if err != nil {
@@ -68,23 +64,23 @@ func TestTrace(t *testing.T) {
 	defer csv.Close()
 	csv.WriteString("id,position,is_insert,char,avg_time_ms\n")
 
-	document := NewCRDTDocument(0)
-	time_sum := time.Duration(0)
-	plot_every := 500
+	document := NewRuneDocument(0)
+	timeSum := time.Duration(0)
+	plotEvery := 500
 
 	start := time.Now()
 	for i, edit := range trace.Edits {
-		start := time.Now()
+		opStart := time.Now()
 		if edit.IsInsert {
 			document.Ins(edit.Position, edit.Char)
 		} else {
 			document.Del(edit.Position, 1)
 		}
-		time_sum += time.Since(start)
-		if i%plot_every == 0 {
-			avg_time := float64(time_sum.Nanoseconds()) / float64(plot_every)
-			fmt.Fprintf(csv, "%d,%d,%t,%q,%.5f\n", i, edit.Position, edit.IsInsert, edit.Char, avg_time)
-			time_sum = 0
+		timeSum += time.Since(opStart)
+		if i%plotEvery == 0 {
+			avgTime := float64(timeSum.Nanoseconds()) / float64(plotEvery)
+			fmt.Fprintf(csv, "%d,%d,%t,%q,%.5f\n", i, edit.Position, edit.IsInsert, edit.Char, avgTime)
+			timeSum = 0
 		}
 	}
 	elapsed := time.Since(start)

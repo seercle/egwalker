@@ -1,10 +1,10 @@
 package bxtree
 
-const (
-	INTERNAL_MIN_SIZE = 16
-	INTERNAL_MAX_SIZE = INTERNAL_MIN_SIZE * 2
-	LEAF_MIN_SIZE     = 64
-	LEAF_MAX_SIZE     = LEAF_MIN_SIZE * 2
+var (
+	InternalMinSize = 16
+	InternalMaxSize = 32
+	LeafMinSize     = 64
+	LeafMaxSize     = 128
 )
 
 type node[T any] struct {

@@ -1,6 +1,6 @@
-go/*.prof
-go/*.test
-go/*.out
-go/*.csv
+go/**/*.prof
+go/**/*.test
+go/**/*.out
+go/**/*.csv
 .direnv
 .envrc
