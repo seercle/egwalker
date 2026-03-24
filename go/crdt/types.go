@@ -30,6 +30,7 @@ type opLog[T any] struct {
 	ops      []op[T]
 	frontier []lv
 	version  remoteVersion
+	idToLV   map[id]lv
 }
 
 type diffResult struct {
@@ -54,7 +55,7 @@ type crdtItem struct {
 }
 
 type crdtDoc struct {
-	items          []*crdtItem
+	items          *bxtree.BxTree[*crdtItem]
 	currentVersion []lv
 	delTargets     map[lv]lv        // Map op_lv (delete op) -> target_lv
 	itemsByLV      map[lv]*crdtItem // Map lv -> crdt_item
@@ -107,8 +108,9 @@ type MapOp[K comparable, V any] struct {
 
 // MapDocument represents a CRDT map document using LWW strategy.
 type MapDocument[K comparable, V any] struct {
-	agent int
-	opLog *opLog[MapOp[K, V]]
+	agent    int
+	opLog    *opLog[MapOp[K, V]]
+	keyIndex map[K][]lv
 }
 
 // Mergeable is an interface for documents that can be merged recursively.

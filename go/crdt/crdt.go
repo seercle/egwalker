@@ -1,28 +1,10 @@
 package crdt
 
 import (
-	"container/heap"
 	"egwalker/bxtree"
+	"egwalker/pheap"
 	"sort"
 )
-
-// ==========================================
-// Priority Queue / Heap Helpers (Internal)
-// ==========================================
-
-type intMaxHeap []lv
-
-func (h intMaxHeap) Len() int           { return len(h) }
-func (h intMaxHeap) Less(i, j int) bool { return h[i] > h[j] } // Max Heap
-func (h intMaxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *intMaxHeap) Push(x any)        { *h = append(*h, x.(lv)) }
-func (h *intMaxHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
 
 // ==========================================
 // Diff Algorithm (Internal)
@@ -32,13 +14,15 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 	flags := make(map[lv]diffFlag)
 	numShared := 0
 
-	pq := &intMaxHeap{}
-	heap.Init(pq)
+	// Max-heap of lv
+	pq := pheap.NewWithLess(func(a, b lv) bool {
+		return a < b
+	})
 
 	enq := func(v lv, flag diffFlag) {
 		oldFlag, exists := flags[v]
 		if !exists {
-			heap.Push(pq, v)
+			pq.Push(v)
 			flags[v] = flag
 			if flag == diffFlagShared {
 				numShared++
@@ -58,8 +42,8 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 
 	var aOnly, bOnly []lv
 
-	for pq.Len() > numShared {
-		curLV := heap.Pop(pq).(lv)
+	for pq.Size() > numShared {
+		curLV, _ := pq.Pop()
 		flag := flags[curLV]
 
 		switch flag {
@@ -110,9 +94,10 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	item.curState++
 }
 
-func findItemIdxAtLV(items []*crdtItem, targetLV lv) int {
-	for i, item := range items {
-		if item.lv == targetLV {
+func findItemIdxAtLV(items *bxtree.BxTree[*crdtItem], targetLV lv) int {
+	for i := 0; i < items.Size(); i++ {
+		item, _ := items.GetAt(i)
+		if (*item).lv == targetLV {
 			return i
 		}
 	}
@@ -124,7 +109,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	scanEndPos := endPos
 
 	left := scanIdx - 1
-	right := len(doc.items)
+	right := doc.items.Size()
 	if newItem.originRight != -1 {
 		right = findItemIdxAtLV(doc.items, newItem.originRight)
 	}
@@ -132,7 +117,8 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	scanning := false
 
 	for scanIdx < right {
-		other := doc.items[scanIdx]
+		otherPtr, _ := doc.items.GetAt(scanIdx)
+		other := *otherPtr
 
 		if other.curState != stateNotYetInserted {
 			break
@@ -143,7 +129,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 			oLeft = findItemIdxAtLV(doc.items, other.originLeft)
 		}
 
-		oRight := len(doc.items)
+		oRight := doc.items.Size()
 		if other.originRight != -1 {
 			oRight = findItemIdxAtLV(doc.items, other.originRight)
 		}
@@ -170,7 +156,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 		}
 	}
 
-	doc.items = append(doc.items[:idx], append([]*crdtItem{newItem}, doc.items[idx:]...)...)
+	doc.items.InsertAt(idx, newItem)
 
 	o := log.ops[newItem.lv]
 	if o.opType != opTypeIns {
@@ -185,16 +171,17 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	}
 }
 
-func findByCurrentPos(items []*crdtItem, targetPos int) (int, int) {
+func findByCurrentPos(items *bxtree.BxTree[*crdtItem], targetPos int) (int, int) {
 	curPos := 0
 	endPos := 0
 	idx := 0
 
 	for ; curPos < targetPos; idx++ {
-		if idx >= len(items) {
+		if idx >= items.Size() {
 			panic("Past end of items list")
 		}
-		item := items[idx]
+		itemPtr, _ := items.GetAt(idx)
+		item := *itemPtr
 		if item.curState == stateInserted {
 			curPos++
 		}
@@ -211,14 +198,19 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T], opLV 
 	if o.opType == opTypeDel {
 		idx, endPos := findByCurrentPos(doc.items, o.pos)
 
-		for doc.items[idx].curState != stateInserted {
-			if !doc.items[idx].deleted {
+		for {
+			itemPtr, _ := doc.items.GetAt(idx)
+			if (*itemPtr).curState == stateInserted {
+				break
+			}
+			if !(*itemPtr).deleted {
 				endPos++
 			}
 			idx++
 		}
 
-		item := doc.items[idx]
+		itemPtr, _ := doc.items.GetAt(idx)
+		item := *itemPtr
 
 		if !item.deleted {
 			item.deleted = true
@@ -236,18 +228,23 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T], opLV 
 	} else {
 		idx, endPos := findByCurrentPos(doc.items, o.pos)
 
-		if idx >= 1 && doc.items[idx-1].curState != stateInserted {
-			panic("Item to the left is not inserted!")
+		if idx >= 1 {
+			prevPtr, _ := doc.items.GetAt(idx - 1)
+			if (*prevPtr).curState != stateInserted {
+				panic("Item to the left is not inserted!")
+			}
 		}
 
 		originLeft := lv(-1)
 		if idx > 0 {
-			originLeft = doc.items[idx-1].lv
+			prevPtr, _ := doc.items.GetAt(idx - 1)
+			originLeft = (*prevPtr).lv
 		}
 
 		originRight := lv(-1)
-		for i := idx; i < len(doc.items); i++ {
-			item2 := doc.items[i]
+		for i := idx; i < doc.items.Size(); i++ {
+			item2Ptr, _ := doc.items.GetAt(i)
+			item2 := *item2Ptr
 			if item2.curState != stateNotYetInserted {
 				originRight = item2.lv
 				break
@@ -284,7 +281,7 @@ func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.
 
 func checkout[T any](log *opLog[T]) *bxtree.BxTree[T] {
 	doc := &crdtDoc{
-		items:          []*crdtItem{},
+		items:          bxtree.New[*crdtItem](),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
@@ -318,25 +315,10 @@ func compareArrays(a, b []lv) int {
 	return 0
 }
 
-type mergePointQueue []mergePoint
-
-func (pq mergePointQueue) Len() int { return len(pq) }
-func (pq mergePointQueue) Less(i, j int) bool {
-	return compareArrays(pq[i].v, pq[j].v) > 0
-}
-func (pq mergePointQueue) Swap(i, j int) { pq[i], pq[j] = pq[j], pq[i] }
-func (pq *mergePointQueue) Push(x any)   { *pq = append(*pq, x.(mergePoint)) }
-func (pq *mergePointQueue) Pop() any {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	*pq = old[0 : n-1]
-	return item
-}
-
 func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
-	pq := &mergePointQueue{}
-	heap.Init(pq)
+	pq := pheap.NewWithLess(func(a, b mergePoint) bool {
+		return compareArrays(a.v, b.v) < 0
+	})
 
 	enq := func(lvs []lv, isInA bool) {
 		v := make([]lv, len(lvs))
@@ -349,7 +331,7 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 			v:     v,
 			isInA: isInA,
 		}
-		heap.Push(pq, mp)
+		pq.Push(mp)
 	}
 
 	enq(a, true)
@@ -359,7 +341,7 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 	var sharedOps, bOnlyOps []lv
 
 	for {
-		item := heap.Pop(pq).(mergePoint)
+		item, _ := pq.Pop()
 		v := item.v
 		isInA := item.isInA
 
@@ -368,18 +350,18 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 			break
 		}
 
-		for pq.Len() > 0 {
-			peekItem := (*pq)[0]
-			if compareArrays(v, peekItem.v) != 0 {
+		for {
+			peekItem, ok := pq.Peek()
+			if !ok || compareArrays(v, peekItem.v) != 0 {
 				break
 			}
-			heap.Pop(pq)
+			pq.Pop()
 			if peekItem.isInA {
 				isInA = true
 			}
 		}
 
-		if pq.Len() == 0 {
+		if pq.Size() == 0 {
 			commonVersion = make([]lv, len(v))
 			for i, val := range v {
 				commonVersion[len(v)-1-i] = val
@@ -434,7 +416,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 	visit := findOpsToVisit(log, b.frontier, mergeFrontier)
 
 	doc := &crdtDoc{
-		items:          []*crdtItem{},
+		items:          bxtree.New[*crdtItem](),
 		currentVersion: visit.commonVersion,
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
@@ -456,7 +438,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 			originLeft:  -1,
 			originRight: -1,
 		}
-		doc.items = append(doc.items, item)
+		doc.items.InsertAt(doc.items.Size(), item)
 		doc.itemsByLV[item.lv] = item
 	}
 

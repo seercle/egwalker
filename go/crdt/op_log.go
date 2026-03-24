@@ -13,6 +13,7 @@ func newOpLog[T any]() *opLog[T] {
 		ops:      []op[T]{},
 		frontier: []lv{},
 		version:  make(remoteVersion),
+		idToLV:   make(map[id]lv),
 	}
 }
 
@@ -31,6 +32,7 @@ func (log *opLog[T]) pushLocalOp(agent int, o op[T]) {
 	o.parents = parents_copy
 
 	log.ops = append(log.ops, o)
+	log.idToLV[o.id] = cur_lv
 	log.frontier = []lv{cur_lv}
 	log.version[agent] = seq
 }
@@ -61,15 +63,9 @@ func localDelete[T any](log *opLog[T], agent int, pos int, del_len int) {
 	}
 }
 
-func idEq(a, b id) bool {
-	return a.agent == b.agent && a.seq == b.seq
-}
-
 func idToLV[T any](log *opLog[T], target_id id) lv {
-	for i, o := range log.ops {
-		if idEq(o.id, target_id) {
-			return lv(i)
-		}
+	if lv, ok := log.idToLV[target_id]; ok {
+		return lv
 	}
 	panic("Could not find id in oplog")
 }
@@ -151,6 +147,7 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
 	o.parents = sortLVs(parents)
 
 	log.ops = append(log.ops, o)
+	log.idToLV[o.id] = cur_lv
 	log.frontier = advanceFrontier(log.frontier, cur_lv, o.parents)
 
 	if seq != last_known_seq+1 {

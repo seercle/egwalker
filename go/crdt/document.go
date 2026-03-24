@@ -165,28 +165,26 @@ func (doc *ArrayDocument[T]) GetItems() []T {
 // NewMapDocument creates a new generic CRDT map document.
 func NewMapDocument[K comparable, V any](agent int) *MapDocument[K, V] {
 	return &MapDocument[K, V]{
-		agent: agent,
-		opLog: newOpLog[MapOp[K, V]](),
+		agent:    agent,
+		opLog:    newOpLog[MapOp[K, V]](),
+		keyIndex: make(map[K][]lv),
 	}
 }
 
 // Set sets the value for the given key.
 func (m *MapDocument[K, V]) Set(key K, value V) {
+	curLV := lv(len(m.opLog.ops))
 	m.opLog.pushLocalOp(m.agent, op[MapOp[K, V]]{
 		content: MapOp[K, V]{Key: key, Value: value},
 	})
+	m.keyIndex[key] = append(m.keyIndex[key], curLV)
 }
 
 // Get returns the value for the given key using LWW strategy, with recursive merging for Mergeable values.
 func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	var concurrentLVs []lv
 
-	for i, o := range m.opLog.ops {
-		if o.content.Key != key {
-			continue
-		}
-
-		curLV := lv(i)
+	for _, curLV := range m.keyIndex[key] {
 		// Filter out any existing concurrent LVs that are ancestors of this one
 		nextConcurrent := []lv{curLV}
 		for _, existingLV := range concurrentLVs {
@@ -244,7 +242,12 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 			}
 		}
 	}
+	oldLen := len(m.opLog.ops)
 	mergeInto(m.opLog, other.opLog)
+	for i := oldLen; i < len(m.opLog.ops); i++ {
+		o := m.opLog.ops[i]
+		m.keyIndex[o.content.Key] = append(m.keyIndex[o.content.Key], lv(i))
+	}
 }
 
 // Keys returns all keys that have been set in the map.
