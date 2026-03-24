@@ -47,7 +47,7 @@ func BenchmarkInsertRandom_Slice_Medium(b *testing.B) {
 
 func BenchmarkInsertRandom_BxTree_Medium(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		tree := New[int]()
+		tree := New[int, struct{}]()
 		for i := 0; i < MediumSize; i++ {
 			pos := 0
 			if tree.Size() > 0 {
@@ -73,7 +73,7 @@ func BenchmarkInsertRandom_Slice_Large(b *testing.B) {
 
 func BenchmarkInsertRandom_BxTree_Large(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		tree := New[int]()
+		tree := New[int, struct{}]()
 		for i := 0; i < LargeSize; i++ {
 			pos := 0
 			if tree.Size() > 0 {
@@ -95,7 +95,7 @@ func BenchmarkAppend_Slice_Large(b *testing.B) {
 
 func BenchmarkAppend_BxTree_Large(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		tree := New[int]()
+		tree := New[int, struct{}]()
 		for i := 0; i < LargeSize; i++ {
 			tree.InsertAt(tree.Size(), i)
 		}
@@ -116,7 +116,7 @@ func BenchmarkReadRandom_Slice_Large(b *testing.B) {
 }
 
 func BenchmarkReadRandom_BxTree_Large(b *testing.B) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	for i := 0; i < LargeSize; i++ {
 		tree.InsertAt(tree.Size(), i)
 	}

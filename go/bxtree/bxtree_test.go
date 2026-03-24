@@ -5,7 +5,7 @@ import (
 )
 
 func TestTest(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	for i := 0; i < 129; i++ {
 		tree.InsertAt(i, i)
 	}
@@ -16,13 +16,13 @@ func TestTest(t *testing.T) {
 }
 
 func TestFirstLastPointers(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 
 	tree.InsertAt(0, 100)
-	if tree.first == nil || tree.last == nil {
+	if tree.First == nil || tree.Last == nil {
 		t.Fatal("First or Last pointer is nil after first insert")
 	}
-	if tree.first != tree.last {
+	if tree.First != tree.Last {
 		t.Fatal("First and Last should point to the same node after single insert")
 	}
 
@@ -33,7 +33,7 @@ func TestFirstLastPointers(t *testing.T) {
 			t.Fatalf("Insert failed at %d: %v", i, err)
 		}
 
-		lastNode := tree.last
+		lastNode := tree.Last
 		if lastNode == nil {
 			t.Fatalf("Last pointer is nil at iteration %d", i)
 		}
@@ -41,11 +41,11 @@ func TestFirstLastPointers(t *testing.T) {
 			t.Fatalf("Last pointer points to internal node at iteration %d", i)
 		}
 
-		if len(lastNode.items) == 0 {
+		if len(lastNode.Items) == 0 {
 			t.Fatalf("Last node is empty at iteration %d", i)
 		}
-		if lastNode.items[len(lastNode.items)-1] != 100+i {
-			t.Errorf("Last node does not contain the last inserted item. Expected %d, got %d", 100+i, lastNode.items[len(lastNode.items)-1])
+		if lastNode.Items[len(lastNode.Items)-1] != 100+i {
+			t.Errorf("Last node does not contain the last inserted item. Expected %d, got %d", 100+i, lastNode.Items[len(lastNode.Items)-1])
 		}
 	}
 
@@ -56,35 +56,35 @@ func TestFirstLastPointers(t *testing.T) {
 			t.Fatalf("Prepend failed at %d: %v", i, err)
 		}
 
-		firstNode := tree.first
+		firstNode := tree.First
 		if firstNode == nil {
 			t.Fatalf("First pointer is nil at prepend iteration %d", i)
 		}
 		if !firstNode.isLeaf {
 			t.Fatalf("First pointer points to internal node at prepend iteration %d", i)
 		}
-		if len(firstNode.items) == 0 {
+		if len(firstNode.Items) == 0 {
 			t.Fatalf("First node is empty at prepend iteration %d", i)
 		}
-		if firstNode.items[0] != val {
-			t.Errorf("First node does not contain the first inserted item. Expected %d, got %d", val, firstNode.items[0])
+		if firstNode.Items[0] != val {
+			t.Errorf("First node does not contain the first inserted item. Expected %d, got %d", val, firstNode.Items[0])
 		}
 	}
 
-	curr := tree.root
+	curr := tree.Root
 	for !curr.isLeaf {
 		curr = curr.children[0]
 	}
-	if curr != tree.first {
-		t.Errorf("Root traversal to leftmost leaf does not match tree.first")
+	if curr != tree.First {
+		t.Errorf("Root traversal to leftmost leaf does not match tree.First")
 	}
 
-	curr = tree.root
+	curr = tree.Root
 	for !curr.isLeaf {
 		curr = curr.children[len(curr.children)-1]
 	}
-	if curr != tree.last {
-		t.Errorf("Root traversal to rightmost leaf does not match tree.last")
+	if curr != tree.Last {
+		t.Errorf("Root traversal to rightmost leaf does not match tree.Last")
 	}
 
 	val, err := tree.GetAt(0)
@@ -105,7 +105,7 @@ func TestFirstLastPointers(t *testing.T) {
 }
 
 func TestDeleteEmpty(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	err := tree.DeleteAt(0)
 	if err != ErrIndexOutOfBounds {
 		t.Errorf("Expected ErrIndexOutOfBounds when deleting from empty tree, got %v", err)
@@ -113,7 +113,7 @@ func TestDeleteEmpty(t *testing.T) {
 }
 
 func TestDeleteOutOfBounds(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	tree.InsertAt(0, 1)
 
 	tests := []int{-1, 1, 5}
@@ -126,7 +126,7 @@ func TestDeleteOutOfBounds(t *testing.T) {
 }
 
 func TestDeleteSingleItem(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	tree.InsertAt(0, 10)
 
 	err := tree.DeleteAt(0)
@@ -148,7 +148,7 @@ func TestDeleteSingleItem(t *testing.T) {
 }
 
 func TestDeleteFromLeavesSimple(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	for i := 0; i < 5; i++ {
 		tree.InsertAt(i, i)
 	}
@@ -173,7 +173,7 @@ func TestDeleteFromLeavesSimple(t *testing.T) {
 }
 
 func TestDeleteMergesAndBorrows(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	count := 50
 
 	for i := 0; i < count; i++ {
@@ -203,7 +203,7 @@ func TestDeleteMergesAndBorrows(t *testing.T) {
 }
 
 func TestDeleteReverse(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	count := 50
 	for i := 0; i < count; i++ {
 		tree.InsertAt(i, i)
@@ -226,7 +226,7 @@ func TestDeleteReverse(t *testing.T) {
 }
 
 func TestFirstLastPointersAfterDelete(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	count := 20
 	for i := 0; i < count; i++ {
 		tree.InsertAt(i, i)
@@ -236,14 +236,14 @@ func TestFirstLastPointersAfterDelete(t *testing.T) {
 		tree.DeleteAt(0)
 	}
 
-	if tree.first == nil {
-		t.Fatal("tree.first is nil after deletions")
+	if tree.First == nil {
+		t.Fatal("tree.First is nil after deletions")
 	}
-	if tree.first.size == 0 {
-		t.Fatal("tree.first is empty")
+	if tree.First.size == 0 {
+		t.Fatal("tree.First is empty")
 	}
-	if tree.first.items[0] != 5 {
-		t.Errorf("tree.first item mismatch. Expected 5, got %d", tree.first.items[0])
+	if tree.First.Items[0] != 5 {
+		t.Errorf("tree.First item mismatch. Expected 5, got %d", tree.First.Items[0])
 	}
 
 	currentSize := tree.Size()
@@ -251,15 +251,15 @@ func TestFirstLastPointersAfterDelete(t *testing.T) {
 		tree.DeleteAt(currentSize - 1 - i)
 	}
 
-	if tree.last == nil {
-		t.Fatal("tree.last is nil after deletions")
+	if tree.Last == nil {
+		t.Fatal("tree.Last is nil after deletions")
 	}
-	if tree.last.size == 0 {
-		t.Fatal("tree.last is empty")
+	if tree.Last.size == 0 {
+		t.Fatal("tree.Last is empty")
 	}
 	expectedLast := count - 1 - 5
-	actualLast := tree.last.items[tree.last.size-1]
+	actualLast := tree.Last.Items[tree.Last.size-1]
 	if actualLast != expectedLast {
-		t.Errorf("tree.last item mismatch. Expected %d, got %d", expectedLast, actualLast)
+		t.Errorf("tree.Last item mismatch. Expected %d, got %d", expectedLast, actualLast)
 	}
 }

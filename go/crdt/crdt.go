@@ -68,6 +68,25 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 // CRDT Logic (Internal)
 // ==========================================
 
+var crdtSummaryConfig = &bxtree.SummaryConfig[*crdtItem, crdtSummary]{
+	FromItem: func(item *crdtItem) crdtSummary {
+		m := crdtSummary{0, 0}
+		if item.curState == stateInserted {
+			m[0] = 1
+		}
+		if !item.deleted {
+			m[1] = 1
+		}
+		return m
+	},
+	Add: func(a, b crdtSummary) crdtSummary {
+		return crdtSummary{a[0] + b[0], a[1] + b[1]}
+	},
+	Sub: func(a, b crdtSummary) crdtSummary {
+		return crdtSummary{a[0] - b[0], a[1] - b[1]}
+	},
+}
+
 func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	o := log.ops[opLV]
 	var targetLV lv
@@ -78,7 +97,18 @@ func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	}
 
 	item := doc.itemsByLV[targetLV]
+	oldM0 := 0
+	if item.curState == stateInserted {
+		oldM0 = 1
+	}
 	item.curState--
+	newM0 := 0
+	if item.curState == stateInserted {
+		newM0 = 1
+	}
+	if oldM0 != newM0 {
+		item.node.UpdateSummaryUpwards(crdtSummary{newM0 - oldM0, 0}, doc.items)
+	}
 }
 
 func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
@@ -91,27 +121,51 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	}
 
 	item := doc.itemsByLV[targetLV]
+	oldM0 := 0
+	if item.curState == stateInserted {
+		oldM0 = 1
+	}
 	item.curState++
+	newM0 := 0
+	if item.curState == stateInserted {
+		newM0 = 1
+	}
+	if oldM0 != newM0 {
+		item.node.UpdateSummaryUpwards(crdtSummary{newM0 - oldM0, 0}, doc.items)
+	}
 }
 
-func findItemIdxAtLV(items *bxtree.BxTree[*crdtItem], targetLV lv) int {
-	for i := 0; i < items.Size(); i++ {
-		item, _ := items.GetAt(i)
-		if (*item).lv == targetLV {
-			return i
+func findItemIdxAtLV(doc *crdtDoc, targetLV lv) int {
+	item, ok := doc.itemsByLV[targetLV]
+	if !ok {
+		panic("Could not find item")
+	}
+	if item.node == nil {
+		panic("Item node is nil")
+	}
+
+	nodeIdx := item.node.Index()
+	posInNode := -1
+	for i, it := range item.node.Items {
+		if it == item {
+			posInNode = i
+			break
 		}
 	}
-	panic("Could not find item")
+	if posInNode == -1 {
+		panic("Could not find item in node items")
+	}
+	return nodeIdx + posInNode
 }
 
-func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[T]) {
+func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[T, struct{}]) {
 	scanIdx := idx
 	scanEndPos := endPos
 
 	left := scanIdx - 1
 	right := doc.items.Size()
 	if newItem.originRight != -1 {
-		right = findItemIdxAtLV(doc.items, newItem.originRight)
+		right = findItemIdxAtLV(doc, newItem.originRight)
 	}
 
 	scanning := false
@@ -126,12 +180,12 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 
 		oLeft := -1
 		if other.originLeft != -1 {
-			oLeft = findItemIdxAtLV(doc.items, other.originLeft)
+			oLeft = findItemIdxAtLV(doc, other.originLeft)
 		}
 
 		oRight := doc.items.Size()
 		if other.originRight != -1 {
-			oRight = findItemIdxAtLV(doc.items, other.originRight)
+			oRight = findItemIdxAtLV(doc, other.originRight)
 		}
 
 		newItemAgent := log.ops[newItem.lv].id.agent
@@ -171,16 +225,19 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	}
 }
 
-func findByCurrentPos(items *bxtree.BxTree[*crdtItem], targetPos int) (int, int) {
+func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
+	if targetPos == 0 {
+		return 0, 0
+	}
+
 	curPos := 0
 	endPos := 0
 	idx := 0
-
 	for ; curPos < targetPos; idx++ {
-		if idx >= items.Size() {
+		if idx >= doc.items.Size() {
 			panic("Past end of items list")
 		}
-		itemPtr, _ := items.GetAt(idx)
+		itemPtr, _ := doc.items.GetAt(idx)
 		item := *itemPtr
 		if item.curState == stateInserted {
 			curPos++
@@ -192,11 +249,11 @@ func findByCurrentPos(items *bxtree.BxTree[*crdtItem], targetPos int) (int, int)
 	return idx, endPos
 }
 
-func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T], opLV lv) {
+func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct{}], opLV lv) {
 	o := log.ops[opLV]
 
 	if o.opType == opTypeDel {
-		idx, endPos := findByCurrentPos(doc.items, o.pos)
+		idx, endPos := findByCurrentPos(doc, o.pos)
 
 		for {
 			itemPtr, _ := doc.items.GetAt(idx)
@@ -220,13 +277,18 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T], opLV 
 					panic("Snapshot delete failed")
 				}
 			}
+			// UPDATE SUMMARY
+			item.node.UpdateSummaryUpwards(crdtSummary{0, -1}, doc.items)
 		}
 
 		item.curState = 1 // Deleted(1)
+		// UPDATE SUMMARY
+		item.node.UpdateSummaryUpwards(crdtSummary{-1, 0}, doc.items)
+
 		doc.delTargets[opLV] = item.lv
 
 	} else {
-		idx, endPos := findByCurrentPos(doc.items, o.pos)
+		idx, endPos := findByCurrentPos(doc, o.pos)
 
 		if idx >= 1 {
 			prevPtr, _ := doc.items.GetAt(idx - 1)
@@ -264,7 +326,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T], opLV 
 	}
 }
 
-func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.BxTree[T]) {
+func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.BxTree[T, struct{}]) {
 	o := log.ops[opLV]
 	diffRes := diff(log, doc.currentVersion, o.parents)
 
@@ -279,15 +341,19 @@ func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.
 	doc.currentVersion = []lv{opLV}
 }
 
-func checkout[T any](log *opLog[T]) *bxtree.BxTree[T] {
+func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 	doc := &crdtDoc{
-		items:          bxtree.New[*crdtItem](),
+		items:          bxtree.New[*crdtItem, crdtSummary](),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
 	}
+	doc.items.SummaryConfig = crdtSummaryConfig
+	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+		item.node = node
+	}
 
-	snapshot := bxtree.New[T]()
+	snapshot := bxtree.New[T, struct{}]()
 
 	for i := 0; i < len(log.ops); i++ {
 		do1Operation(doc, log, lv(i), snapshot)
@@ -403,7 +469,7 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 
 func newBranch[T any]() *branch[T] {
 	return &branch[T]{
-		snapshot: bxtree.New[T](),
+		snapshot: bxtree.New[T, struct{}](),
 		frontier: []lv{},
 	}
 }
@@ -416,10 +482,14 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 	visit := findOpsToVisit(log, b.frontier, mergeFrontier)
 
 	doc := &crdtDoc{
-		items:          bxtree.New[*crdtItem](),
+		items:          bxtree.New[*crdtItem, crdtSummary](),
 		currentVersion: visit.commonVersion,
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
+	}
+	doc.items.SummaryConfig = crdtSummaryConfig
+	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+		item.node = node
 	}
 
 	maxFrontier := -1

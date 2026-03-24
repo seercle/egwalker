@@ -1,23 +1,36 @@
 package bxtree
 
-var (
-	InternalMinSize = 16
-	InternalMaxSize = 32
-	LeafMinSize     = 64
-	LeafMaxSize     = 128
+const (
+	DefaultInternalMinSize = 16
+	DefaultInternalMaxSize = 32
+	DefaultLeafMinSize     = 64
+	DefaultLeafMaxSize     = 128
 )
 
-type node[T any] struct {
+type Node[T any, S any] struct {
 	isLeaf   bool
-	parent   *node[T]
+	parent   *Node[T, S]
 	size     int
-	items    []T        // only for leaf nodes
-	next     *node[T]   // only for leaf nodes
-	children []*node[T] // only for internal nodes
+	Summary  S
+	Items    []T           // only for leaf nodes
+	next     *Node[T, S]   // only for leaf nodes
+	children []*Node[T, S] // only for internal nodes
 }
 
-type BxTree[T any] struct {
-	root  *node[T]
-	first *node[T]
-	last  *node[T]
+type SummaryConfig[T any, S any] struct {
+	FromItem func(item T) S
+	Add      func(a, b S) S
+	Sub      func(a, b S) S
+}
+
+type BxTree[T any, S any] struct {
+	Root            *Node[T, S]
+	First           *Node[T, S]
+	Last            *Node[T, S]
+	internalMinSize int
+	internalMaxSize int
+	leafMinSize     int
+	leafMaxSize     int
+	OnItemMoved     func(item T, node *Node[T, S])
+	SummaryConfig   *SummaryConfig[T, S]
 }

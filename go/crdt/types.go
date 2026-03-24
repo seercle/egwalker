@@ -52,10 +52,13 @@ type crdtItem struct {
 	originRight lv // -1 if none
 	deleted     bool
 	curState    int
+	node        *bxtree.Node[*crdtItem, crdtSummary]
 }
 
+type crdtSummary [2]int
+
 type crdtDoc struct {
-	items          *bxtree.BxTree[*crdtItem]
+	items          *bxtree.BxTree[*crdtItem, crdtSummary]
 	currentVersion []lv
 	delTargets     map[lv]lv        // Map op_lv (delete op) -> target_lv
 	itemsByLV      map[lv]*crdtItem // Map lv -> crdt_item
@@ -73,7 +76,7 @@ type mergePoint struct {
 }
 
 type branch[T any] struct {
-	snapshot *bxtree.BxTree[T]
+	snapshot *bxtree.BxTree[T, struct{}]
 	frontier []lv
 }
 

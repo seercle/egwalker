@@ -9,7 +9,7 @@ import (
 func TestBxTree_RandomOperations(t *testing.T) {
 	seed := int64(42)
 	rng := rand.New(rand.NewSource(seed))
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	var mirror []int
 
 	for i := 0; i < 5000; i++ {
@@ -66,7 +66,7 @@ func TestBxTree_RandomOperations(t *testing.T) {
 }
 
 func TestBxTree_BulkInsertDelete(t *testing.T) {
-	tree := New[int]()
+	tree := New[int, struct{}]()
 	count := 1000
 	items := make([]int, count)
 	for i := 0; i < count; i++ {
@@ -124,7 +124,7 @@ func TestBxTree_BoundaryStability(t *testing.T) {
 	// but since they are constants in types.go, we just push enough data
 	// to ensure depth > 1.
 
-	tree := New[string]()
+	tree := New[string, struct{}]()
 
 	// Prepend many items
 	for i := 0; i < 1000; i++ {
@@ -148,12 +148,12 @@ func TestBxTree_BoundaryStability(t *testing.T) {
 	}
 
 	// Verify linked list integrity
-	curr := tree.first
+	curr := tree.First
 	visitedCount := 0
 	for curr != nil {
-		visitedCount += len(curr.items)
-		if curr.next == nil && curr != tree.last {
-			t.Error("Reached end of list but tree.last is not set to this node")
+		visitedCount += len(curr.Items)
+		if curr.next == nil && curr != tree.Last {
+			t.Error("Reached end of list but tree.Last is not set to this node")
 		}
 		curr = curr.next
 	}
