@@ -170,43 +170,54 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 
 	scanning := false
 
-	for scanIdx < right {
-		otherPtr, _ := doc.items.GetAt(scanIdx)
-		other := *otherPtr
-
-		if other.curState != stateNotYetInserted {
-			break
+	if scanIdx < right {
+		node, pos, err := doc.items.GetAtNode(scanIdx)
+		if err != nil {
+			panic("GetAtNode failed")
 		}
 
-		oLeft := -1
-		if other.originLeft != -1 {
-			oLeft = findItemIdxAtLV(doc, other.originLeft)
-		}
+		for scanIdx < right {
+			other := node.Items[pos]
 
-		oRight := doc.items.Size()
-		if other.originRight != -1 {
-			oRight = findItemIdxAtLV(doc, other.originRight)
-		}
+			if other.curState != stateNotYetInserted {
+				break
+			}
 
-		newItemAgent := log.ops[newItem.lv].id.agent
-		otherAgent := log.ops[other.lv].id.agent
+			oLeft := -1
+			if other.originLeft != -1 {
+				oLeft = findItemIdxAtLV(doc, other.originLeft)
+			}
 
-		if oLeft < left || (oLeft == left && oRight == right && newItemAgent < otherAgent) {
-			break
-		}
+			oRight := doc.items.Size()
+			if other.originRight != -1 {
+				oRight = findItemIdxAtLV(doc, other.originRight)
+			}
 
-		if oLeft == left {
-			scanning = oRight < right
-		}
+			newItemAgent := log.ops[newItem.lv].id.agent
+			otherAgent := log.ops[other.lv].id.agent
 
-		if !other.deleted {
-			scanEndPos++
-		}
-		scanIdx++
+			if oLeft < left || (oLeft == left && oRight == right && newItemAgent < otherAgent) {
+				break
+			}
 
-		if !scanning {
-			idx = scanIdx
-			endPos = scanEndPos
+			if oLeft == left {
+				scanning = oRight < right
+			}
+
+			if !other.deleted {
+				scanEndPos++
+			}
+			scanIdx++
+			pos++
+			if pos >= len(node.Items) {
+				node = node.Next()
+				pos = 0
+			}
+
+			if !scanning {
+				idx = scanIdx
+				endPos = scanEndPos
+			}
 		}
 	}
 
@@ -230,23 +241,20 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
 		return 0, 0
 	}
 
-	curPos := 0
-	endPos := 0
-	idx := 0
-	for ; curPos < targetPos; idx++ {
-		if idx >= doc.items.Size() {
-			panic("Past end of items list")
+	node, posInNode, acc := doc.items.FindPath(func(acc crdtSummary, cur crdtSummary) bool {
+		return acc[0]+cur[0] >= targetPos
+	})
+
+	if node == nil {
+		if doc.items.Root == nil {
+			return 0, 0
 		}
-		itemPtr, _ := doc.items.GetAt(idx)
-		item := *itemPtr
-		if item.curState == stateInserted {
-			curPos++
-		}
-		if !item.deleted {
-			endPos++
-		}
+		return doc.items.Size(), doc.items.Root.Summary[1]
 	}
-	return idx, endPos
+
+	item := node.Items[posInNode]
+	m := crdtSummaryConfig.FromItem(item)
+	return node.Index() + posInNode + 1, acc[1] + m[1]
 }
 
 func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct{}], opLV lv) {
@@ -255,15 +263,26 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 	if o.opType == opTypeDel {
 		idx, endPos := findByCurrentPos(doc, o.pos)
 
-		for {
-			itemPtr, _ := doc.items.GetAt(idx)
-			if (*itemPtr).curState == stateInserted {
-				break
+		node, pos, err := doc.items.GetAtNode(idx)
+		if err == nil {
+			for {
+				item := node.Items[pos]
+				if item.curState == stateInserted {
+					break
+				}
+				if !item.deleted {
+					endPos++
+				}
+				idx++
+				pos++
+				if pos >= len(node.Items) {
+					node = node.Next()
+					pos = 0
+					if node == nil {
+						break
+					}
+				}
 			}
-			if !(*itemPtr).deleted {
-				endPos++
-			}
-			idx++
 		}
 
 		itemPtr, _ := doc.items.GetAt(idx)

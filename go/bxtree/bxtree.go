@@ -69,6 +69,10 @@ func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
 	return &leaf.Items[pos], nil
 }
 
+func (tree *BxTree[T, S]) GetAtNode(index int) (*Node[T, S], int, error) {
+	return tree.getAt(index)
+}
+
 func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 	if index < 0 || index >= tree.Size() {
 		return nil, -1, ErrIndexOutOfBounds
@@ -96,6 +100,14 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 		}
 	}
 	return curr, index, nil
+}
+
+func (n *Node[T, S]) IsLeaf() bool {
+	return n.isLeaf
+}
+
+func (n *Node[T, S]) Next() *Node[T, S] {
+	return n.next
 }
 
 func (tree *BxTree[T, S]) InsertRange(index int, items []T) error {
