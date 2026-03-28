@@ -3,6 +3,7 @@ package bxtree
 import (
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -118,7 +119,7 @@ func TestInsert(t *testing.T) {
 	tree := New[int, struct{}]()
 
 	t.Run("Sequential", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			if err := tree.InsertAt(i, i); err != nil {
 				t.Fatalf("InsertAt(%d) failed: %v", i, err)
 			}
@@ -130,7 +131,7 @@ func TestInsert(t *testing.T) {
 
 	t.Run("Prepend", func(t *testing.T) {
 		tree := New[int, struct{}]()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			tree.InsertAt(0, i)
 		}
 		val, _ := tree.GetAt(0)
@@ -172,7 +173,7 @@ func TestDelete(t *testing.T) {
 
 	t.Run("Range", func(t *testing.T) {
 		tree := New[int, struct{}]()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			tree.InsertAt(i, i)
 		}
 		tree.DeleteRange(10, 80) // Keep [0-9] and [90-99]
@@ -199,7 +200,7 @@ func TestPointers(t *testing.T) {
 	tree := New[int, struct{}]()
 	count := 1000 // Enough to cause multiple splits
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tree.InsertAt(tree.Size(), i)
 	}
 
@@ -237,7 +238,7 @@ func TestSummary(t *testing.T) {
 	tree.SummaryConfig = setupCountSummary()
 
 	// Initial inserts
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		tree.InsertAt(i, i*10)
 	}
 
@@ -294,14 +295,7 @@ func TestOnItemMoved(t *testing.T) {
 		if it.node == nil {
 			t.Fatalf("Item %d has nil node pointer", i)
 		}
-		found := false
-		for _, nodeItem := range it.node.Items() {
-			if nodeItem == it {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(it.node.Items(), it) {
 			t.Fatalf("Item %d pointer to node %p is incorrect; item not found in node", i, it.node)
 		}
 	}
@@ -311,14 +305,7 @@ func TestOnItemMoved(t *testing.T) {
 
 	// Verify again
 	tree.ForEach(func(it *item) {
-		found := false
-		for _, nodeItem := range it.node.Items() {
-			if nodeItem == it {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(it.node.Items(), it) {
 			t.Errorf("Item %d pointer to node %p is incorrect after rebalancing", it.id, it.node)
 		}
 	})
@@ -330,7 +317,7 @@ func TestStressRandom(t *testing.T) {
 	tree := New[int, struct{}]()
 	var mirror []int
 
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		op := rng.Intn(3)
 		if len(mirror) == 0 {
 			op = 0
@@ -389,7 +376,7 @@ func TestForEach(t *testing.T) {
 
 func TestIterator(t *testing.T) {
 	tree := New[int, struct{}]()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		tree.InsertAt(i, i)
 	}
 

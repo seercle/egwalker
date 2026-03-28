@@ -53,10 +53,7 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 	var prevLeaf *Node[T, S]
 
 	for i := 0; i < len(items); i += tree.leafMaxSize {
-		end := i + tree.leafMaxSize
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(i+tree.leafMaxSize, len(items))
 
 		leaf := &Node[T, S]{
 			isLeaf: true,
@@ -100,10 +97,7 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 	for len(currentLevel) > 1 {
 		var nextLevel []*Node[T, S]
 		for i := 0; i < len(currentLevel); i += tree.internalMaxSize {
-			end := i + tree.internalMaxSize
-			if end > len(currentLevel) {
-				end = len(currentLevel)
-			}
+			end := min(i+tree.internalMaxSize, len(currentLevel))
 
 			n := &Node[T, S]{
 				isLeaf:   false,

@@ -51,7 +51,7 @@ func verifyTree[T any, S any](t *testing.T, tree *BxTree[T, S], expected []T) {
 
 	// 4. Verify tree structure (internal consistency)
 	if tree.Root() != nil {
-		verifyNode(t, tree.Root(), nil, tree)
+		verifyNode(t, tree.Root(), tree)
 	}
 
 	// 5. Verify Leaf pointers (First -> next -> ... -> Last)
@@ -80,11 +80,8 @@ func verifyTree[T any, S any](t *testing.T, tree *BxTree[T, S], expected []T) {
 	}
 }
 
-func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], tree *BxTree[T, S]) int {
+func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) int {
 	t.Helper()
-
-	// We can't check n.parent because it's private.
-	// But we can check internal consistency during recursion.
 
 	size := 0
 	var summary S
@@ -105,7 +102,7 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], t
 		}
 	} else {
 		for _, child := range n.Children() {
-			childSize := verifyNode(t, child, n, tree)
+			childSize := verifyNode(t, child, tree)
 			size += childSize
 			if tree.SummaryConfig != nil {
 				if first {
@@ -132,7 +129,7 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], t
 func TestFuzzTree(t *testing.T) {
 	seedCount := 50
 	for _, withSummary := range []bool{true, false} {
-		for seed := 0; seed < seedCount; seed++ {
+		for seed := range seedCount {
 			src := rand.NewSource(int64(seed))
 			r := rand.New(src)
 
@@ -145,7 +142,7 @@ func TestFuzzTree(t *testing.T) {
 			}
 			var reference []int
 
-			for op := 0; op < 200; op++ {
+			for op := range 200 {
 				length := len(reference)
 
 				if length == 0 || r.Float64() < 0.7 {
