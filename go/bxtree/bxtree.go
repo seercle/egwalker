@@ -371,7 +371,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 		copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 		copy(leaf.items[pos:], newItems)
 
-		leaf.addSizeUpward(len(newItems))
+		leaf.sizeAddUpward(len(newItems))
 
 		if tree.SummaryConfig != nil {
 			var totalDelta S
@@ -408,7 +408,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 	copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 	copy(leaf.items[pos:], newItems)
 
-	leaf.addSizeUpward(len(newItems))
+	leaf.sizeAddUpward(len(newItems))
 
 	if tree.SummaryConfig != nil {
 		var totalDelta S
@@ -602,7 +602,7 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 			leaf.SummaryAddUpward(tree.SummaryConfig.Sub(S(*new(S)), totalDelta), tree)
 		}
 
-		leaf.addSizeUpward(-canDelete)
+		leaf.sizeAddUpward(-canDelete)
 		leaf.items = append(leaf.items[:pos], leaf.items[pos+canDelete:]...)
 		leaf.size = len(leaf.items)
 
@@ -790,9 +790,9 @@ func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	}
 }
 
-func (n *Node[T, S]) addSizeUpward(delta int) {
+func (n *Node[T, S]) sizeAddUpward(delta int) {
 	if n == nil {
-		panic("bxtree: addSizeUpward called on nil node")
+		panic("bxtree: sizeAddUpward called on nil node")
 	}
 	curr := n
 	for curr != nil {
