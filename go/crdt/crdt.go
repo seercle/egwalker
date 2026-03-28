@@ -68,24 +68,28 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 // CRDT Logic (Internal)
 // ==========================================
 
-var crdtSummaryConfig = &bxtree.Summary[*crdtItem, crdtSummary]{
-	FromItem: func(item *crdtItem) crdtSummary {
-		m := crdtSummary{0, 0}
-		if item.curState == stateInserted {
-			m[0] = 1
-		}
-		if !item.deleted {
-			m[1] = 1
-		}
-		return m
-	},
-	Add: func(a, b crdtSummary) crdtSummary {
-		return crdtSummary{a[0] + b[0], a[1] + b[1]}
-	},
-	Sub: func(a, b crdtSummary) crdtSummary {
-		return crdtSummary{a[0] - b[0], a[1] - b[1]}
-	},
+type crdtSummarizer struct{}
+
+func (s crdtSummarizer) FromItem(item *crdtItem) crdtSummary {
+	m := crdtSummary{0, 0}
+	if item.curState == stateInserted {
+		m[0] = 1
+	}
+	if !item.deleted {
+		m[1] = 1
+	}
+	return m
 }
+
+func (s crdtSummarizer) Add(a, b crdtSummary) crdtSummary {
+	return crdtSummary{a[0] + b[0], a[1] + b[1]}
+}
+
+func (s crdtSummarizer) Sub(a, b crdtSummary) crdtSummary {
+	return crdtSummary{a[0] - b[0], a[1] - b[1]}
+}
+
+var crdtSummaryConfig = crdtSummarizer{}
 
 func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	o := log.ops[opLV]
@@ -365,7 +369,7 @@ func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
 	}
-	doc.items.Summary = crdtSummaryConfig
+	doc.items.Summarizer = crdtSummaryConfig
 	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 		item.node = node
 	}
@@ -504,7 +508,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
 	}
-	doc.items.Summary = crdtSummaryConfig
+	doc.items.Summarizer = crdtSummaryConfig
 	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 		item.node = node
 	}

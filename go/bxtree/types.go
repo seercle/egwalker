@@ -31,10 +31,12 @@ func (n *Node[T, S]) Items() []T {
 	return n.items
 }
 
-type Summary[T any, S any] struct {
-	FromItem func(item T) S
-	Add      func(a, b S) S
-	Sub      func(a, b S) S
+// Summarizer defines the interface for maintaining tree-wide summaries.
+// T is the type of items in the tree, and S is the type of the summary.
+type Summarizer[T any, S any] interface {
+	FromItem(item T) S
+	Add(a, b S) S
+	Sub(a, b S) S
 }
 
 type Config struct {
@@ -53,7 +55,7 @@ type BxTree[T any, S any] struct {
 	leafMinSize     int
 	leafMaxSize     int
 	OnItemMoved     func(item T, node *Node[T, S])
-	Summary         *Summary[T, S]
+	Summarizer      Summarizer[T, S]
 }
 
 func (tree *BxTree[T, S]) Root() *Node[T, S] {

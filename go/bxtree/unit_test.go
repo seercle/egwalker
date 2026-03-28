@@ -8,12 +8,14 @@ import (
 )
 
 // Helpers
-func setupCountSummary() *Summary[int, int] {
-	return &Summary[int, int]{
-		FromItem: func(item int) int { return 1 },
-		Add:      func(a, b int) int { return a + b },
-		Sub:      func(a, b int) int { return a - b },
-	}
+type countSummarizer struct{}
+
+func (s countSummarizer) FromItem(item int) int { return 1 }
+func (s countSummarizer) Add(a, b int) int      { return a + b }
+func (s countSummarizer) Sub(a, b int) int      { return a - b }
+
+func setupCountSummary() Summarizer[int, int] {
+	return countSummarizer{}
 }
 
 func TestNew(t *testing.T) {
@@ -306,7 +308,7 @@ func TestPointers(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	tree := New[int, int]()
-	tree.Summary = setupCountSummary()
+	tree.Summarizer = setupCountSummary()
 
 	// Initial inserts
 	for i := range 100 {
