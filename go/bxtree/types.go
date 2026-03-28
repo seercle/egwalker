@@ -14,6 +14,7 @@ type Node[T any, S any] struct {
 	Summary  S
 	Items    []T           // only for leaf nodes
 	next     *Node[T, S]   // only for leaf nodes
+	prev     *Node[T, S]   // only for leaf nodes
 	children []*Node[T, S] // only for internal nodes
 }
 

@@ -374,3 +374,51 @@ func TestForEach(t *testing.T) {
 		}
 	})
 }
+
+func TestIterator(t *testing.T) {
+	tree := New[int, struct{}]()
+	for i := 0; i < 100; i++ {
+		tree.InsertAt(i, i)
+	}
+
+	t.Run("All", func(t *testing.T) {
+		idx := 0
+		for item := range tree.All() {
+			if item != idx {
+				t.Fatalf("Expected %d, got %d", idx, item)
+			}
+			idx++
+		}
+		if idx != 100 {
+			t.Errorf("Expected 100 items, got %d", idx)
+		}
+	})
+
+	t.Run("Reverse", func(t *testing.T) {
+		idx := 99
+		count := 0
+		for item := range tree.Reverse() {
+			if item != idx {
+				t.Fatalf("Expected %d, got %d", idx, item)
+			}
+			idx--
+			count++
+		}
+		if count != 100 {
+			t.Errorf("Expected 100 items, got %d", count)
+		}
+	})
+
+	t.Run("Break", func(t *testing.T) {
+		count := 0
+		for item := range tree.All() {
+			if item == 10 {
+				break
+			}
+			count++
+		}
+		if count != 10 {
+			t.Errorf("Expected 10 items before break, got %d", count)
+		}
+	})
+}

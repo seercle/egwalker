@@ -1,6 +1,9 @@
 package bxtree
 
-import "fmt"
+import (
+	"fmt"
+	"iter"
+)
 
 func New[T any, S any]() *BxTree[T, S] {
 	return &BxTree[T, S]{
@@ -55,6 +58,7 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 
 		if prevLeaf != nil {
 			prevLeaf.next = leaf
+			leaf.prev = prevLeaf
 		} else {
 			tree.First = leaf
 		}
@@ -118,13 +122,39 @@ func (tree *BxTree[T, S]) Size() int {
 	return tree.Root.size
 }
 
-func (tree *BxTree[T, S]) ForEach(f func(item T)) {
-	curr := tree.First
-	for curr != nil {
-		for _, item := range curr.Items {
-			f(item)
+// All returns an iterator over all items in the tree in order.
+func (tree *BxTree[T, S]) All() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		curr := tree.First
+		for curr != nil {
+			for _, item := range curr.Items {
+				if !yield(item) {
+					return
+				}
+			}
+			curr = curr.next
 		}
-		curr = curr.next
+	}
+}
+
+// Reverse returns an iterator over all items in the tree in reverse order.
+func (tree *BxTree[T, S]) Reverse() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		curr := tree.Last
+		for curr != nil {
+			for i := len(curr.Items) - 1; i >= 0; i-- {
+				if !yield(curr.Items[i]) {
+					return
+				}
+			}
+			curr = curr.prev
+		}
+	}
+}
+
+func (tree *BxTree[T, S]) ForEach(f func(item T)) {
+	for item := range tree.All() {
+		f(item)
 	}
 }
 
@@ -338,6 +368,10 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 
 		right.next = n.next
 		n.next = right
+		right.prev = n
+		if right.next != nil {
+			right.next.prev = right
+		}
 		if tree.Last == n {
 			tree.Last = right
 		}
@@ -567,6 +601,9 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 			left.Summary = tree.SummaryConfig.Add(left.Summary, right.Summary)
 		}
 		left.next = right.next
+		if left.next != nil {
+			left.next.prev = left
+		}
 		if tree.Last == right {
 			tree.Last = left
 		}
