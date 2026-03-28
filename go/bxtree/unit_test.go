@@ -8,8 +8,8 @@ import (
 )
 
 // Helpers
-func setupCountSummary() *SummaryConfig[int, int] {
-	return &SummaryConfig[int, int]{
+func setupCountSummary() *Summary[int, int] {
+	return &Summary[int, int]{
 		FromItem: func(item int) int { return 1 },
 		Add:      func(a, b int) int { return a + b },
 		Sub:      func(a, b int) int { return a - b },
@@ -306,7 +306,7 @@ func TestPointers(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	tree := New[int, int]()
-	tree.SummaryConfig = setupCountSummary()
+	tree.Summary = setupCountSummary()
 
 	// Initial inserts
 	for i := range 100 {

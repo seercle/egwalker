@@ -68,7 +68,7 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 // CRDT Logic (Internal)
 // ==========================================
 
-var crdtSummaryConfig = &bxtree.SummaryConfig[*crdtItem, crdtSummary]{
+var crdtSummaryConfig = &bxtree.Summary[*crdtItem, crdtSummary]{
 	FromItem: func(item *crdtItem) crdtSummary {
 		m := crdtSummary{0, 0}
 		if item.curState == stateInserted {
@@ -365,7 +365,7 @@ func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
 	}
-	doc.items.SummaryConfig = crdtSummaryConfig
+	doc.items.Summary = crdtSummaryConfig
 	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 		item.node = node
 	}
@@ -504,7 +504,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
 	}
-	doc.items.SummaryConfig = crdtSummaryConfig
+	doc.items.Summary = crdtSummaryConfig
 	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 		item.node = node
 	}

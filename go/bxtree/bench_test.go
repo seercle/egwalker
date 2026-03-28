@@ -147,14 +147,14 @@ func BenchmarkSummaryOverhead(b *testing.B) {
 	})
 
 	b.Run("WithSummary", func(b *testing.B) {
-		config := &SummaryConfig[int, int]{
+		config := &Summary[int, int]{
 			FromItem: func(i int) int { return 1 },
 			Add:      func(a, b int) int { return a + b },
 			Sub:      func(a, b int) int { return a - b },
 		}
 		for b.Loop() {
 			tree := New[int, int]()
-			tree.SummaryConfig = config
+			tree.Summary = config
 			for i := range size {
 				tree.InsertAt(i, i)
 			}

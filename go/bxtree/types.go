@@ -31,7 +31,7 @@ func (n *Node[T, S]) Items() []T {
 	return n.items
 }
 
-type SummaryConfig[T any, S any] struct {
+type Summary[T any, S any] struct {
 	FromItem func(item T) S
 	Add      func(a, b S) S
 	Sub      func(a, b S) S
@@ -53,7 +53,7 @@ type BxTree[T any, S any] struct {
 	leafMinSize     int
 	leafMaxSize     int
 	OnItemMoved     func(item T, node *Node[T, S])
-	SummaryConfig   *SummaryConfig[T, S]
+	Summary         *Summary[T, S]
 }
 
 func (tree *BxTree[T, S]) Root() *Node[T, S] {
