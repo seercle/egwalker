@@ -3,7 +3,6 @@ package bxtree
 import (
 	"math/rand"
 	"reflect"
-	"slices"
 	"testing"
 )
 
@@ -21,7 +20,7 @@ func TestNew(t *testing.T) {
 	if tree.Size() != 0 {
 		t.Errorf("New tree should have size 0, got %d", tree.Size())
 	}
-	if tree.Root != nil || tree.First != nil || tree.Last != nil {
+	if tree.Root() != nil || tree.First() != nil || tree.Last() != nil {
 		t.Error("New tree should have nil pointers")
 	}
 }
@@ -48,8 +47,8 @@ func TestNewFromSlice(t *testing.T) {
 			t.Errorf("Expected size %d, got %d", size, tree.Size())
 		}
 
-		if tree.Root.Summary != size {
-			t.Errorf("Expected root summary %d, got %d", size, tree.Root.Summary)
+		if tree.Root().Summary() != size {
+			t.Errorf("Expected root summary %d, got %d", size, tree.Root().Summary())
 		}
 
 		// Verify structure
@@ -62,7 +61,7 @@ func TestNewFromSlice(t *testing.T) {
 		})
 
 		// Verify pointers
-		if tree.First == nil || tree.Last == nil {
+		if tree.First() == nil || tree.Last() == nil {
 			t.Fatal("First/Last pointers should be set")
 		}
 	})
@@ -119,7 +118,7 @@ func TestInsert(t *testing.T) {
 	tree := New[int, struct{}]()
 
 	t.Run("Sequential", func(t *testing.T) {
-		for i := range 100 {
+		for i := 0; i < 100; i++ {
 			if err := tree.InsertAt(i, i); err != nil {
 				t.Fatalf("InsertAt(%d) failed: %v", i, err)
 			}
@@ -131,7 +130,7 @@ func TestInsert(t *testing.T) {
 
 	t.Run("Prepend", func(t *testing.T) {
 		tree := New[int, struct{}]()
-		for i := range 100 {
+		for i := 0; i < 100; i++ {
 			tree.InsertAt(0, i)
 		}
 		val, _ := tree.GetAt(0)
@@ -158,7 +157,7 @@ func TestInsert(t *testing.T) {
 func TestDelete(t *testing.T) {
 	t.Run("Single", func(t *testing.T) {
 		tree := New[int, struct{}]()
-		for i := range 10 {
+		for i := 0; i < 10; i++ {
 			tree.InsertAt(i, i)
 		}
 		tree.DeleteAt(5) // Remove 5
@@ -173,7 +172,7 @@ func TestDelete(t *testing.T) {
 
 	t.Run("Range", func(t *testing.T) {
 		tree := New[int, struct{}]()
-		for i := range 100 {
+		for i := 0; i < 100; i++ {
 			tree.InsertAt(i, i)
 		}
 		tree.DeleteRange(10, 80) // Keep [0-9] and [90-99]
@@ -190,7 +189,7 @@ func TestDelete(t *testing.T) {
 		tree := New[int, struct{}]()
 		tree.InsertAt(0, 1)
 		tree.DeleteAt(0)
-		if tree.Size() != 0 || tree.Root != nil {
+		if tree.Size() != 0 || tree.Root() != nil {
 			t.Error("Tree should be completely empty after deleting last item")
 		}
 	})
@@ -200,34 +199,34 @@ func TestPointers(t *testing.T) {
 	tree := New[int, struct{}]()
 	count := 1000 // Enough to cause multiple splits
 
-	for i := range count {
+	for i := 0; i < count; i++ {
 		tree.InsertAt(tree.Size(), i)
 	}
 
-	if tree.First == nil || tree.Last == nil {
+	if tree.First() == nil || tree.Last() == nil {
 		t.Fatal("First/Last pointers should not be nil")
 	}
 
 	// Forward traversal
-	curr := tree.First
+	curr := tree.First()
 	visited := 0
 	for curr != nil {
-		if !curr.isLeaf {
+		if !curr.IsLeaf() {
 			t.Error("Leaf chain contains internal node")
 		}
-		visited += len(curr.Items)
-		if curr.next == nil && curr != tree.Last {
+		visited += len(curr.Items())
+		if curr.Next() == nil && curr != tree.Last() {
 			t.Error("Last node in chain is not tree.Last")
 		}
-		curr = curr.next
+		curr = curr.Next()
 	}
 	if visited != count {
 		t.Errorf("Forward traversal visited %d items, want %d", visited, count)
 	}
 
 	// Boundary values
-	firstVal := tree.First.Items[0]
-	lastVal := tree.Last.Items[len(tree.Last.Items)-1]
+	firstVal := tree.First().Items()[0]
+	lastVal := tree.Last().Items()[len(tree.Last().Items())-1]
 	if firstVal != 0 || lastVal != count-1 {
 		t.Errorf("Boundary values mismatch: first=%d, last=%d", firstVal, lastVal)
 	}
@@ -238,40 +237,40 @@ func TestSummary(t *testing.T) {
 	tree.SummaryConfig = setupCountSummary()
 
 	// Initial inserts
-	for i := range 100 {
+	for i := 0; i < 100; i++ {
 		tree.InsertAt(i, i*10)
 	}
 
-	if tree.Root.Summary != 100 {
-		t.Errorf("Root summary mismatch after inserts: got %d, want 100", tree.Root.Summary)
+	if tree.Root().Summary() != 100 {
+		t.Errorf("Root summary mismatch after inserts: got %d, want 100", tree.Root().Summary())
 	}
 
 	// Deletions
 	tree.DeleteRange(0, 10)
-	if tree.Root.Summary != 90 {
-		t.Errorf("Root summary mismatch after delete: got %d, want 90", tree.Root.Summary)
+	if tree.Root().Summary() != 90 {
+		t.Errorf("Root summary mismatch after delete: got %d, want 90", tree.Root().Summary())
 	}
 
 	// Check internal nodes (recursive)
 	var verifyNodeSummary func(*Node[int, int])
 	verifyNodeSummary = func(n *Node[int, int]) {
-		if n.isLeaf {
-			expected := len(n.Items)
-			if n.Summary != expected {
-				t.Errorf("Leaf node summary mismatch: got %d, want %d", n.Summary, expected)
+		if n.IsLeaf() {
+			expected := len(n.Items())
+			if n.Summary() != expected {
+				t.Errorf("Leaf node summary mismatch: got %d, want %d", n.Summary(), expected)
 			}
 		} else {
 			sum := 0
-			for _, child := range n.children {
+			for _, child := range n.Children() {
 				verifyNodeSummary(child)
-				sum += child.Summary
+				sum += child.Summary()
 			}
-			if n.Summary != sum {
-				t.Errorf("Internal node summary mismatch: got %d, want %d", n.Summary, sum)
+			if n.Summary() != sum {
+				t.Errorf("Internal node summary mismatch: got %d, want %d", n.Summary(), sum)
 			}
 		}
 	}
-	verifyNodeSummary(tree.Root)
+	verifyNodeSummary(tree.Root())
 }
 
 func TestOnItemMoved(t *testing.T) {
@@ -280,10 +279,9 @@ func TestOnItemMoved(t *testing.T) {
 		node *Node[*item, struct{}]
 	}
 
-	tree := New[*item, struct{}]()
-	tree.OnItemMoved = func(it *item, n *Node[*item, struct{}]) {
+	tree := NewFromSlice[*item, struct{}](nil, nil, func(it *item, n *Node[*item, struct{}]) {
 		it.node = n
-	}
+	})
 
 	items := make([]*item, 200)
 	for i := range items {
@@ -296,7 +294,14 @@ func TestOnItemMoved(t *testing.T) {
 		if it.node == nil {
 			t.Fatalf("Item %d has nil node pointer", i)
 		}
-		if !slices.Contains(it.node.Items, it) {
+		found := false
+		for _, nodeItem := range it.node.Items() {
+			if nodeItem == it {
+				found = true
+				break
+			}
+		}
+		if !found {
 			t.Fatalf("Item %d pointer to node %p is incorrect; item not found in node", i, it.node)
 		}
 	}
@@ -306,7 +311,14 @@ func TestOnItemMoved(t *testing.T) {
 
 	// Verify again
 	tree.ForEach(func(it *item) {
-		if !slices.Contains(it.node.Items, it) {
+		found := false
+		for _, nodeItem := range it.node.Items() {
+			if nodeItem == it {
+				found = true
+				break
+			}
+		}
+		if !found {
 			t.Errorf("Item %d pointer to node %p is incorrect after rebalancing", it.id, it.node)
 		}
 	})
@@ -318,7 +330,7 @@ func TestStressRandom(t *testing.T) {
 	tree := New[int, struct{}]()
 	var mirror []int
 
-	for range 5000 {
+	for i := 0; i < 5000; i++ {
 		op := rng.Intn(3)
 		if len(mirror) == 0 {
 			op = 0

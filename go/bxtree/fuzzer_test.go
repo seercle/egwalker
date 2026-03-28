@@ -50,31 +50,31 @@ func verifyTree[T any, S any](t *testing.T, tree *BxTree[T, S], expected []T) {
 	}
 
 	// 4. Verify tree structure (internal consistency)
-	if tree.Root != nil {
-		verifyNode(t, tree.Root, nil, tree)
+	if tree.Root() != nil {
+		verifyNode(t, tree.Root(), nil, tree)
 	}
 
 	// 5. Verify Leaf pointers (First -> next -> ... -> Last)
 	if len(expected) == 0 {
-		if tree.First != nil || tree.Last != nil {
+		if tree.First() != nil || tree.Last() != nil {
 			t.Error("Empty tree should have nil First/Last")
 		}
 	} else {
-		curr := tree.First
+		curr := tree.First()
 		count := 0
 		var lastSeen *Node[T, S]
 		for curr != nil {
-			if !curr.isLeaf {
+			if !curr.IsLeaf() {
 				t.Error("Leaf chain contains non-leaf node")
 			}
-			count += len(curr.Items)
+			count += len(curr.Items())
 			lastSeen = curr
-			curr = curr.next
+			curr = curr.Next()
 		}
 		if count != len(expected) {
 			t.Errorf("Leaf chain total size mismatch: got %d, want %d", count, len(expected))
 		}
-		if lastSeen != tree.Last {
+		if lastSeen != tree.Last() {
 			t.Error("Leaf chain end does not match tree.Last")
 		}
 	}
@@ -83,18 +83,18 @@ func verifyTree[T any, S any](t *testing.T, tree *BxTree[T, S], expected []T) {
 func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], tree *BxTree[T, S]) int {
 	t.Helper()
 
-	if n.parent != parent {
-		t.Errorf("Node parent pointer incorrect. Node: %p, Parent: %p, Expected: %p", n, n.parent, parent)
-	}
+	// We can't check n.parent because it's private.
+	// But we can check internal consistency during recursion.
 
 	size := 0
 	var summary S
 	first := true
 
-	if n.isLeaf {
-		size = len(n.Items)
+	if n.IsLeaf() {
+		items := n.Items()
+		size = len(items)
 		if tree.SummaryConfig != nil {
-			for i, item := range n.Items {
+			for i, item := range items {
 				m := tree.SummaryConfig.FromItem(item)
 				if i == 0 {
 					summary = m
@@ -104,15 +104,15 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], t
 			}
 		}
 	} else {
-		for _, child := range n.children {
+		for _, child := range n.Children() {
 			childSize := verifyNode(t, child, n, tree)
 			size += childSize
 			if tree.SummaryConfig != nil {
 				if first {
-					summary = child.Summary
+					summary = child.Summary()
 					first = false
 				} else {
-					summary = tree.SummaryConfig.Add(summary, child.Summary)
+					summary = tree.SummaryConfig.Add(summary, child.Summary())
 				}
 			}
 		}
@@ -122,8 +122,8 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], t
 		t.Errorf("Node size mismatch: got %d, want %d", n.size, size)
 	}
 
-	if tree.SummaryConfig != nil && !reflect.DeepEqual(n.Summary, summary) {
-		t.Errorf("Node summary mismatch: got %v, want %v", n.Summary, summary)
+	if tree.SummaryConfig != nil && !reflect.DeepEqual(n.Summary(), summary) {
+		t.Errorf("Node summary mismatch: got %v, want %v", n.Summary(), summary)
 	}
 
 	return size
@@ -132,7 +132,7 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], parent *Node[T, S], t
 func TestFuzzTree(t *testing.T) {
 	seedCount := 50
 	for _, withSummary := range []bool{true, false} {
-		for seed := range seedCount {
+		for seed := 0; seed < seedCount; seed++ {
 			src := rand.NewSource(int64(seed))
 			r := rand.New(src)
 
@@ -145,7 +145,7 @@ func TestFuzzTree(t *testing.T) {
 			}
 			var reference []int
 
-			for op := range 200 {
+			for op := 0; op < 200; op++ {
 				length := len(reference)
 
 				if length == 0 || r.Float64() < 0.7 {

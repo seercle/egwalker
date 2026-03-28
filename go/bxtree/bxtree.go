@@ -6,14 +6,36 @@ import (
 )
 
 func New[T any, S any]() *BxTree[T, S] {
+	return NewWithConfig[T, S](Config{
+		InternalMinSize: DefaultInternalMinSize,
+		InternalMaxSize: DefaultInternalMaxSize,
+		LeafMinSize:     DefaultLeafMinSize,
+		LeafMaxSize:     DefaultLeafMaxSize,
+	})
+}
+
+func NewWithConfig[T any, S any](cfg Config) *BxTree[T, S] {
+	if cfg.InternalMinSize == 0 {
+		cfg.InternalMinSize = DefaultInternalMinSize
+	}
+	if cfg.InternalMaxSize == 0 {
+		cfg.InternalMaxSize = DefaultInternalMaxSize
+	}
+	if cfg.LeafMinSize == 0 {
+		cfg.LeafMinSize = DefaultLeafMinSize
+	}
+	if cfg.LeafMaxSize == 0 {
+		cfg.LeafMaxSize = DefaultLeafMaxSize
+	}
+
 	return &BxTree[T, S]{
-		Root:            nil,
-		First:           nil,
-		Last:            nil,
-		internalMinSize: DefaultInternalMinSize,
-		internalMaxSize: DefaultInternalMaxSize,
-		leafMinSize:     DefaultLeafMinSize,
-		leafMaxSize:     DefaultLeafMaxSize,
+		root:            nil,
+		first:           nil,
+		last:            nil,
+		internalMinSize: cfg.InternalMinSize,
+		internalMaxSize: cfg.InternalMaxSize,
+		leafMinSize:     cfg.LeafMinSize,
+		leafMaxSize:     cfg.LeafMaxSize,
 	}
 }
 
@@ -38,14 +60,14 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 
 		leaf := &Node[T, S]{
 			isLeaf: true,
-			Items:  make([]T, end-i),
+			items:  make([]T, end-i),
 			size:   end - i,
 		}
-		copy(leaf.Items, items[i:end])
+		copy(leaf.items, items[i:end])
 
 		if tree.SummaryConfig != nil {
 			var s S
-			for j, item := range leaf.Items {
+			for j, item := range leaf.items {
 				m := tree.SummaryConfig.FromItem(item)
 				if j == 0 {
 					s = m
@@ -53,25 +75,25 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 					s = tree.SummaryConfig.Add(s, m)
 				}
 			}
-			leaf.Summary = s
+			leaf.summary = s
 		}
 
 		if prevLeaf != nil {
 			prevLeaf.next = leaf
 			leaf.prev = prevLeaf
 		} else {
-			tree.First = leaf
+			tree.first = leaf
 		}
 		leaves = append(leaves, leaf)
 		prevLeaf = leaf
 
 		if tree.OnItemMoved != nil {
-			for _, item := range leaf.Items {
+			for _, item := range leaf.items {
 				tree.OnItemMoved(item, leaf)
 			}
 		}
 	}
-	tree.Last = prevLeaf
+	tree.last = prevLeaf
 
 	// 2. Build internal nodes bottom-up
 	var currentLevel []*Node[T, S] = leaves
@@ -97,37 +119,37 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 				size += child.size
 				if tree.SummaryConfig != nil {
 					if first {
-						s = child.Summary
+						s = child.summary
 						first = false
 					} else {
-						s = tree.SummaryConfig.Add(s, child.Summary)
+						s = tree.SummaryConfig.Add(s, child.summary)
 					}
 				}
 			}
 			n.size = size
-			n.Summary = s
+			n.summary = s
 			nextLevel = append(nextLevel, n)
 		}
 		currentLevel = nextLevel
 	}
 
-	tree.Root = currentLevel[0]
+	tree.root = currentLevel[0]
 	return tree
 }
 
 func (tree *BxTree[T, S]) Size() int {
-	if tree.Root == nil {
+	if tree.root == nil {
 		return 0
 	}
-	return tree.Root.size
+	return tree.root.size
 }
 
 // All returns an iterator over all items in the tree in order.
 func (tree *BxTree[T, S]) All() iter.Seq[T] {
 	return func(yield func(T) bool) {
-		curr := tree.First
+		curr := tree.first
 		for curr != nil {
-			for _, item := range curr.Items {
+			for _, item := range curr.items {
 				if !yield(item) {
 					return
 				}
@@ -140,10 +162,10 @@ func (tree *BxTree[T, S]) All() iter.Seq[T] {
 // Reverse returns an iterator over all items in the tree in reverse order.
 func (tree *BxTree[T, S]) Reverse() iter.Seq[T] {
 	return func(yield func(T) bool) {
-		curr := tree.Last
+		curr := tree.last
 		for curr != nil {
-			for i := len(curr.Items) - 1; i >= 0; i-- {
-				if !yield(curr.Items[i]) {
+			for i := len(curr.items) - 1; i >= 0; i-- {
+				if !yield(curr.items[i]) {
 					return
 				}
 			}
@@ -159,9 +181,9 @@ func (tree *BxTree[T, S]) ForEach(f func(item T)) {
 }
 
 func (tree *BxTree[T, S]) Print() {
-	if tree.Root != nil {
-		fmt.Printf("Tree size: %d\n", tree.Root.size)
-		tree.Root.printTree(0)
+	if tree.root != nil {
+		fmt.Printf("Tree size: %d\n", tree.root.size)
+		tree.root.printTree(0)
 	} else {
 		fmt.Println("Empty tree")
 	}
@@ -173,9 +195,9 @@ func (n *Node[T, S]) printTree(level int) {
 		prefix += "  "
 	}
 	if n.isLeaf {
-		fmt.Printf("%sLeafNode(len=%d):\n", prefix, len(n.Items))
+		fmt.Printf("%sLeafNode(len=%d):\n", prefix, len(n.items))
 		fmt.Print(prefix)
-		for _, item := range n.Items {
+		for _, item := range n.items {
 			fmt.Printf(" %v", item)
 		}
 		fmt.Println()
@@ -193,7 +215,7 @@ func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &leaf.Items[pos], nil
+	return &leaf.items[pos], nil
 }
 
 func (tree *BxTree[T, S]) GetAtNode(index int) (*Node[T, S], int, error) {
@@ -204,14 +226,14 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 	if index < 0 || index >= tree.Size() {
 		return nil, -1, ErrIndexOutOfBounds
 	}
-	if index < tree.First.size {
-		return tree.First, index, nil
+	if index < tree.first.size {
+		return tree.first, index, nil
 	}
-	if index >= tree.Size()-tree.Last.size {
-		return tree.Last, index - (tree.Size() - tree.Last.size), nil
+	if index >= tree.Size()-tree.last.size {
+		return tree.last, index - (tree.Size() - tree.last.size), nil
 	}
 
-	curr := tree.Root
+	curr := tree.root
 	for !curr.isLeaf {
 		found := false
 		for _, child := range curr.children {
@@ -237,6 +259,14 @@ func (n *Node[T, S]) Next() *Node[T, S] {
 	return n.next
 }
 
+func (n *Node[T, S]) Prev() *Node[T, S] {
+	return n.prev
+}
+
+func (n *Node[T, S]) Children() []*Node[T, S] {
+	return n.children
+}
+
 func (tree *BxTree[T, S]) InsertRange(index int, items []T) error {
 	return tree.insert(index, items)
 }
@@ -245,48 +275,51 @@ func (tree *BxTree[T, S]) InsertAt(index int, item T) error {
 	return tree.insert(index, []T{item})
 }
 
-func (tree *BxTree[T, S]) insert(index int, items []T) error {
-	if len(items) == 0 {
-		return nil
-	}
-	if index < 0 || index > tree.Size() {
-		return ErrIndexOutOfBounds
-	}
+func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
+	if tree.root == nil {
+		if index != 0 {
+			return ErrIndexOutOfBounds
+		}
+		leaf := &Node[T, S]{
+			isLeaf: true,
+			items:  make([]T, len(newItems)),
+			size:   len(newItems),
+		}
+		copy(leaf.items, newItems)
+		tree.root = leaf
+		tree.first = leaf
+		tree.last = leaf
 
-	for len(items) > 0 {
-		var leaf *Node[T, S]
-		var pos int
-
-		if tree.Root == nil {
-			leaf = &Node[T, S]{
-				isLeaf: true,
+		if tree.SummaryConfig != nil {
+			var s S
+			for i, item := range newItems {
+				m := tree.SummaryConfig.FromItem(item)
+				if i == 0 {
+					s = m
+				} else {
+					s = tree.SummaryConfig.Add(s, m)
+				}
 			}
-			tree.Root = leaf
-			tree.First = leaf
-			tree.Last = leaf
-			pos = 0
-		} else if index == tree.Size() {
-			leaf, pos = tree.Last, tree.Last.size
-		} else {
-			var err error
-			leaf, pos, err = tree.getAt(index)
-			if err != nil {
-				return err
-			}
+			leaf.summary = s
 		}
 
-		// How many items can we fit in this leaf without exceeding leafMaxSize?
-		canFit := max(tree.leafMaxSize-len(leaf.Items), 1)
-		canFit = min(canFit, len(items))
+		if tree.OnItemMoved != nil {
+			for _, item := range leaf.items {
+				tree.OnItemMoved(item, leaf)
+			}
+		}
+		return nil
+	}
 
-		// Insert items
-		newItems := items[:canFit]
-		oldLen := len(leaf.Items)
-		leaf.Items = append(leaf.Items, make([]T, len(newItems))...)
-		copy(leaf.Items[pos+len(newItems):], leaf.Items[pos:oldLen])
-		copy(leaf.Items[pos:], newItems)
+	if index == tree.Size() {
+		leaf := tree.last
+		pos := len(leaf.items)
+		oldLen := len(leaf.items)
+		leaf.items = append(leaf.items, newItems...)
+		copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
+		copy(leaf.items[pos:], newItems)
 
-		leaf.addSizeUpward(len(newItems))
+		leaf.sizeAddUpward(len(newItems))
 
 		if tree.SummaryConfig != nil {
 			var totalDelta S
@@ -298,7 +331,7 @@ func (tree *BxTree[T, S]) insert(index int, items []T) error {
 					totalDelta = tree.SummaryConfig.Add(totalDelta, m)
 				}
 			}
-			leaf.AddSummaryUpward(totalDelta, tree)
+			leaf.SummaryAddUpward(totalDelta, tree)
 		}
 
 		if tree.OnItemMoved != nil {
@@ -307,13 +340,47 @@ func (tree *BxTree[T, S]) insert(index int, items []T) error {
 			}
 		}
 
-		items = items[canFit:]
-		index += canFit
-
-		if len(leaf.Items) > tree.leafMaxSize {
+		if len(leaf.items) > tree.leafMaxSize {
 			tree.split(leaf)
 		}
+		return nil
 	}
+
+	leaf, pos, err := tree.getAt(index)
+	if err != nil {
+		return err
+	}
+
+	oldLen := len(leaf.items)
+	leaf.items = append(leaf.items, newItems...)
+	copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
+	copy(leaf.items[pos:], newItems)
+
+	leaf.sizeAddUpward(len(newItems))
+
+	if tree.SummaryConfig != nil {
+		var totalDelta S
+		for i, item := range newItems {
+			m := tree.SummaryConfig.FromItem(item)
+			if i == 0 {
+				totalDelta = m
+			} else {
+				totalDelta = tree.SummaryConfig.Add(totalDelta, m)
+			}
+		}
+		leaf.SummaryAddUpward(totalDelta, tree)
+	}
+
+	if tree.OnItemMoved != nil {
+		for _, item := range newItems {
+			tree.OnItemMoved(item, leaf)
+		}
+	}
+
+	if len(leaf.items) > tree.leafMaxSize {
+		tree.split(leaf)
+	}
+
 	return nil
 }
 
@@ -324,27 +391,26 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 			size:   n.size,
 		}
 		if tree.SummaryConfig != nil {
-			newRoot.Summary = n.Summary
+			newRoot.summary = n.summary
 		}
-		tree.Root = newRoot
+		tree.root = newRoot
 		n.parent = newRoot
 		newRoot.children = []*Node[T, S]{n}
 	}
 
-	parent := n.parent
 	right := &Node[T, S]{
 		isLeaf: n.isLeaf,
-		parent: parent,
+		parent: n.parent,
 	}
 
 	if n.isLeaf {
-		mid := len(n.Items) / 2
-		right.Items = make([]T, len(n.Items)-mid)
-		copy(right.Items, n.Items[mid:])
+		mid := len(n.items) / 2
+		right.items = make([]T, len(n.items)-mid)
+		copy(right.items, n.items[mid:])
 
 		if tree.SummaryConfig != nil {
 			var rightSummary S
-			for i, item := range right.Items {
+			for i, item := range right.items {
 				m := tree.SummaryConfig.FromItem(item)
 				if i == 0 {
 					rightSummary = m
@@ -352,19 +418,13 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 					rightSummary = tree.SummaryConfig.Add(rightSummary, m)
 				}
 			}
-			right.Summary = rightSummary
-			n.Summary = tree.SummaryConfig.Sub(n.Summary, rightSummary)
+			right.summary = rightSummary
+			n.summary = tree.SummaryConfig.Sub(n.summary, rightSummary)
 		}
 
-		if tree.OnItemMoved != nil {
-			for _, item := range right.Items {
-				tree.OnItemMoved(item, right)
-			}
-		}
-
-		n.Items = n.Items[:mid]
-		n.size = len(n.Items)
-		right.size = len(right.Items)
+		n.items = n.items[:mid]
+		n.size = len(n.items)
+		right.size = len(right.items)
 
 		right.next = n.next
 		n.next = right
@@ -372,45 +432,60 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 		if right.next != nil {
 			right.next.prev = right
 		}
-		if tree.Last == n {
-			tree.Last = right
+		if tree.last == n {
+			tree.last = right
+		}
+
+		if tree.OnItemMoved != nil {
+			for _, item := range right.items {
+				tree.OnItemMoved(item, right)
+			}
 		}
 	} else {
 		mid := len(n.children) / 2
 		right.children = make([]*Node[T, S], len(n.children)-mid)
 		copy(right.children, n.children[mid:])
-		n.children = n.children[:mid]
 
 		n.size = 0
 		right.size = 0
-		firstN := true
-		firstR := true
 
-		for _, child := range n.children {
-			n.size += child.size
-			if tree.SummaryConfig != nil {
+		if tree.SummaryConfig != nil {
+			firstN := true
+			firstR := true
+
+			for _, child := range n.children[:mid] {
+				n.size += child.size
 				if firstN {
-					n.Summary = child.Summary
+					n.summary = child.summary
 					firstN = false
 				} else {
-					n.Summary = tree.SummaryConfig.Add(n.Summary, child.Summary)
+					n.summary = tree.SummaryConfig.Add(n.summary, child.summary)
 				}
 			}
-		}
-		for _, child := range right.children {
-			child.parent = right
-			right.size += child.size
-			if tree.SummaryConfig != nil {
+			for _, child := range right.children {
+				child.parent = right
+				right.size += child.size
 				if firstR {
-					right.Summary = child.Summary
+					right.summary = child.summary
 					firstR = false
 				} else {
-					right.Summary = tree.SummaryConfig.Add(right.Summary, child.Summary)
+					right.summary = tree.SummaryConfig.Add(right.summary, child.summary)
 				}
 			}
+		} else {
+
+			for _, child := range n.children[:mid] {
+				n.size += child.size
+			}
+			for _, child := range right.children {
+				child.parent = right
+				right.size += child.size
+			}
 		}
+		n.children = n.children[:mid]
 	}
 
+	parent := n.parent
 	idx := n.getParentIndex()
 	parent.children = append(parent.children, nil)
 	copy(parent.children[idx+2:], parent.children[idx+1:])
@@ -449,71 +524,61 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 		if tree.SummaryConfig != nil {
 			var totalDelta S
 			for i := range canDelete {
-				m := tree.SummaryConfig.FromItem(leaf.Items[pos+i])
+				m := tree.SummaryConfig.FromItem(leaf.items[pos+i])
 				if i == 0 {
 					totalDelta = m
 				} else {
 					totalDelta = tree.SummaryConfig.Add(totalDelta, m)
 				}
 			}
-			leaf.AddSummaryUpward(tree.SummaryConfig.Sub(*new(S), totalDelta), tree)
+			leaf.SummaryAddUpward(tree.SummaryConfig.Sub(S(*new(S)), totalDelta), tree)
 		}
 
-		// Delete items
-		copy(leaf.Items[pos:], leaf.Items[pos+canDelete:])
-		leaf.Items = leaf.Items[:len(leaf.Items)-canDelete]
-		leaf.addSizeUpward(-canDelete)
+		leaf.sizeAddUpward(-canDelete)
+		leaf.items = append(leaf.items[:pos], leaf.items[pos+canDelete:]...)
+		leaf.size = len(leaf.items)
 
 		length -= canDelete
-		tree.rebalance(leaf)
+
+		if tree.root.size == 0 {
+			tree.root = nil
+			tree.first = nil
+			tree.last = nil
+		} else if leaf.size < tree.leafMinSize && leaf.parent != nil {
+			tree.rebalance(leaf)
+		}
 	}
+
 	return nil
 }
 
 func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 	if n.parent == nil {
 		if !n.isLeaf && len(n.children) == 1 {
-			tree.Root = n.children[0]
-			tree.Root.parent = nil
-		} else if n.isLeaf && n.size == 0 {
-			tree.Root = nil
-			tree.First = nil
-			tree.Last = nil
+			tree.root = n.children[0]
+			tree.root.parent = nil
 		}
 		return
 	}
 
-	minSize := tree.internalMinSize
-	if n.isLeaf {
-		minSize = tree.leafMinSize
-	}
-
-	currLen := len(n.children)
-	if n.isLeaf {
-		currLen = len(n.Items)
-	}
-
-	if currLen >= minSize {
-		return
-	}
-
-	idx := n.getParentIndex()
 	parent := n.parent
+	idx := n.getParentIndex()
 
-	if idx > 0 {
-		left := parent.children[idx-1]
-		if n.isLeaf {
-			if len(left.Items) > tree.leafMinSize {
-				item := left.Items[len(left.Items)-1]
-				left.Items = left.Items[:len(left.Items)-1]
+	if n.isLeaf {
+		if idx > 0 {
+			left := parent.children[idx-1]
+			if len(left.items) > tree.leafMinSize {
+				// Borrow from left
+				item := left.items[len(left.items)-1]
+				left.items = left.items[:len(left.items)-1]
 				left.size--
-				n.Items = append([]T{item}, n.Items...)
+				n.items = append([]T{item}, n.items...)
 				n.size++
 
 				if tree.SummaryConfig != nil {
 					m := tree.SummaryConfig.FromItem(item)
-					left.Summary = tree.SummaryConfig.Sub(left.Summary, m)
-					n.Summary = tree.SummaryConfig.Add(n.Summary, m)
+					left.summary = tree.SummaryConfig.Sub(left.summary, m)
+					n.summary = tree.SummaryConfig.Add(n.summary, m)
 				}
 
 				if tree.OnItemMoved != nil {
@@ -521,7 +586,32 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				}
 				return
 			}
-		} else {
+		}
+		if idx < len(parent.children)-1 {
+			right := parent.children[idx+1]
+			if len(right.items) > tree.leafMinSize {
+				// Borrow from right
+				item := right.items[0]
+				right.items = right.items[1:]
+				right.size--
+				n.items = append(n.items, item)
+				n.size++
+
+				if tree.SummaryConfig != nil {
+					m := tree.SummaryConfig.FromItem(item)
+					right.summary = tree.SummaryConfig.Sub(right.summary, m)
+					n.summary = tree.SummaryConfig.Add(n.summary, m)
+				}
+
+				if tree.OnItemMoved != nil {
+					tree.OnItemMoved(item, n)
+				}
+				return
+			}
+		}
+	} else {
+		if idx > 0 {
+			left := parent.children[idx-1]
 			if len(left.children) > tree.internalMinSize {
 				child := left.children[len(left.children)-1]
 				left.children = left.children[:len(left.children)-1]
@@ -531,37 +621,15 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				child.parent = n
 
 				if tree.SummaryConfig != nil {
-					left.Summary = tree.SummaryConfig.Sub(left.Summary, child.Summary)
-					n.Summary = tree.SummaryConfig.Add(n.Summary, child.Summary)
+					left.summary = tree.SummaryConfig.Sub(left.summary, child.summary)
+					n.summary = tree.SummaryConfig.Add(n.summary, child.summary)
 				}
 
 				return
 			}
 		}
-	}
-
-	if idx < len(parent.children)-1 {
-		right := parent.children[idx+1]
-		if n.isLeaf {
-			if len(right.Items) > tree.leafMinSize {
-				item := right.Items[0]
-				right.Items = right.Items[1:]
-				right.size--
-				n.Items = append(n.Items, item)
-				n.size++
-
-				if tree.SummaryConfig != nil {
-					m := tree.SummaryConfig.FromItem(item)
-					right.Summary = tree.SummaryConfig.Sub(right.Summary, m)
-					n.Summary = tree.SummaryConfig.Add(n.Summary, m)
-				}
-
-				if tree.OnItemMoved != nil {
-					tree.OnItemMoved(item, n)
-				}
-				return
-			}
-		} else {
+		if idx < len(parent.children)-1 {
+			right := parent.children[idx+1]
 			if len(right.children) > tree.internalMinSize {
 				child := right.children[0]
 				right.children = right.children[1:]
@@ -571,8 +639,8 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				child.parent = n
 
 				if tree.SummaryConfig != nil {
-					right.Summary = tree.SummaryConfig.Sub(right.Summary, child.Summary)
-					n.Summary = tree.SummaryConfig.Add(n.Summary, child.Summary)
+					right.summary = tree.SummaryConfig.Sub(right.summary, child.summary)
+					n.summary = tree.SummaryConfig.Add(n.summary, child.summary)
 				}
 
 				return
@@ -591,21 +659,21 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 	parent := left.parent
 	if left.isLeaf {
 		if tree.OnItemMoved != nil {
-			for _, item := range right.Items {
+			for _, item := range right.items {
 				tree.OnItemMoved(item, left)
 			}
 		}
-		left.Items = append(left.Items, right.Items...)
-		left.size = len(left.Items)
+		left.items = append(left.items, right.items...)
+		left.size = len(left.items)
 		if tree.SummaryConfig != nil {
-			left.Summary = tree.SummaryConfig.Add(left.Summary, right.Summary)
+			left.summary = tree.SummaryConfig.Add(left.summary, right.summary)
 		}
 		left.next = right.next
 		if left.next != nil {
 			left.next.prev = left
 		}
-		if tree.Last == right {
-			tree.Last = left
+		if tree.last == right {
+			tree.last = left
 		}
 	} else {
 		for _, child := range right.children {
@@ -613,7 +681,7 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 			left.children = append(left.children, child)
 			left.size += child.size
 			if tree.SummaryConfig != nil {
-				left.Summary = tree.SummaryConfig.Add(left.Summary, child.Summary)
+				left.summary = tree.SummaryConfig.Add(left.summary, child.summary)
 			}
 		}
 	}
@@ -625,18 +693,18 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 	tree.rebalance(parent)
 }
 
-func (n *Node[T, S]) AddSummaryUpward(delta S, tree *BxTree[T, S]) {
+func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	if tree.SummaryConfig == nil {
 		return
 	}
 	curr := n
 	for curr != nil {
-		curr.Summary = tree.SummaryConfig.Add(curr.Summary, delta)
+		curr.summary = tree.SummaryConfig.Add(curr.summary, delta)
 		curr = curr.parent
 	}
 }
 
-func (n *Node[T, S]) addSizeUpward(delta int) {
+func (n *Node[T, S]) sizeAddUpward(delta int) {
 	curr := n
 	for curr != nil {
 		curr.size += delta
@@ -672,39 +740,40 @@ func (n *Node[T, S]) Index() int {
 	return index
 }
 
-// FindPath traverses the tree using a predicate.
-// The predicate takes the current accumulated summary and a candidate child/item summary,
-// and returns true if the target is within or beyond that child/item.
 func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, S], int, S) {
-	if tree.Root == nil || tree.SummaryConfig == nil {
+	if tree.root == nil {
 		return nil, -1, *new(S)
 	}
 
 	var acc S
-	curr := tree.Root
 	first := true
+	curr := tree.root
 
 	for !curr.isLeaf {
 		found := false
 		for _, child := range curr.children {
-			if predicate(acc, child.Summary) {
+			var nextAcc S
+			if first {
+				nextAcc = child.summary
+			} else {
+				nextAcc = tree.SummaryConfig.Add(acc, child.summary)
+			}
+
+			if predicate(acc, child.summary) {
 				curr = child
 				found = true
 				break
 			}
-			if first {
-				acc = child.Summary
-				first = false
-			} else {
-				acc = tree.SummaryConfig.Add(acc, child.Summary)
-			}
+			acc = nextAcc
+			first = false
 		}
 		if !found {
 			return nil, -1, acc
 		}
 	}
 
-	for i, item := range curr.Items {
+	// In leaf
+	for i, item := range curr.items {
 		m := tree.SummaryConfig.FromItem(item)
 		if predicate(acc, m) {
 			return curr, i, acc

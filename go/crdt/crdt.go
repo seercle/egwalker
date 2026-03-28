@@ -107,7 +107,7 @@ func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		newM0 = 1
 	}
 	if oldM0 != newM0 {
-		item.node.AddSummaryUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
+		item.node.SummaryAddUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
 	}
 }
 
@@ -131,7 +131,7 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		newM0 = 1
 	}
 	if oldM0 != newM0 {
-		item.node.AddSummaryUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
+		item.node.SummaryAddUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
 	}
 }
 
@@ -146,7 +146,7 @@ func findItemIdxAtLV(doc *crdtDoc, targetLV lv) int {
 
 	nodeIdx := item.node.Index()
 	posInNode := -1
-	for i, it := range item.node.Items {
+	for i, it := range item.node.Items() {
 		if it == item {
 			posInNode = i
 			break
@@ -177,7 +177,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 		}
 
 		for scanIdx < right {
-			other := node.Items[pos]
+			other := node.Items()[pos]
 
 			if other.curState != stateNotYetInserted {
 				break
@@ -209,7 +209,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 			}
 			scanIdx++
 			pos++
-			if pos >= len(node.Items) {
+			if pos >= len(node.Items()) {
 				node = node.Next()
 				pos = 0
 			}
@@ -246,13 +246,13 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
 	})
 
 	if node == nil {
-		if doc.items.Root == nil {
+		if doc.items.Root() == nil {
 			return 0, 0
 		}
-		return doc.items.Size(), doc.items.Root.Summary[1]
+		return doc.items.Size(), doc.items.Root().Summary()[1]
 	}
 
-	item := node.Items[posInNode]
+	item := node.Items()[posInNode]
 	m := crdtSummaryConfig.FromItem(item)
 	return node.Index() + posInNode + 1, acc[1] + m[1]
 }
@@ -266,7 +266,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 		node, pos, err := doc.items.GetAtNode(idx)
 		if err == nil {
 			for {
-				item := node.Items[pos]
+				item := node.Items()[pos]
 				if item.curState == stateInserted {
 					break
 				}
@@ -275,7 +275,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 				}
 				idx++
 				pos++
-				if pos >= len(node.Items) {
+				if pos >= len(node.Items()) {
 					node = node.Next()
 					pos = 0
 					if node == nil {
@@ -296,13 +296,11 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 					panic("Snapshot delete failed")
 				}
 			}
-			// UPDATE SUMMARY
-			item.node.AddSummaryUpward(crdtSummary{0, -1}, doc.items)
+			item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
 		}
 
 		item.curState = 1 // Deleted(1)
-		// UPDATE SUMMARY
-		item.node.AddSummaryUpward(crdtSummary{-1, 0}, doc.items)
+		item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
 
 		doc.delTargets[opLV] = item.lv
 
