@@ -297,7 +297,7 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 			index -= child.size
 		}
 		if !found {
-			panic(fmt.Sprintf("internal inconsistency: index %d not found in internal node during traversal", index))
+			panic(fmt.Sprintf("bxtree: index %d not found in internal node during traversal", index))
 		}
 	}
 	return curr, index, nil
@@ -396,12 +396,11 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 		copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 		copy(leaf.items[pos:], newItems)
 
-		leaf.sizeAddUpward(len(newItems))
-
+		var deltaSummary S
 		if tree.summarizer != nil {
-			delta := tree.summarizeItems(newItems)
-			leaf.SummaryAddUpward(delta, tree)
+			deltaSummary = tree.summarizeItems(newItems)
 		}
+		leaf.addUpward(len(newItems), deltaSummary, tree)
 
 		tree.onItemsMoved(leaf, newItems)
 
@@ -421,12 +420,11 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 	copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 	copy(leaf.items[pos:], newItems)
 
-	leaf.sizeAddUpward(len(newItems))
-
+	var deltaSummary S
 	if tree.summarizer != nil {
-		delta := tree.summarizeItems(newItems)
-		leaf.SummaryAddUpward(delta, tree)
+		deltaSummary = tree.summarizeItems(newItems)
 	}
+	leaf.addUpward(len(newItems), deltaSummary, tree)
 
 	tree.onItemsMoved(leaf, newItems)
 
@@ -455,7 +453,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 	}
 
 	if n.parent == nil {
-		panic("internal inconsistency: split node must have a parent")
+		panic("bxtree: split node must have a parent")
 	}
 
 	right := &Node[T, S]{
@@ -574,15 +572,15 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 		canDelete := min(length, leaf.size-pos)
 
 		// Update summary before deleting
+		var deltaSummary S
 		if tree.summarizer != nil {
 			deletedItems := leaf.items[pos : pos+canDelete]
 			totalDelta := tree.summarizeItems(deletedItems)
-			leaf.SummaryAddUpward(tree.summarizer.Sub(S(*new(S)), totalDelta), tree)
+			deltaSummary = tree.summarizer.Sub(S(*new(S)), totalDelta)
 		}
+		leaf.addUpward(-canDelete, deltaSummary, tree)
 
-		leaf.sizeAddUpward(-canDelete)
 		leaf.items = append(leaf.items[:pos], leaf.items[pos+canDelete:]...)
-		leaf.size = len(leaf.items)
 
 		length -= canDelete
 
@@ -709,7 +707,7 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 	}
 	parent := left.parent
 	if parent == nil {
-		panic("internal inconsistency: cannot merge nodes without a parent")
+		panic("bxtree: cannot merge nodes without a parent")
 	}
 	if left.isLeaf {
 		left.items = append(left.items, right.items...)
@@ -745,8 +743,21 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 	tree.rebalance(parent)
 }
 
+func (n *Node[T, S]) addUpward(deltaSize int, deltaSummary S, tree *BxTree[T, S]) {
+	if tree == nil {
+		panic("bxtree: addUpward called with nil tree")
+	}
+	curr := n
+	for curr != nil {
+		curr.size += deltaSize
+		if tree.summarizer != nil {
+			curr.summary = tree.summarizer.Add(curr.summary, deltaSummary)
+		}
+		curr = curr.parent
+	}
+}
+
 // SummaryAddUpward adds the delta to the summary of this node and all of its ancestors.
-// This is an internal method and should generally not be called directly.
 func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	if n == nil {
 		panic("bxtree: SummaryAddUpward called on nil node")
@@ -754,23 +765,11 @@ func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	if tree == nil {
 		panic("bxtree: SummaryAddUpward called with nil tree")
 	}
-	if tree.summarizer == nil {
-		return
-	}
 	curr := n
 	for curr != nil {
-		curr.summary = tree.summarizer.Add(curr.summary, delta)
-		curr = curr.parent
-	}
-}
-
-func (n *Node[T, S]) sizeAddUpward(delta int) {
-	if n == nil {
-		panic("bxtree: sizeAddUpward called on nil node")
-	}
-	curr := n
-	for curr != nil {
-		curr.size += delta
+		if tree.summarizer != nil {
+			curr.summary = tree.summarizer.Add(curr.summary, delta)
+		}
 		curr = curr.parent
 	}
 }
@@ -780,14 +779,14 @@ func (n *Node[T, S]) getParentIndex() int {
 		panic("bxtree: getParentIndex called on nil node")
 	}
 	if n.parent == nil {
-		panic("getParentIndex called on root node")
+		panic("bxtree: getParentIndex called on root node")
 	}
 	for i, child := range n.parent.children {
 		if child == n {
 			return i
 		}
 	}
-	panic("node not found in parent's children")
+	panic("bxtree: node not found in parent's children")
 }
 
 // Index returns the absolute 0-based index of the first item in this node.
@@ -829,7 +828,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 	}
 
 	if tree.summarizer == nil {
-		panic("FindPath called on tree without Summarizer")
+		panic("bxtree: FindPath called on tree without Summarizer")
 	}
 
 	var acc S
@@ -855,7 +854,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 			first = false
 		}
 		if !found {
-			panic("internal inconsistency: FindPath failed to find child matching predicate")
+			panic("bxtree: FindPath failed to find child matching predicate")
 		}
 	}
 
