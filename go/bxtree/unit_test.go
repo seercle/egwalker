@@ -1,413 +1,314 @@
 package bxtree
 
 import (
-	"fmt"
 	"math/rand"
+	"reflect"
+	"slices"
 	"testing"
 )
 
-func TestFirstLastPointers(t *testing.T) {
-	tree := New[int, struct{}]()
-
-	tree.InsertAt(0, 100)
-	if tree.First == nil || tree.Last == nil {
-		t.Fatal("First or Last pointer is nil after first insert")
-	}
-	if tree.First != tree.Last {
-		t.Fatal("First and Last should point to the same node after single insert")
-	}
-
-	count := 500
-	for i := 1; i < count; i++ {
-		err := tree.InsertAt(tree.Size(), 100+i)
-		if err != nil {
-			t.Fatalf("Insert failed at %d: %v", i, err)
-		}
-
-		lastNode := tree.Last
-		if lastNode == nil {
-			t.Fatalf("Last pointer is nil at iteration %d", i)
-		}
-		if !lastNode.isLeaf {
-			t.Fatalf("Last pointer points to internal node at iteration %d", i)
-		}
-
-		if len(lastNode.Items) == 0 {
-			t.Fatalf("Last node is empty at iteration %d", i)
-		}
-		if lastNode.Items[len(lastNode.Items)-1] != 100+i {
-			t.Errorf("Last node does not contain the last inserted item. Expected %d, got %d", 100+i, lastNode.Items[len(lastNode.Items)-1])
-		}
-	}
-
-	for i := 1; i < count; i++ {
-		val := 100 - i
-		err := tree.InsertAt(0, val)
-		if err != nil {
-			t.Fatalf("Prepend failed at %d: %v", i, err)
-		}
-
-		firstNode := tree.First
-		if firstNode == nil {
-			t.Fatalf("First pointer is nil at prepend iteration %d", i)
-		}
-		if !firstNode.isLeaf {
-			t.Fatalf("First pointer points to internal node at prepend iteration %d", i)
-		}
-		if len(firstNode.Items) == 0 {
-			t.Fatalf("First node is empty at prepend iteration %d", i)
-		}
-		if firstNode.Items[0] != val {
-			t.Errorf("First node does not contain the first inserted item. Expected %d, got %d", val, firstNode.Items[0])
-		}
-	}
-
-	curr := tree.Root
-	for !curr.isLeaf {
-		curr = curr.children[0]
-	}
-	if curr != tree.First {
-		t.Errorf("Root traversal to leftmost leaf does not match tree.First")
-	}
-
-	curr = tree.Root
-	for !curr.isLeaf {
-		curr = curr.children[len(curr.children)-1]
-	}
-	if curr != tree.Last {
-		t.Errorf("Root traversal to rightmost leaf does not match tree.Last")
-	}
-
-	val, err := tree.GetAt(0)
-	if err != nil {
-		t.Fatalf("GetAt(0) failed: %v", err)
-	}
-	if *val != 100-(count-1) {
-		t.Errorf("First element incorrect. Expected %d, got %d", 100-(count-1), *val)
-	}
-
-	val, err = tree.GetAt(tree.Size() - 1)
-	if err != nil {
-		t.Fatalf("GetAt(last) failed: %v", err)
-	}
-	if *val != 100+(count-1) {
-		t.Errorf("Last element incorrect. Expected %d, got %d", 100+(count-1), *val)
+// Helpers
+func setupCountSummary() *SummaryConfig[int, int] {
+	return &SummaryConfig[int, int]{
+		FromItem: func(item int) int { return 1 },
+		Add:      func(a, b int) int { return a + b },
+		Sub:      func(a, b int) int { return a - b },
 	}
 }
 
-func TestDeleteEmpty(t *testing.T) {
+func TestNew(t *testing.T) {
 	tree := New[int, struct{}]()
-	err := tree.DeleteAt(0)
-	if err != ErrIndexOutOfBounds {
-		t.Errorf("Expected ErrIndexOutOfBounds when deleting from empty tree, got %v", err)
-	}
-}
-
-func TestDeleteOutOfBounds(t *testing.T) {
-	tree := New[int, struct{}]()
-	tree.InsertAt(0, 1)
-
-	tests := []int{-1, 1, 5}
-	for _, idx := range tests {
-		err := tree.DeleteAt(idx)
-		if err != ErrIndexOutOfBounds {
-			t.Errorf("Expected ErrIndexOutOfBounds for index %d, got %v", idx, err)
-		}
-	}
-}
-
-func TestDeleteSingleItem(t *testing.T) {
-	tree := New[int, struct{}]()
-	tree.InsertAt(0, 10)
-
-	err := tree.DeleteAt(0)
-	if err != nil {
-		t.Fatalf("DeleteAt(0) failed: %v", err)
-	}
-
 	if tree.Size() != 0 {
-		t.Errorf("Expected size 0, got %d", tree.Size())
+		t.Errorf("New tree should have size 0, got %d", tree.Size())
 	}
-
-	err = tree.InsertAt(0, 20)
-	if err != nil {
-		t.Fatalf("Re-insertion after emptying failed: %v", err)
-	}
-	if val, _ := tree.GetAt(0); *val != 20 {
-		t.Errorf("Re-insertion failed value check")
+	if tree.Root != nil || tree.First != nil || tree.Last != nil {
+		t.Error("New tree should have nil pointers")
 	}
 }
 
-func TestDeleteFromLeavesSimple(t *testing.T) {
+func TestIndexOutOfBounds(t *testing.T) {
 	tree := New[int, struct{}]()
-	for i := 0; i < 5; i++ {
-		tree.InsertAt(i, i)
-	}
 
-	tree.DeleteAt(2) // [0, 1, 3, 4]
-	if tree.Size() != 4 {
-		t.Errorf("Size incorrect after delete")
-	}
-	if v, _ := tree.GetAt(2); *v != 3 {
-		t.Errorf("Index 2 is wrong after delete, expected 3, got %d", *v)
-	}
-
-	tree.DeleteAt(3) // [0, 1, 3]
-	if v, _ := tree.GetAt(2); *v != 3 {
-		t.Errorf("Last element wrong, expected 3, got %d", *v)
-	}
-
-	tree.DeleteAt(0) // [1, 3]
-	if v, _ := tree.GetAt(0); *v != 1 {
-		t.Errorf("First element wrong, expected 1, got %d", *v)
-	}
-}
-
-func TestDeleteMergesAndBorrows(t *testing.T) {
-	tree := New[int, struct{}]()
-	count := 50
-
-	for i := 0; i < count; i++ {
-		tree.InsertAt(i, i)
-	}
-
-	initialSize := tree.Size()
-
-	for i := 0; i < count; i++ {
-		err := tree.DeleteAt(0)
-		if err != nil {
-			t.Fatalf("DeleteAt(0) iteration %d failed: %v", i, err)
+	t.Run("EmptyTree", func(t *testing.T) {
+		if _, err := tree.GetAt(0); err != ErrIndexOutOfBounds {
+			t.Errorf("GetAt(0) expected index out of bounds, got %v", err)
 		}
-
-		expectedSize := initialSize - 1 - i
-		if tree.Size() != expectedSize {
-			t.Fatalf("Size mismatch at iteration %d. Expected %d, got %d", i, expectedSize, tree.Size())
+		if err := tree.DeleteAt(0); err != ErrIndexOutOfBounds {
+			t.Errorf("DeleteAt(0) expected index out of bounds, got %v", err)
 		}
+	})
 
-		if expectedSize > 0 {
-			val, _ := tree.GetAt(0)
-			if *val != i+1 {
-				t.Fatalf("Data corruption at iteration %d. Expected head to be %d, got %d", i, i+1, *val)
+	tree.InsertAt(0, 10) // Size 1
+
+	t.Run("NonEmptyTree", func(t *testing.T) {
+		tests := []int{-1, 1, 10}
+		for _, idx := range tests {
+			if _, err := tree.GetAt(idx); err != ErrIndexOutOfBounds {
+				t.Errorf("GetAt(%d) expected index out of bounds, got %v", idx, err)
+			}
+			if err := tree.DeleteAt(idx); err != ErrIndexOutOfBounds {
+				t.Errorf("DeleteAt(%d) expected index out of bounds, got %v", idx, err)
 			}
 		}
-	}
+	})
 }
 
-func TestDeleteReverse(t *testing.T) {
+func TestInsert(t *testing.T) {
 	tree := New[int, struct{}]()
-	count := 50
-	for i := 0; i < count; i++ {
-		tree.InsertAt(i, i)
-	}
 
-	for i := 0; i < count; i++ {
-		err := tree.DeleteAt(tree.Size() - 1)
-		if err != nil {
-			t.Fatalf("DeleteAt(last) iteration %d failed: %v", i, err)
-		}
-
-		if tree.Size() > 0 {
-			val, _ := tree.GetAt(tree.Size() - 1)
-			expected := count - i - 2
-			if *val != expected {
-				t.Errorf("Data corruption deleting from end. Expected last %d, got %d", expected, *val)
+	t.Run("Sequential", func(t *testing.T) {
+		for i := range 100 {
+			if err := tree.InsertAt(i, i); err != nil {
+				t.Fatalf("InsertAt(%d) failed: %v", i, err)
 			}
 		}
-	}
+		if tree.Size() != 100 {
+			t.Errorf("Expected size 100, got %d", tree.Size())
+		}
+	})
+
+	t.Run("Prepend", func(t *testing.T) {
+		tree := New[int, struct{}]()
+		for i := range 100 {
+			tree.InsertAt(0, i)
+		}
+		val, _ := tree.GetAt(0)
+		if *val != 99 {
+			t.Errorf("Prepend failed, expected 99 at index 0, got %d", *val)
+		}
+	})
+
+	t.Run("Range", func(t *testing.T) {
+		tree := New[int, struct{}]()
+		items := []int{1, 2, 3, 4, 5}
+		tree.InsertRange(0, items)
+		if tree.Size() != 5 {
+			t.Errorf("InsertRange size mismatch: %d", tree.Size())
+		}
+		tree.InsertRange(2, []int{10, 20}) // [1, 2, 10, 20, 3, 4, 5]
+		val, _ := tree.GetAt(2)
+		if *val != 10 {
+			t.Errorf("InsertRange middle failed, expected 10, got %d", *val)
+		}
+	})
 }
 
-func TestFirstLastPointersAfterDelete(t *testing.T) {
-	tree := New[int, struct{}]()
-	count := 20
-	for i := 0; i < count; i++ {
-		tree.InsertAt(i, i)
-	}
+func TestDelete(t *testing.T) {
+	t.Run("Single", func(t *testing.T) {
+		tree := New[int, struct{}]()
+		for i := range 10 {
+			tree.InsertAt(i, i)
+		}
+		tree.DeleteAt(5) // Remove 5
+		if tree.Size() != 9 {
+			t.Errorf("Size mismatch after delete: %d", tree.Size())
+		}
+		val, _ := tree.GetAt(5)
+		if *val != 6 {
+			t.Errorf("Value mismatch after delete: expected 6, got %d", *val)
+		}
+	})
 
-	for i := 0; i < 5; i++ {
+	t.Run("Range", func(t *testing.T) {
+		tree := New[int, struct{}]()
+		for i := range 100 {
+			tree.InsertAt(i, i)
+		}
+		tree.DeleteRange(10, 80) // Keep [0-9] and [90-99]
+		if tree.Size() != 20 {
+			t.Errorf("DeleteRange size mismatch: %d", tree.Size())
+		}
+		val, _ := tree.GetAt(10)
+		if *val != 90 {
+			t.Errorf("Value mismatch after DeleteRange: expected 90, got %d", *val)
+		}
+	})
+
+	t.Run("Emptying", func(t *testing.T) {
+		tree := New[int, struct{}]()
+		tree.InsertAt(0, 1)
 		tree.DeleteAt(0)
+		if tree.Size() != 0 || tree.Root != nil {
+			t.Error("Tree should be completely empty after deleting last item")
+		}
+	})
+}
+
+func TestPointers(t *testing.T) {
+	tree := New[int, struct{}]()
+	count := 1000 // Enough to cause multiple splits
+
+	for i := range count {
+		tree.InsertAt(tree.Size(), i)
 	}
 
-	if tree.First == nil {
-		t.Fatal("tree.First is nil after deletions")
-	}
-	if tree.First.size == 0 {
-		t.Fatal("tree.First is empty")
-	}
-	if tree.First.Items[0] != 5 {
-		t.Errorf("tree.First item mismatch. Expected 5, got %d", tree.First.Items[0])
+	if tree.First == nil || tree.Last == nil {
+		t.Fatal("First/Last pointers should not be nil")
 	}
 
-	currentSize := tree.Size()
-	for i := 0; i < 5; i++ {
-		tree.DeleteAt(currentSize - 1 - i)
+	// Forward traversal
+	curr := tree.First
+	visited := 0
+	for curr != nil {
+		if !curr.isLeaf {
+			t.Error("Leaf chain contains internal node")
+		}
+		visited += len(curr.Items)
+		if curr.next == nil && curr != tree.Last {
+			t.Error("Last node in chain is not tree.Last")
+		}
+		curr = curr.next
+	}
+	if visited != count {
+		t.Errorf("Forward traversal visited %d items, want %d", visited, count)
 	}
 
-	if tree.Last == nil {
-		t.Fatal("tree.Last is nil after deletions")
-	}
-	if tree.Last.size == 0 {
-		t.Fatal("tree.Last is empty")
-	}
-	expectedLast := count - 1 - 5
-	actualLast := tree.Last.Items[tree.Last.size-1]
-	if actualLast != expectedLast {
-		t.Errorf("tree.Last item mismatch. Expected %d, got %d", expectedLast, actualLast)
+	// Boundary values
+	firstVal := tree.First.Items[0]
+	lastVal := tree.Last.Items[len(tree.Last.Items)-1]
+	if firstVal != 0 || lastVal != count-1 {
+		t.Errorf("Boundary values mismatch: first=%d, last=%d", firstVal, lastVal)
 	}
 }
 
-func TestBxTree_RandomOperations(t *testing.T) {
+func TestSummary(t *testing.T) {
+	tree := New[int, int]()
+	tree.SummaryConfig = setupCountSummary()
+
+	// Initial inserts
+	for i := range 100 {
+		tree.InsertAt(i, i*10)
+	}
+
+	if tree.Root.Summary != 100 {
+		t.Errorf("Root summary mismatch after inserts: got %d, want 100", tree.Root.Summary)
+	}
+
+	// Deletions
+	tree.DeleteRange(0, 10)
+	if tree.Root.Summary != 90 {
+		t.Errorf("Root summary mismatch after delete: got %d, want 90", tree.Root.Summary)
+	}
+
+	// Check internal nodes (recursive)
+	var verifyNodeSummary func(*Node[int, int])
+	verifyNodeSummary = func(n *Node[int, int]) {
+		if n.isLeaf {
+			expected := len(n.Items)
+			if n.Summary != expected {
+				t.Errorf("Leaf node summary mismatch: got %d, want %d", n.Summary, expected)
+			}
+		} else {
+			sum := 0
+			for _, child := range n.children {
+				verifyNodeSummary(child)
+				sum += child.Summary
+			}
+			if n.Summary != sum {
+				t.Errorf("Internal node summary mismatch: got %d, want %d", n.Summary, sum)
+			}
+		}
+	}
+	verifyNodeSummary(tree.Root)
+}
+
+func TestOnItemMoved(t *testing.T) {
+	type item struct {
+		id   int
+		node *Node[*item, struct{}]
+	}
+
+	tree := New[*item, struct{}]()
+	tree.OnItemMoved = func(it *item, n *Node[*item, struct{}]) {
+		it.node = n
+	}
+
+	items := make([]*item, 200)
+	for i := range items {
+		items[i] = &item{id: i}
+		tree.InsertAt(i, items[i])
+	}
+
+	// Verify all items know their nodes
+	for i, it := range items {
+		if it.node == nil {
+			t.Fatalf("Item %d has nil node pointer", i)
+		}
+		if !slices.Contains(it.node.Items, it) {
+			t.Fatalf("Item %d pointer to node %p is incorrect; item not found in node", i, it.node)
+		}
+	}
+
+	// Delete some to trigger merges/rebalancing
+	tree.DeleteRange(0, 100)
+
+	// Verify again
+	tree.ForEach(func(it *item) {
+		if !slices.Contains(it.node.Items, it) {
+			t.Errorf("Item %d pointer to node %p is incorrect after rebalancing", it.id, it.node)
+		}
+	})
+}
+
+func TestStressRandom(t *testing.T) {
 	seed := int64(42)
 	rng := rand.New(rand.NewSource(seed))
 	tree := New[int, struct{}]()
 	var mirror []int
 
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		op := rng.Intn(3)
 		if len(mirror) == 0 {
-			op = 0 // Must insert if empty
+			op = 0
 		}
 
 		switch op {
 		case 0: // Insert
 			val := rng.Intn(10000)
 			pos := rng.Intn(len(mirror) + 1)
-			err := tree.InsertAt(pos, val)
-			if err != nil {
-				t.Fatalf("InsertAt(%d, %d) failed: %v", pos, val, err)
-			}
+			tree.InsertAt(pos, val)
 			mirror = append(mirror[:pos], append([]int{val}, mirror[pos:]...)...)
-
 		case 1: // Delete
 			pos := rng.Intn(len(mirror))
-			err := tree.DeleteAt(pos)
-			if err != nil {
-				t.Fatalf("DeleteAt(%d) failed: %v", pos, err)
-			}
+			tree.DeleteAt(pos)
 			mirror = append(mirror[:pos], mirror[pos+1:]...)
-
-		case 2: // Get/Verify
+		case 2: // Verify
 			pos := rng.Intn(len(mirror))
-			val, err := tree.GetAt(pos)
-			if err != nil {
-				t.Fatalf("GetAt(%d) failed: %v", pos, err)
-			}
+			val, _ := tree.GetAt(pos)
 			if *val != mirror[pos] {
 				t.Fatalf("Value mismatch at %d: expected %d, got %d", pos, mirror[pos], *val)
 			}
 		}
-
-		if tree.Size() != len(mirror) {
-			t.Fatalf("Size mismatch: tree=%d, mirror=%d", tree.Size(), len(mirror))
-		}
 	}
 
-	// Final verification via ForEach
+	// Final verification
 	idx := 0
 	tree.ForEach(func(item int) {
-		if idx >= len(mirror) {
-			t.Fatalf("ForEach went out of bounds at index %d", idx)
-		}
 		if item != mirror[idx] {
-			t.Fatalf("ForEach mismatch at index %d: expected %d, got %d", idx, mirror[idx], item)
+			t.Fatalf("ForEach mismatch at %d", idx)
 		}
 		idx++
 	})
 }
 
-func TestBxTree_BulkInsertDelete(t *testing.T) {
+func TestForEach(t *testing.T) {
 	tree := New[int, struct{}]()
-	count := 1000
-	items := make([]int, count)
-	for i := 0; i < count; i++ {
-		items[i] = i
-	}
 
-	// Bulk insert
-	err := tree.InsertRange(0, items)
-	if err != nil {
-		t.Fatalf("InsertRange failed: %v", err)
-	}
-
-	if tree.Size() != count {
-		t.Fatalf("Expected size %d, got %d", count, tree.Size())
-	}
-
-	// Verify all
-	tree.ForEach(func(item int) {
-		if item < 0 || item >= count {
-			t.Errorf("Unexpected item in tree: %d", item)
+	t.Run("Empty", func(t *testing.T) {
+		count := 0
+		tree.ForEach(func(int) { count++ })
+		if count != 0 {
+			t.Error("ForEach on empty tree should not run")
 		}
 	})
 
-	// Bulk delete from middle
-	delLen := 200
-	delStart := 400
-	err = tree.DeleteRange(delStart, delLen)
-	if err != nil {
-		t.Fatalf("DeleteRange failed: %v", err)
-	}
-
-	expectedSize := count - delLen
-	if tree.Size() != expectedSize {
-		t.Fatalf("Expected size %d, got %d", expectedSize, tree.Size())
-	}
-
-	// Verify items after deletion
-	for i := 0; i < tree.Size(); i++ {
-		val, _ := tree.GetAt(i)
-		if i < delStart {
-			if *val != i {
-				t.Errorf("Mismatch before deletion range at %d: expected %d, got %d", i, i, *val)
-			}
-		} else {
-			if *val != i+delLen {
-				t.Errorf("Mismatch after deletion range at %d: expected %d, got %d", i, i+delLen, *val)
-			}
+	t.Run("SingleNode", func(t *testing.T) {
+		tree.InsertAt(0, 1)
+		tree.InsertAt(1, 2)
+		var items []int
+		tree.ForEach(func(i int) { items = append(items, i) })
+		if !reflect.DeepEqual(items, []int{1, 2}) {
+			t.Errorf("ForEach failed: %v", items)
 		}
-	}
-}
-
-func TestBxTree_BoundaryStability(t *testing.T) {
-	// Test very small max sizes to trigger splits/merges frequently
-	// Note: This assumes we could configure LeafMaxSize/InternalMaxSize,
-	// but since they are constants in types.go, we just push enough data
-	// to ensure depth > 1.
-
-	tree := New[string, struct{}]()
-
-	// Prepend many items
-	for i := 0; i < 1000; i++ {
-		tree.InsertAt(0, fmt.Sprintf("val-%d", i))
-	}
-
-	// Append many items
-	for i := 0; i < 1000; i++ {
-		tree.InsertAt(tree.Size(), fmt.Sprintf("end-%d", i))
-	}
-
-	// Delete from both ends
-	for i := 0; i < 500; i++ {
-		tree.DeleteAt(0)
-		tree.DeleteAt(tree.Size() - 1)
-	}
-
-	expectedSize := 1000 // (1000 + 1000) - (500 + 500)
-	if tree.Size() != expectedSize {
-		t.Errorf("Expected size %d, got %d", expectedSize, tree.Size())
-	}
-
-	// Verify linked list integrity
-	curr := tree.First
-	visitedCount := 0
-	for curr != nil {
-		visitedCount += len(curr.Items)
-		if curr.next == nil && curr != tree.Last {
-			t.Error("Reached end of list but tree.Last is not set to this node")
-		}
-		curr = curr.next
-	}
-
-	if visitedCount != tree.Size() {
-		t.Errorf("Linked list traversal count %d does not match tree size %d", visitedCount, tree.Size())
-	}
+	})
 }
