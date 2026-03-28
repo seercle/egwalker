@@ -86,13 +86,13 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) i
 	if n.IsLeaf() {
 		items := n.Items()
 		size = len(items)
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			for i, item := range items {
-				m := tree.Summarizer.FromItem(item)
+				m := tree.summarizer.FromItem(item)
 				if i == 0 {
 					summary = m
 				} else {
-					summary = tree.Summarizer.Add(summary, m)
+					summary = tree.summarizer.Add(summary, m)
 				}
 			}
 		}
@@ -100,12 +100,12 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) i
 		for _, child := range n.Children() {
 			childSize := verifyNode(t, child, tree)
 			size += childSize
-			if tree.Summarizer != nil {
+			if tree.summarizer != nil {
 				if first {
 					summary = child.Summary()
 					first = false
 				} else {
-					summary = tree.Summarizer.Add(summary, child.Summary())
+					summary = tree.summarizer.Add(summary, child.Summary())
 				}
 			}
 		}
@@ -115,7 +115,7 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) i
 		t.Errorf("Node size mismatch: got %d, want %d", n.size, size)
 	}
 
-	if tree.Summarizer != nil && !reflect.DeepEqual(n.Summary(), summary) {
+	if tree.summarizer != nil && !reflect.DeepEqual(n.Summary(), summary) {
 		t.Errorf("Node summary mismatch: got %v, want %v", n.Summary(), summary)
 	}
 
@@ -131,8 +131,7 @@ func TestFuzzTree(t *testing.T) {
 
 			var tree *BxTree[int, int]
 			if withSummary {
-				tree = New[int, int]()
-				tree.Summarizer = countSummary
+				tree = New(WithSummarizer(countSummary))
 			} else {
 				tree = New[int, int]()
 			}
@@ -190,9 +189,11 @@ func FuzzBxTree(f *testing.F) {
 		withSummary := data[0]%2 == 0
 		data = data[1:]
 
-		tree := New[int, int]()
+		var tree *BxTree[int, int]
 		if withSummary {
-			tree.Summarizer = countSummary
+			tree = New(WithSummarizer(countSummary))
+		} else {
+			tree = New[int, int]()
 		}
 		var reference []int
 

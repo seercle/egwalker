@@ -5,44 +5,51 @@ import (
 	"iter"
 )
 
-func New[T any, S any]() *BxTree[T, S] {
-	return NewWithConfig[T, S](Config{
-		InternalMinSize: DefaultInternalMinSize,
-		InternalMaxSize: DefaultInternalMaxSize,
-		LeafMinSize:     DefaultLeafMinSize,
-		LeafMaxSize:     DefaultLeafMaxSize,
-	})
-}
-
-func NewWithConfig[T any, S any](cfg Config) *BxTree[T, S] {
-	if cfg.InternalMinSize == 0 {
-		cfg.InternalMinSize = DefaultInternalMinSize
-	}
-	if cfg.InternalMaxSize == 0 {
-		cfg.InternalMaxSize = DefaultInternalMaxSize
-	}
-	if cfg.LeafMinSize == 0 {
-		cfg.LeafMinSize = DefaultLeafMinSize
-	}
-	if cfg.LeafMaxSize == 0 {
-		cfg.LeafMaxSize = DefaultLeafMaxSize
-	}
-
-	return &BxTree[T, S]{
-		root:            nil,
-		first:           nil,
-		last:            nil,
-		internalMinSize: cfg.InternalMinSize,
-		internalMaxSize: cfg.InternalMaxSize,
-		leafMinSize:     cfg.LeafMinSize,
-		leafMaxSize:     cfg.LeafMaxSize,
+// WithSummarizer sets the summarizer for the tree.
+func WithSummarizer[T any, S any](s Summarizer[T, S]) Option[T, S] {
+	return func(tree *BxTree[T, S]) {
+		tree.summarizer = s
 	}
 }
 
-func NewFromSlice[T any, S any](items []T, summarizer Summarizer[T, S], onMoved func(T, *Node[T, S])) *BxTree[T, S] {
-	tree := New[T, S]()
-	tree.Summarizer = summarizer
-	tree.OnItemMoved = onMoved
+// WithOnItemMoved sets the callback for when an item is moved to a new node.
+func WithOnItemMoved[T any, S any](f func(item T, node *Node[T, S])) Option[T, S] {
+	return func(tree *BxTree[T, S]) {
+		tree.onItemMoved = f
+	}
+}
+
+// WithInternalNodeSize sets the minimum and maximum number of children for internal nodes.
+func WithInternalNodeSize[T any, S any](min, max int) Option[T, S] {
+	return func(tree *BxTree[T, S]) {
+		tree.internalMinSize = min
+		tree.internalMaxSize = max
+	}
+}
+
+// WithLeafNodeSize sets the minimum and maximum number of items for leaf nodes.
+func WithLeafNodeSize[T any, S any](min, max int) Option[T, S] {
+	return func(tree *BxTree[T, S]) {
+		tree.leafMinSize = min
+		tree.leafMaxSize = max
+	}
+}
+
+func New[T any, S any](opts ...Option[T, S]) *BxTree[T, S] {
+	tree := &BxTree[T, S]{
+		internalMinSize: DefaultInternalMinSize,
+		internalMaxSize: DefaultInternalMaxSize,
+		leafMinSize:     DefaultLeafMinSize,
+		leafMaxSize:     DefaultLeafMaxSize,
+	}
+	for _, opt := range opts {
+		opt(tree)
+	}
+	return tree
+}
+
+func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
+	tree := New(opts...)
 
 	if len(items) == 0 {
 		return tree
@@ -62,14 +69,14 @@ func NewFromSlice[T any, S any](items []T, summarizer Summarizer[T, S], onMoved 
 		}
 		copy(leaf.items, items[i:end])
 
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			var s S
 			for j, item := range leaf.items {
-				m := tree.Summarizer.FromItem(item)
+				m := tree.summarizer.FromItem(item)
 				if j == 0 {
 					s = m
 				} else {
-					s = tree.Summarizer.Add(s, m)
+					s = tree.summarizer.Add(s, m)
 				}
 			}
 			leaf.summary = s
@@ -84,9 +91,9 @@ func NewFromSlice[T any, S any](items []T, summarizer Summarizer[T, S], onMoved 
 		leaves = append(leaves, leaf)
 		prevLeaf = leaf
 
-		if tree.OnItemMoved != nil {
+		if tree.onItemMoved != nil {
 			for _, item := range leaf.items {
-				tree.OnItemMoved(item, leaf)
+				tree.onItemMoved(item, leaf)
 			}
 		}
 	}
@@ -111,12 +118,12 @@ func NewFromSlice[T any, S any](items []T, summarizer Summarizer[T, S], onMoved 
 			for _, child := range n.children {
 				child.parent = n
 				size += child.size
-				if tree.Summarizer != nil {
+				if tree.summarizer != nil {
 					if first {
 						s = child.summary
 						first = false
 					} else {
-						s = tree.Summarizer.Add(s, child.summary)
+						s = tree.summarizer.Add(s, child.summary)
 					}
 				}
 			}
@@ -342,22 +349,22 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 		tree.first = leaf
 		tree.last = leaf
 
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			var s S
 			for i, item := range newItems {
-				m := tree.Summarizer.FromItem(item)
+				m := tree.summarizer.FromItem(item)
 				if i == 0 {
 					s = m
 				} else {
-					s = tree.Summarizer.Add(s, m)
+					s = tree.summarizer.Add(s, m)
 				}
 			}
 			leaf.summary = s
 		}
 
-		if tree.OnItemMoved != nil {
+		if tree.onItemMoved != nil {
 			for _, item := range leaf.items {
-				tree.OnItemMoved(item, leaf)
+				tree.onItemMoved(item, leaf)
 			}
 		}
 		return nil
@@ -373,22 +380,22 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 		leaf.sizeAddUpward(len(newItems))
 
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			var totalDelta S
 			for i, item := range newItems {
-				m := tree.Summarizer.FromItem(item)
+				m := tree.summarizer.FromItem(item)
 				if i == 0 {
 					totalDelta = m
 				} else {
-					totalDelta = tree.Summarizer.Add(totalDelta, m)
+					totalDelta = tree.summarizer.Add(totalDelta, m)
 				}
 			}
 			leaf.SummaryAddUpward(totalDelta, tree)
 		}
 
-		if tree.OnItemMoved != nil {
+		if tree.onItemMoved != nil {
 			for _, item := range newItems {
-				tree.OnItemMoved(item, leaf)
+				tree.onItemMoved(item, leaf)
 			}
 		}
 
@@ -410,22 +417,22 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 	leaf.sizeAddUpward(len(newItems))
 
-	if tree.Summarizer != nil {
+	if tree.summarizer != nil {
 		var totalDelta S
 		for i, item := range newItems {
-			m := tree.Summarizer.FromItem(item)
+			m := tree.summarizer.FromItem(item)
 			if i == 0 {
 				totalDelta = m
 			} else {
-				totalDelta = tree.Summarizer.Add(totalDelta, m)
+				totalDelta = tree.summarizer.Add(totalDelta, m)
 			}
 		}
 		leaf.SummaryAddUpward(totalDelta, tree)
 	}
 
-	if tree.OnItemMoved != nil {
+	if tree.onItemMoved != nil {
 		for _, item := range newItems {
-			tree.OnItemMoved(item, leaf)
+			tree.onItemMoved(item, leaf)
 		}
 	}
 
@@ -445,7 +452,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 			isLeaf: false,
 			size:   n.size,
 		}
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			newRoot.summary = n.summary
 		}
 		tree.root = newRoot
@@ -467,18 +474,18 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 		right.items = make([]T, len(n.items)-mid)
 		copy(right.items, n.items[mid:])
 
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			var rightSummary S
 			for i, item := range right.items {
-				m := tree.Summarizer.FromItem(item)
+				m := tree.summarizer.FromItem(item)
 				if i == 0 {
 					rightSummary = m
 				} else {
-					rightSummary = tree.Summarizer.Add(rightSummary, m)
+					rightSummary = tree.summarizer.Add(rightSummary, m)
 				}
 			}
 			right.summary = rightSummary
-			n.summary = tree.Summarizer.Sub(n.summary, rightSummary)
+			n.summary = tree.summarizer.Sub(n.summary, rightSummary)
 		}
 
 		n.items = n.items[:mid]
@@ -495,9 +502,9 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 			tree.last = right
 		}
 
-		if tree.OnItemMoved != nil {
+		if tree.onItemMoved != nil {
 			for _, item := range right.items {
-				tree.OnItemMoved(item, right)
+				tree.onItemMoved(item, right)
 			}
 		}
 	} else {
@@ -508,7 +515,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 		n.size = 0
 		right.size = 0
 
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			firstN := true
 			firstR := true
 
@@ -518,7 +525,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 					n.summary = child.summary
 					firstN = false
 				} else {
-					n.summary = tree.Summarizer.Add(n.summary, child.summary)
+					n.summary = tree.summarizer.Add(n.summary, child.summary)
 				}
 			}
 			for _, child := range right.children {
@@ -528,7 +535,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 					right.summary = child.summary
 					firstR = false
 				} else {
-					right.summary = tree.Summarizer.Add(right.summary, child.summary)
+					right.summary = tree.summarizer.Add(right.summary, child.summary)
 				}
 			}
 		} else {
@@ -589,17 +596,17 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 		canDelete := min(length, leaf.size-pos)
 
 		// Update summary before deleting
-		if tree.Summarizer != nil {
+		if tree.summarizer != nil {
 			var totalDelta S
 			for i := range canDelete {
-				m := tree.Summarizer.FromItem(leaf.items[pos+i])
+				m := tree.summarizer.FromItem(leaf.items[pos+i])
 				if i == 0 {
 					totalDelta = m
 				} else {
-					totalDelta = tree.Summarizer.Add(totalDelta, m)
+					totalDelta = tree.summarizer.Add(totalDelta, m)
 				}
 			}
-			leaf.SummaryAddUpward(tree.Summarizer.Sub(S(*new(S)), totalDelta), tree)
+			leaf.SummaryAddUpward(tree.summarizer.Sub(S(*new(S)), totalDelta), tree)
 		}
 
 		leaf.sizeAddUpward(-canDelete)
@@ -646,14 +653,14 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				n.items = append([]T{item}, n.items...)
 				n.size++
 
-				if tree.Summarizer != nil {
-					m := tree.Summarizer.FromItem(item)
-					left.summary = tree.Summarizer.Sub(left.summary, m)
-					n.summary = tree.Summarizer.Add(n.summary, m)
+				if tree.summarizer != nil {
+					m := tree.summarizer.FromItem(item)
+					left.summary = tree.summarizer.Sub(left.summary, m)
+					n.summary = tree.summarizer.Add(n.summary, m)
 				}
 
-				if tree.OnItemMoved != nil {
-					tree.OnItemMoved(item, n)
+				if tree.onItemMoved != nil {
+					tree.onItemMoved(item, n)
 				}
 				return
 			}
@@ -668,14 +675,14 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				n.items = append(n.items, item)
 				n.size++
 
-				if tree.Summarizer != nil {
-					m := tree.Summarizer.FromItem(item)
-					right.summary = tree.Summarizer.Sub(right.summary, m)
-					n.summary = tree.Summarizer.Add(n.summary, m)
+				if tree.summarizer != nil {
+					m := tree.summarizer.FromItem(item)
+					right.summary = tree.summarizer.Sub(right.summary, m)
+					n.summary = tree.summarizer.Add(n.summary, m)
 				}
 
-				if tree.OnItemMoved != nil {
-					tree.OnItemMoved(item, n)
+				if tree.onItemMoved != nil {
+					tree.onItemMoved(item, n)
 				}
 				return
 			}
@@ -691,9 +698,9 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				n.size += child.size
 				child.parent = n
 
-				if tree.Summarizer != nil {
-					left.summary = tree.Summarizer.Sub(left.summary, child.summary)
-					n.summary = tree.Summarizer.Add(n.summary, child.summary)
+				if tree.summarizer != nil {
+					left.summary = tree.summarizer.Sub(left.summary, child.summary)
+					n.summary = tree.summarizer.Add(n.summary, child.summary)
 				}
 
 				return
@@ -709,9 +716,9 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 				n.size += child.size
 				child.parent = n
 
-				if tree.Summarizer != nil {
-					right.summary = tree.Summarizer.Sub(right.summary, child.summary)
-					n.summary = tree.Summarizer.Add(n.summary, child.summary)
+				if tree.summarizer != nil {
+					right.summary = tree.summarizer.Sub(right.summary, child.summary)
+					n.summary = tree.summarizer.Add(n.summary, child.summary)
 				}
 
 				return
@@ -738,15 +745,15 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 		panic("internal inconsistency: cannot merge nodes without a parent")
 	}
 	if left.isLeaf {
-		if tree.OnItemMoved != nil {
+		if tree.onItemMoved != nil {
 			for _, item := range right.items {
-				tree.OnItemMoved(item, left)
+				tree.onItemMoved(item, left)
 			}
 		}
 		left.items = append(left.items, right.items...)
 		left.size = len(left.items)
-		if tree.Summarizer != nil {
-			left.summary = tree.Summarizer.Add(left.summary, right.summary)
+		if tree.summarizer != nil {
+			left.summary = tree.summarizer.Add(left.summary, right.summary)
 		}
 		left.next = right.next
 		if left.next != nil {
@@ -760,8 +767,8 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 			child.parent = left
 			left.children = append(left.children, child)
 			left.size += child.size
-			if tree.Summarizer != nil {
-				left.summary = tree.Summarizer.Add(left.summary, child.summary)
+			if tree.summarizer != nil {
+				left.summary = tree.summarizer.Add(left.summary, child.summary)
 			}
 		}
 	}
@@ -780,12 +787,12 @@ func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	if tree == nil {
 		panic("bxtree: SummaryAddUpward called with nil tree")
 	}
-	if tree.Summarizer == nil {
+	if tree.summarizer == nil {
 		return
 	}
 	curr := n
 	for curr != nil {
-		curr.summary = tree.Summarizer.Add(curr.summary, delta)
+		curr.summary = tree.summarizer.Add(curr.summary, delta)
 		curr = curr.parent
 	}
 }
@@ -846,8 +853,8 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 		return nil, -1, *new(S)
 	}
 
-	if tree.Summarizer == nil {
-		panic("FindPath called on tree without Summary")
+	if tree.summarizer == nil {
+		panic("FindPath called on tree without Summarizer")
 	}
 
 	var acc S
@@ -861,7 +868,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 			if first {
 				nextAcc = child.summary
 			} else {
-				nextAcc = tree.Summarizer.Add(acc, child.summary)
+				nextAcc = tree.summarizer.Add(acc, child.summary)
 			}
 
 			if predicate(acc, child.summary) {
@@ -879,7 +886,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 
 	// In leaf
 	for i, item := range curr.items {
-		m := tree.Summarizer.FromItem(item)
+		m := tree.summarizer.FromItem(item)
 		if predicate(acc, m) {
 			return curr, i, acc
 		}
@@ -887,7 +894,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 			acc = m
 			first = false
 		} else {
-			acc = tree.Summarizer.Add(acc, m)
+			acc = tree.summarizer.Add(acc, m)
 		}
 	}
 

@@ -364,14 +364,15 @@ func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.
 
 func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 	doc := &crdtDoc{
-		items:          bxtree.New[*crdtItem, crdtSummary](),
+		items: bxtree.New(
+			bxtree.WithSummarizer(crdtSummaryConfig),
+			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+				item.node = node
+			}),
+		),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
-	}
-	doc.items.Summarizer = crdtSummaryConfig
-	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
-		item.node = node
 	}
 
 	snapshot := bxtree.New[T, struct{}]()
@@ -503,14 +504,15 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 	visit := findOpsToVisit(log, b.frontier, mergeFrontier)
 
 	doc := &crdtDoc{
-		items:          bxtree.New[*crdtItem, crdtSummary](),
+		items: bxtree.New(
+			bxtree.WithSummarizer(crdtSummaryConfig),
+			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+				item.node = node
+			}),
+		),
 		currentVersion: visit.commonVersion,
 		delTargets:     make(map[lv]lv),
 		itemsByLV:      make(map[lv]*crdtItem),
-	}
-	doc.items.Summarizer = crdtSummaryConfig
-	doc.items.OnItemMoved = func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
-		item.node = node
 	}
 
 	maxFrontier := -1

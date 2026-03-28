@@ -39,13 +39,6 @@ type Summarizer[T any, S any] interface {
 	Sub(a, b S) S
 }
 
-type Config struct {
-	InternalMinSize int
-	InternalMaxSize int
-	LeafMinSize     int
-	LeafMaxSize     int
-}
-
 type BxTree[T any, S any] struct {
 	root            *Node[T, S]
 	first           *Node[T, S]
@@ -54,9 +47,12 @@ type BxTree[T any, S any] struct {
 	internalMaxSize int
 	leafMinSize     int
 	leafMaxSize     int
-	OnItemMoved     func(item T, node *Node[T, S])
-	Summarizer      Summarizer[T, S]
+	onItemMoved     func(item T, node *Node[T, S])
+	summarizer      Summarizer[T, S]
 }
+
+// Option is a functional option for configuring a BxTree.
+type Option[T any, S any] func(*BxTree[T, S])
 
 func (tree *BxTree[T, S]) Root() *Node[T, S] {
 	if tree == nil {

@@ -149,8 +149,7 @@ func BenchmarkSummaryOverhead(b *testing.B) {
 	b.Run("WithSummary", func(b *testing.B) {
 		config := countSummarizer{}
 		for b.Loop() {
-			tree := New[int, int]()
-			tree.Summarizer = config
+			tree := New(WithSummarizer(config))
 			for i := range size {
 				tree.InsertAt(i, i)
 			}

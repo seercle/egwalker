@@ -101,7 +101,7 @@ func TestNilNode(t *testing.T) {
 
 func TestNewFromSlice(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		tree := NewFromSlice[int, struct{}](nil, nil, nil)
+		tree := NewFromSlice[int, struct{}](nil)
 		if tree.Size() != 0 {
 			t.Errorf("Expected size 0, got %d", tree.Size())
 		}
@@ -115,7 +115,7 @@ func TestNewFromSlice(t *testing.T) {
 		}
 
 		config := setupCountSummary()
-		tree := NewFromSlice(items, config, nil)
+		tree := NewFromSlice(items, WithSummarizer(config))
 
 		if tree.Size() != size {
 			t.Errorf("Expected size %d, got %d", size, tree.Size())
@@ -145,9 +145,9 @@ func TestNewFromSlice(t *testing.T) {
 			node *Node[*item, struct{}]
 		}
 		items := []*item{{}, {}, {}}
-		tree := NewFromSlice(items, nil, func(it *item, n *Node[*item, struct{}]) {
+		tree := NewFromSlice(items, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
 			it.node = n
-		})
+		}))
 
 		if tree.Size() != 3 {
 			t.Errorf("Expected size 3, got %d", tree.Size())
@@ -307,8 +307,7 @@ func TestPointers(t *testing.T) {
 }
 
 func TestSummary(t *testing.T) {
-	tree := New[int, int]()
-	tree.Summarizer = setupCountSummary()
+	tree := New(WithSummarizer(setupCountSummary()))
 
 	// Initial inserts
 	for i := range 100 {
@@ -353,9 +352,9 @@ func TestOnItemMoved(t *testing.T) {
 		node *Node[*item, struct{}]
 	}
 
-	tree := NewFromSlice(nil, nil, func(it *item, n *Node[*item, struct{}]) {
+	tree := NewFromSlice(nil, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
 		it.node = n
-	})
+	}))
 
 	items := make([]*item, 200)
 	for i := range items {
