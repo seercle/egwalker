@@ -132,6 +132,9 @@ func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved 
 }
 
 func (tree *BxTree[T, S]) Size() int {
+	if tree == nil {
+		panic("bxtree: Size called on nil tree")
+	}
 	if tree.root == nil {
 		return 0
 	}
@@ -140,6 +143,9 @@ func (tree *BxTree[T, S]) Size() int {
 
 // All returns an iterator over all items in the tree in order.
 func (tree *BxTree[T, S]) All() iter.Seq[T] {
+	if tree == nil {
+		panic("bxtree: All called on nil tree")
+	}
 	return func(yield func(T) bool) {
 		curr := tree.first
 		for curr != nil {
@@ -155,6 +161,9 @@ func (tree *BxTree[T, S]) All() iter.Seq[T] {
 
 // Reverse returns an iterator over all items in the tree in reverse order.
 func (tree *BxTree[T, S]) Reverse() iter.Seq[T] {
+	if tree == nil {
+		panic("bxtree: Reverse called on nil tree")
+	}
 	return func(yield func(T) bool) {
 		curr := tree.last
 		for curr != nil {
@@ -169,12 +178,21 @@ func (tree *BxTree[T, S]) Reverse() iter.Seq[T] {
 }
 
 func (tree *BxTree[T, S]) ForEach(f func(item T)) {
+	if tree == nil {
+		panic("bxtree: ForEach called on nil tree")
+	}
+	if f == nil {
+		panic("bxtree: ForEach called with nil function")
+	}
 	for item := range tree.All() {
 		f(item)
 	}
 }
 
 func (tree *BxTree[T, S]) Print() {
+	if tree == nil {
+		panic("bxtree: Print called on nil tree")
+	}
 	if tree.root != nil {
 		fmt.Printf("Tree size: %d\n", tree.root.size)
 		tree.root.printTree(0)
@@ -184,6 +202,9 @@ func (tree *BxTree[T, S]) Print() {
 }
 
 func (n *Node[T, S]) printTree(level int) {
+	if n == nil {
+		panic("bxtree: printTree called on nil node")
+	}
 	prefix := ""
 	for range level {
 		prefix += "  "
@@ -205,6 +226,9 @@ func (n *Node[T, S]) printTree(level int) {
 }
 
 func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
+	if tree == nil {
+		panic("bxtree: GetAt called on nil tree")
+	}
 	leaf, pos, err := tree.getAt(index)
 	if err != nil {
 		return nil, err
@@ -213,10 +237,16 @@ func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
 }
 
 func (tree *BxTree[T, S]) GetAtNode(index int) (*Node[T, S], int, error) {
+	if tree == nil {
+		panic("bxtree: GetAtNode called on nil tree")
+	}
 	return tree.getAt(index)
 }
 
 func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
+	if tree == nil {
+		panic("bxtree: getAt called on nil tree")
+	}
 	if index < 0 || index >= tree.Size() {
 		return nil, -1, ErrIndexOutOfBounds
 	}
@@ -239,37 +269,65 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 			index -= child.size
 		}
 		if !found {
-			return nil, -1, ErrIndexOutOfBounds
+			panic(fmt.Sprintf("internal inconsistency: index %d not found in internal node during traversal", index))
 		}
 	}
 	return curr, index, nil
 }
 
 func (n *Node[T, S]) IsLeaf() bool {
+	if n == nil {
+		panic("bxtree: IsLeaf called on nil node")
+	}
 	return n.isLeaf
 }
 
 func (n *Node[T, S]) Next() *Node[T, S] {
+	if n == nil {
+		panic("bxtree: Next called on nil node")
+	}
 	return n.next
 }
 
 func (n *Node[T, S]) Prev() *Node[T, S] {
+	if n == nil {
+		panic("bxtree: Prev called on nil node")
+	}
 	return n.prev
 }
 
+func (n *Node[T, S]) Parent() *Node[T, S] {
+	if n == nil {
+		panic("bxtree: Parent called on nil node")
+	}
+	return n.parent
+}
+
 func (n *Node[T, S]) Children() []*Node[T, S] {
+	if n == nil {
+		panic("bxtree: Children called on nil node")
+	}
 	return n.children
 }
 
 func (tree *BxTree[T, S]) InsertRange(index int, items []T) error {
+	if tree == nil {
+		panic("bxtree: InsertRange called on nil tree")
+	}
 	return tree.insert(index, items)
 }
 
 func (tree *BxTree[T, S]) InsertAt(index int, item T) error {
+	if tree == nil {
+		panic("bxtree: InsertAt called on nil tree")
+	}
 	return tree.insert(index, []T{item})
 }
 
 func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
+	if tree == nil {
+		panic("bxtree: insert called on nil tree")
+	}
 	if tree.root == nil {
 		if index != 0 {
 			return ErrIndexOutOfBounds
@@ -313,7 +371,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 		copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 		copy(leaf.items[pos:], newItems)
 
-		leaf.sizeAddUpward(len(newItems))
+		leaf.addSizeUpward(len(newItems))
 
 		if tree.SummaryConfig != nil {
 			var totalDelta S
@@ -350,7 +408,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 	copy(leaf.items[pos+len(newItems):], leaf.items[pos:oldLen])
 	copy(leaf.items[pos:], newItems)
 
-	leaf.sizeAddUpward(len(newItems))
+	leaf.addSizeUpward(len(newItems))
 
 	if tree.SummaryConfig != nil {
 		var totalDelta S
@@ -379,6 +437,9 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 }
 
 func (tree *BxTree[T, S]) split(n *Node[T, S]) {
+	if n == nil {
+		panic("bxtree: split called with nil node")
+	}
 	if n.parent == nil {
 		newRoot := &Node[T, S]{
 			isLeaf: false,
@@ -390,6 +451,10 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 		tree.root = newRoot
 		n.parent = newRoot
 		newRoot.children = []*Node[T, S]{n}
+	}
+
+	if n.parent == nil {
+		panic("internal inconsistency: split node must have a parent")
 	}
 
 	right := &Node[T, S]{
@@ -491,14 +556,23 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 }
 
 func (tree *BxTree[T, S]) DeleteRange(index int, length int) error {
+	if tree == nil {
+		panic("bxtree: DeleteRange called on nil tree")
+	}
 	return tree.delete(index, length)
 }
 
 func (tree *BxTree[T, S]) DeleteAt(index int) error {
+	if tree == nil {
+		panic("bxtree: DeleteAt called on nil tree")
+	}
 	return tree.delete(index, 1)
 }
 
 func (tree *BxTree[T, S]) delete(index int, length int) error {
+	if tree == nil {
+		panic("bxtree: delete called on nil tree")
+	}
 	if length == 0 {
 		return nil
 	}
@@ -528,7 +602,7 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 			leaf.SummaryAddUpward(tree.SummaryConfig.Sub(S(*new(S)), totalDelta), tree)
 		}
 
-		leaf.sizeAddUpward(-canDelete)
+		leaf.addSizeUpward(-canDelete)
 		leaf.items = append(leaf.items[:pos], leaf.items[pos+canDelete:]...)
 		leaf.size = len(leaf.items)
 
@@ -547,6 +621,9 @@ func (tree *BxTree[T, S]) delete(index int, length int) error {
 }
 
 func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
+	if n == nil {
+		panic("bxtree: rebalance called with nil node")
+	}
 	if n.parent == nil {
 		if !n.isLeaf && len(n.children) == 1 {
 			tree.root = n.children[0]
@@ -650,7 +727,16 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 }
 
 func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
+	if left == nil {
+		panic("bxtree: merge called with nil left node")
+	}
+	if right == nil {
+		panic("bxtree: merge called with nil right node")
+	}
 	parent := left.parent
+	if parent == nil {
+		panic("internal inconsistency: cannot merge nodes without a parent")
+	}
 	if left.isLeaf {
 		if tree.OnItemMoved != nil {
 			for _, item := range right.items {
@@ -688,6 +774,12 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 }
 
 func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
+	if n == nil {
+		panic("bxtree: SummaryAddUpward called on nil node")
+	}
+	if tree == nil {
+		panic("bxtree: SummaryAddUpward called with nil tree")
+	}
 	if tree.SummaryConfig == nil {
 		return
 	}
@@ -698,7 +790,10 @@ func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	}
 }
 
-func (n *Node[T, S]) sizeAddUpward(delta int) {
+func (n *Node[T, S]) addSizeUpward(delta int) {
+	if n == nil {
+		panic("bxtree: addSizeUpward called on nil node")
+	}
 	curr := n
 	for curr != nil {
 		curr.size += delta
@@ -707,18 +802,24 @@ func (n *Node[T, S]) sizeAddUpward(delta int) {
 }
 
 func (n *Node[T, S]) getParentIndex() int {
+	if n == nil {
+		panic("bxtree: getParentIndex called on nil node")
+	}
 	if n.parent == nil {
-		return -1
+		panic("getParentIndex called on root node")
 	}
 	for i, child := range n.parent.children {
 		if child == n {
 			return i
 		}
 	}
-	return -1
+	panic("node not found in parent's children")
 }
 
 func (n *Node[T, S]) Index() int {
+	if n == nil {
+		panic("bxtree: Index called on nil node")
+	}
 	index := 0
 	curr := n
 	for curr.parent != nil {
@@ -735,8 +836,18 @@ func (n *Node[T, S]) Index() int {
 }
 
 func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, S], int, S) {
+	if tree == nil {
+		panic("bxtree: FindPath called on nil tree")
+	}
+	if predicate == nil {
+		panic("bxtree: FindPath called with nil predicate")
+	}
 	if tree.root == nil {
 		return nil, -1, *new(S)
+	}
+
+	if tree.SummaryConfig == nil {
+		panic("FindPath called on tree without SummaryConfig")
 	}
 
 	var acc S
@@ -762,7 +873,7 @@ func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, 
 			first = false
 		}
 		if !found {
-			return nil, -1, acc
+			panic("internal inconsistency: FindPath failed to find child matching predicate")
 		}
 	}
 

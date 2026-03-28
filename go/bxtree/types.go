@@ -18,8 +18,18 @@ type Node[T any, S any] struct {
 	children []*Node[T, S] // only for internal nodes
 }
 
-func (n *Node[T, S]) Summary() S { return n.summary }
-func (n *Node[T, S]) Items() []T { return n.items }
+func (n *Node[T, S]) Summary() S {
+	if n == nil {
+		panic("bxtree: Summary called on nil node")
+	}
+	return n.summary
+}
+func (n *Node[T, S]) Items() []T {
+	if n == nil {
+		panic("bxtree: Items called on nil node")
+	}
+	return n.items
+}
 
 type SummaryConfig[T any, S any] struct {
 	FromItem func(item T) S
@@ -46,6 +56,21 @@ type BxTree[T any, S any] struct {
 	SummaryConfig   *SummaryConfig[T, S]
 }
 
-func (tree *BxTree[T, S]) Root() *Node[T, S]  { return tree.root }
-func (tree *BxTree[T, S]) First() *Node[T, S] { return tree.first }
-func (tree *BxTree[T, S]) Last() *Node[T, S]  { return tree.last }
+func (tree *BxTree[T, S]) Root() *Node[T, S] {
+	if tree == nil {
+		panic("bxtree: Root called on nil tree")
+	}
+	return tree.root
+}
+func (tree *BxTree[T, S]) First() *Node[T, S] {
+	if tree == nil {
+		panic("bxtree: First called on nil tree")
+	}
+	return tree.first
+}
+func (tree *BxTree[T, S]) Last() *Node[T, S] {
+	if tree == nil {
+		panic("bxtree: Last called on nil tree")
+	}
+	return tree.last
+}
