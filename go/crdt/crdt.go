@@ -15,9 +15,7 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 	numShared := 0
 
 	// Max-heap of lv
-	pq := pheap.NewWithLess(func(a, b lv) bool {
-		return a < b
-	})
+	pq := pheap.New[lv]()
 
 	enq := func(v lv, flag diffFlag) {
 		oldFlag, exists := flags[v]
@@ -404,9 +402,9 @@ func compareArrays(a, b []lv) int {
 }
 
 func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
-	pq := pheap.NewWithLess(func(a, b mergePoint) bool {
+	pq := pheap.NewAny(pheap.WithLess(func(a, b mergePoint) bool {
 		return compareArrays(a.v, b.v) < 0
-	})
+	}))
 
 	enq := func(lvs []lv, isInA bool) {
 		v := make([]lv, len(lvs))

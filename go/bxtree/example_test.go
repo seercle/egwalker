@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-func Example_basic() {
+func ExampleNew() {
 	// Create a simple tree of strings
 	tree := New[string, struct{}]()
 
@@ -29,7 +29,7 @@ func (s readmeSummarizer) FromItem(item int) int { return item }
 func (s readmeSummarizer) Add(a, b int) int      { return a + b }
 func (s readmeSummarizer) Sub(a, b int) int      { return a - b }
 
-func Example_summarizer() {
+func ExampleSummarizer() {
 	// Initialize tree with the summarizer
 	tree := New[int, int](
 		WithSummarizer[int, int](readmeSummarizer{}),
