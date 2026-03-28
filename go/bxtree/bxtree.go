@@ -5,7 +5,8 @@ import (
 	"iter"
 )
 
-// WithSummarizer sets the summarizer for the tree.
+// WithSummarizer sets the summarizer for the tree. The summarizer is used to
+// maintain tree-wide metadata summaries that can be used for efficient searching.
 func WithSummarizer[T any, S any](s Summarizer[T, S]) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.summarizer = s
@@ -13,6 +14,7 @@ func WithSummarizer[T any, S any](s Summarizer[T, S]) Option[T, S] {
 }
 
 // WithOnItemMoved sets the callback for when an item is moved to a new node.
+// This is useful for external systems that need to track the current node of an item.
 func WithOnItemMoved[T any, S any](f func(item T, node *Node[T, S])) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.onItemMoved = f
@@ -20,6 +22,7 @@ func WithOnItemMoved[T any, S any](f func(item T, node *Node[T, S])) Option[T, S
 }
 
 // WithInternalNodeSize sets the minimum and maximum number of children for internal nodes.
+// Larger sizes increase branching factor and reduce tree height but increase work per node.
 func WithInternalNodeSize[T any, S any](min, max int) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.internalMinSize = min
@@ -28,6 +31,7 @@ func WithInternalNodeSize[T any, S any](min, max int) Option[T, S] {
 }
 
 // WithLeafNodeSize sets the minimum and maximum number of items for leaf nodes.
+// Larger sizes improve cache locality but increase the cost of insertions and deletions.
 func WithLeafNodeSize[T any, S any](min, max int) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.leafMinSize = min
@@ -35,6 +39,7 @@ func WithLeafNodeSize[T any, S any](min, max int) Option[T, S] {
 	}
 }
 
+// New creates a new empty BxTree with the provided options.
 func New[T any, S any](opts ...Option[T, S]) *BxTree[T, S] {
 	tree := &BxTree[T, S]{
 		internalMinSize: DefaultInternalMinSize,
@@ -48,6 +53,8 @@ func New[T any, S any](opts ...Option[T, S]) *BxTree[T, S] {
 	return tree
 }
 
+// NewFromSlice creates a new BxTree initialized with the provided items.
+// The tree is built bottom-up for maximum efficiency.
 func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 	tree := New(opts...)
 
@@ -138,6 +145,7 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 	return tree
 }
 
+// Size returns the total number of items in the tree.
 func (tree *BxTree[T, S]) Size() int {
 	if tree == nil {
 		panic("bxtree: Size called on nil tree")
@@ -184,6 +192,7 @@ func (tree *BxTree[T, S]) Reverse() iter.Seq[T] {
 	}
 }
 
+// ForEach calls f for every item in the tree in order.
 func (tree *BxTree[T, S]) ForEach(f func(item T)) {
 	if tree == nil {
 		panic("bxtree: ForEach called on nil tree")
@@ -196,6 +205,7 @@ func (tree *BxTree[T, S]) ForEach(f func(item T)) {
 	}
 }
 
+// Print debug prints the structure of the tree to stdout.
 func (tree *BxTree[T, S]) Print() {
 	if tree == nil {
 		panic("bxtree: Print called on nil tree")
@@ -232,6 +242,8 @@ func (n *Node[T, S]) printTree(level int) {
 	}
 }
 
+// GetAt returns a pointer to the item at the specified 0-based index.
+// Returns ErrIndexOutOfBounds if the index is out of range.
 func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
 	if tree == nil {
 		panic("bxtree: GetAt called on nil tree")
@@ -243,6 +255,8 @@ func (tree *BxTree[T, S]) GetAt(index int) (*T, error) {
 	return &leaf.items[pos], nil
 }
 
+// GetAtNode returns the leaf node containing the item at the specified index,
+// along with the item's position within that node.
 func (tree *BxTree[T, S]) GetAtNode(index int) (*Node[T, S], int, error) {
 	if tree == nil {
 		panic("bxtree: GetAtNode called on nil tree")
@@ -282,6 +296,7 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 	return curr, index, nil
 }
 
+// IsLeaf returns true if this node is a leaf node.
 func (n *Node[T, S]) IsLeaf() bool {
 	if n == nil {
 		panic("bxtree: IsLeaf called on nil node")
@@ -289,6 +304,8 @@ func (n *Node[T, S]) IsLeaf() bool {
 	return n.isLeaf
 }
 
+// Next returns the next leaf node in the sequence, or nil if this is the last node.
+// Only valid for leaf nodes.
 func (n *Node[T, S]) Next() *Node[T, S] {
 	if n == nil {
 		panic("bxtree: Next called on nil node")
@@ -296,6 +313,8 @@ func (n *Node[T, S]) Next() *Node[T, S] {
 	return n.next
 }
 
+// Prev returns the previous leaf node in the sequence, or nil if this is the first node.
+// Only valid for leaf nodes.
 func (n *Node[T, S]) Prev() *Node[T, S] {
 	if n == nil {
 		panic("bxtree: Prev called on nil node")
@@ -303,6 +322,7 @@ func (n *Node[T, S]) Prev() *Node[T, S] {
 	return n.prev
 }
 
+// Parent returns the parent of this node, or nil if this is the root.
 func (n *Node[T, S]) Parent() *Node[T, S] {
 	if n == nil {
 		panic("bxtree: Parent called on nil node")
@@ -310,6 +330,8 @@ func (n *Node[T, S]) Parent() *Node[T, S] {
 	return n.parent
 }
 
+// Children returns the child nodes of this internal node.
+// Returns nil for leaf nodes.
 func (n *Node[T, S]) Children() []*Node[T, S] {
 	if n == nil {
 		panic("bxtree: Children called on nil node")
@@ -317,6 +339,7 @@ func (n *Node[T, S]) Children() []*Node[T, S] {
 	return n.children
 }
 
+// InsertRange inserts a slice of items at the specified index.
 func (tree *BxTree[T, S]) InsertRange(index int, items []T) error {
 	if tree == nil {
 		panic("bxtree: InsertRange called on nil tree")
@@ -324,6 +347,7 @@ func (tree *BxTree[T, S]) InsertRange(index int, items []T) error {
 	return tree.insert(index, items)
 }
 
+// InsertAt inserts a single item at the specified index.
 func (tree *BxTree[T, S]) InsertAt(index int, item T) error {
 	if tree == nil {
 		panic("bxtree: InsertAt called on nil tree")
@@ -562,6 +586,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 	}
 }
 
+// DeleteRange removes length items starting from the specified index.
 func (tree *BxTree[T, S]) DeleteRange(index int, length int) error {
 	if tree == nil {
 		panic("bxtree: DeleteRange called on nil tree")
@@ -569,6 +594,7 @@ func (tree *BxTree[T, S]) DeleteRange(index int, length int) error {
 	return tree.delete(index, length)
 }
 
+// DeleteAt removes the item at the specified index.
 func (tree *BxTree[T, S]) DeleteAt(index int) error {
 	if tree == nil {
 		panic("bxtree: DeleteAt called on nil tree")
@@ -780,6 +806,8 @@ func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
 	tree.rebalance(parent)
 }
 
+// SummaryAddUpward adds the delta to the summary of this node and all of its ancestors.
+// This is an internal method and should generally not be called directly.
 func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	if n == nil {
 		panic("bxtree: SummaryAddUpward called on nil node")
@@ -823,6 +851,7 @@ func (n *Node[T, S]) getParentIndex() int {
 	panic("node not found in parent's children")
 }
 
+// Index returns the absolute 0-based index of the first item in this node.
 func (n *Node[T, S]) Index() int {
 	if n == nil {
 		panic("bxtree: Index called on nil node")
@@ -842,6 +871,13 @@ func (n *Node[T, S]) Index() int {
 	return index
 }
 
+// FindPath navigates the tree using a predicate on accumulated summaries.
+//
+// It returns the leaf node, the position within that leaf, and the accumulated
+// summary value just before the matching item.
+//
+// The predicate is called with (accumulated summary, current node summary).
+// It should return true when the search criteria is met.
 func (tree *BxTree[T, S]) FindPath(predicate func(acc S, cur S) bool) (*Node[T, S], int, S) {
 	if tree == nil {
 		panic("bxtree: FindPath called on nil tree")
