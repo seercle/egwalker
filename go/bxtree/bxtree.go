@@ -14,6 +14,103 @@ func New[T any, S any]() *BxTree[T, S] {
 	}
 }
 
+func NewFromSlice[T any, S any](items []T, config *SummaryConfig[T, S], onMoved func(T, *Node[T, S])) *BxTree[T, S] {
+	tree := New[T, S]()
+	tree.SummaryConfig = config
+	tree.OnItemMoved = onMoved
+
+	if len(items) == 0 {
+		return tree
+	}
+
+	// 1. Create all leaf nodes
+	var leaves []*Node[T, S]
+	var prevLeaf *Node[T, S]
+
+	for i := 0; i < len(items); i += tree.leafMaxSize {
+		end := i + tree.leafMaxSize
+		if end > len(items) {
+			end = len(items)
+		}
+
+		leaf := &Node[T, S]{
+			isLeaf: true,
+			Items:  make([]T, end-i),
+			size:   end - i,
+		}
+		copy(leaf.Items, items[i:end])
+
+		if tree.SummaryConfig != nil {
+			var s S
+			for j, item := range leaf.Items {
+				m := tree.SummaryConfig.FromItem(item)
+				if j == 0 {
+					s = m
+				} else {
+					s = tree.SummaryConfig.Add(s, m)
+				}
+			}
+			leaf.Summary = s
+		}
+
+		if prevLeaf != nil {
+			prevLeaf.next = leaf
+		} else {
+			tree.First = leaf
+		}
+		leaves = append(leaves, leaf)
+		prevLeaf = leaf
+
+		if tree.OnItemMoved != nil {
+			for _, item := range leaf.Items {
+				tree.OnItemMoved(item, leaf)
+			}
+		}
+	}
+	tree.Last = prevLeaf
+
+	// 2. Build internal nodes bottom-up
+	var currentLevel []*Node[T, S] = leaves
+	for len(currentLevel) > 1 {
+		var nextLevel []*Node[T, S]
+		for i := 0; i < len(currentLevel); i += tree.internalMaxSize {
+			end := i + tree.internalMaxSize
+			if end > len(currentLevel) {
+				end = len(currentLevel)
+			}
+
+			n := &Node[T, S]{
+				isLeaf:   false,
+				children: make([]*Node[T, S], end-i),
+			}
+			copy(n.children, currentLevel[i:end])
+
+			var size int
+			var s S
+			first := true
+			for _, child := range n.children {
+				child.parent = n
+				size += child.size
+				if tree.SummaryConfig != nil {
+					if first {
+						s = child.Summary
+						first = false
+					} else {
+						s = tree.SummaryConfig.Add(s, child.Summary)
+					}
+				}
+			}
+			n.size = size
+			n.Summary = s
+			nextLevel = append(nextLevel, n)
+		}
+		currentLevel = nextLevel
+	}
+
+	tree.Root = currentLevel[0]
+	return tree
+}
+
 func (tree *BxTree[T, S]) Size() int {
 	if tree.Root == nil {
 		return 0
