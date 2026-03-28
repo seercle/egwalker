@@ -107,7 +107,7 @@ func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		newM0 = 1
 	}
 	if oldM0 != newM0 {
-		item.node.UpdateSummaryUpwards(crdtSummary{newM0 - oldM0, 0}, doc.items)
+		item.node.AddSummaryUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
 	}
 }
 
@@ -131,7 +131,7 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		newM0 = 1
 	}
 	if oldM0 != newM0 {
-		item.node.UpdateSummaryUpwards(crdtSummary{newM0 - oldM0, 0}, doc.items)
+		item.node.AddSummaryUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
 	}
 }
 
@@ -297,12 +297,12 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 				}
 			}
 			// UPDATE SUMMARY
-			item.node.UpdateSummaryUpwards(crdtSummary{0, -1}, doc.items)
+			item.node.AddSummaryUpward(crdtSummary{0, -1}, doc.items)
 		}
 
 		item.curState = 1 // Deleted(1)
 		// UPDATE SUMMARY
-		item.node.UpdateSummaryUpwards(crdtSummary{-1, 0}, doc.items)
+		item.node.AddSummaryUpward(crdtSummary{-1, 0}, doc.items)
 
 		doc.delTargets[opLV] = item.lv
 
