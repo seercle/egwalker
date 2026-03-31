@@ -108,7 +108,7 @@ func TestMixedCompression(t *testing.T) {
 	log := newOpLog[rune]()
 
 	// Scenario: Two users alternating every 10 characters
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		agent := (i % 2) + 1
 		localInsert(log, agent, i*10, make([]rune, 10))
 	}

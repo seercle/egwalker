@@ -109,7 +109,7 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 	opIdx := 0
 	for i, t := range data.Types {
 		run := data.TypeRuns[i]
-		for j := 0; j < run; j++ {
+		for j := range run {
 			log.ops[opIdx+j].opType = t
 		}
 		opIdx += run
@@ -120,7 +120,7 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 	for i, agent := range data.Agents {
 		run := data.AgentRuns[i]
 		startSeq := data.Seqs[i]
-		for j := 0; j < run; j++ {
+		for j := range run {
 			log.ops[opIdx+j].id = id{agent: agent, seq: startSeq + j}
 		}
 		opIdx += run
