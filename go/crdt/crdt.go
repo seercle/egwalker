@@ -41,7 +41,10 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 	var aOnly, bOnly []lv
 
 	for pq.Size() > numShared {
-		curLV, _ := pq.Pop()
+		curLV, ok := pq.Pop()
+		if !ok {
+			break
+		}
 		flag := flags[curLV]
 
 		switch flag {
@@ -71,10 +74,10 @@ type crdtSummarizer struct{}
 func (s crdtSummarizer) FromItem(item *crdtItem) crdtSummary {
 	m := crdtSummary{0, 0}
 	if item.curState == stateInserted {
-		m[0] = 1
+		m[0] = item.length
 	}
 	if !item.deleted {
-		m[1] = 1
+		m[1] = item.length
 	}
 	return m
 }
@@ -89,6 +92,28 @@ func (s crdtSummarizer) Sub(a, b crdtSummary) crdtSummary {
 
 var crdtSummaryConfig = crdtSummarizer{}
 
+func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
+	item, ok := doc.itemsByLV[targetLV]
+	if !ok || item == nil {
+		return nil
+	}
+	if item.length == 1 {
+		return item
+	}
+
+	idx := findItemIdxAtLV(doc, item.lv)
+	offset := int(targetLV - item.lv)
+	if offset > 0 {
+		split(doc, idx, offset)
+		idx++
+	}
+	item = doc.itemsByLV[targetLV]
+	if item.length > 1 {
+		split(doc, idx, 1)
+	}
+	return doc.itemsByLV[targetLV]
+}
+
 func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	o := log.ops[opLV]
 	var targetLV lv
@@ -98,7 +123,11 @@ func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		targetLV = doc.delTargets[opLV]
 	}
 
-	item := doc.itemsByLV[targetLV]
+	item := ensureAtomized(doc, targetLV)
+	if item == nil {
+		return
+	}
+
 	oldM0 := 0
 	if item.curState == stateInserted {
 		oldM0 = 1
@@ -122,7 +151,11 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 		targetLV = doc.delTargets[opLV]
 	}
 
-	item := doc.itemsByLV[targetLV]
+	item := ensureAtomized(doc, targetLV)
+	if item == nil {
+		return
+	}
+
 	oldM0 := 0
 	if item.curState == stateInserted {
 		oldM0 = 1
@@ -207,7 +240,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 			}
 
 			if !other.deleted {
-				scanEndPos++
+				scanEndPos += other.length
 			}
 			scanIdx++
 			pos++
@@ -257,6 +290,44 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
 	item := node.Items()[posInNode]
 	m := crdtSummaryConfig.FromItem(item)
 	return node.Index() + posInNode + 1, acc[1] + m[1]
+}
+
+func split(doc *crdtDoc, idx int, offset int) {
+	if offset <= 0 {
+		return
+	}
+
+	itemPtr, err := doc.items.GetAt(idx)
+	if err != nil || itemPtr == nil {
+		return
+	}
+	item := *itemPtr
+
+	if offset >= item.length {
+		return
+	}
+
+	// Create second part
+	second := &crdtItem{
+		lv:          item.lv + lv(offset),
+		originLeft:  item.originLeft,
+		originRight: item.originRight,
+		deleted:     item.deleted,
+		curState:    item.curState,
+		length:      item.length - offset,
+	}
+
+	// Update first part
+	item.length = offset
+	item.node.UpdateSummaryUpward(doc.items)
+
+	// Insert second part
+	doc.items.InsertAt(idx+1, second)
+
+	// Update the mapping for the entire range of the second part
+	for i := 0; i < second.length; i++ {
+		doc.itemsByLV[second.lv+lv(i)] = second
+	}
 }
 
 func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct{}], opLV lv) {
@@ -338,6 +409,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 			originRight: originRight,
 			deleted:     false,
 			curState:    stateInserted,
+			length:      1,
 		}
 		doc.itemsByLV[opLV] = item
 
@@ -427,7 +499,10 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 	var sharedOps, bOnlyOps []lv
 
 	for {
-		item, _ := pq.Pop()
+		item, ok := pq.Pop()
+		if !ok {
+			break
+		}
 		v := item.v
 		isInA := item.isInA
 
@@ -528,6 +603,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 			deleted:     false,
 			originLeft:  -1,
 			originRight: -1,
+			length:      1,
 		}
 		doc.items.InsertAt(doc.items.Size(), item)
 		doc.itemsByLV[item.lv] = item

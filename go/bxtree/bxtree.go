@@ -774,6 +774,35 @@ func (n *Node[T, S]) SummaryAddUpward(delta S, tree *BxTree[T, S]) {
 	}
 }
 
+// UpdateSummary recomputes the summary for this node based on its children or items.
+func (n *Node[T, S]) UpdateSummary(tree *BxTree[T, S]) {
+	if tree.summarizer == nil {
+		return
+	}
+	if n.isLeaf {
+		n.summary = tree.summarizeItems(n.items)
+	} else {
+		var s S
+		for i, child := range n.children {
+			if i == 0 {
+				s = child.summary
+			} else {
+				s = tree.summarizer.Add(s, child.summary)
+			}
+		}
+		n.summary = s
+	}
+}
+
+// UpdateSummaryUpward recomputes the summary for this node and all its ancestors.
+func (n *Node[T, S]) UpdateSummaryUpward(tree *BxTree[T, S]) {
+	curr := n
+	for curr != nil {
+		curr.UpdateSummary(tree)
+		curr = curr.parent
+	}
+}
+
 func (n *Node[T, S]) getParentIndex() int {
 	if n == nil {
 		panic("bxtree: getParentIndex called on nil node")

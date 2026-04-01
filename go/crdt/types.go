@@ -52,6 +52,7 @@ type crdtItem struct {
 	originRight lv // -1 if none
 	deleted     bool
 	curState    int
+	length      int // Number of characters this item represents
 	node        *bxtree.Node[*crdtItem, crdtSummary]
 }
 
