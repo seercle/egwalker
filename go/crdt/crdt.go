@@ -101,7 +101,7 @@ func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
 		return item
 	}
 
-	idx := findItemIdxAtLV(doc, item.lv)
+	idx := findItemIdxAtLVInternal(doc, item.lv)
 	offset := int(targetLV - item.lv)
 	if offset > 0 {
 		split(doc, idx, offset)
@@ -170,7 +170,7 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	}
 }
 
-func findItemIdxAtLV(doc *crdtDoc, targetLV lv) int {
+func findItemIdxAtLVInternal(doc *crdtDoc, targetLV lv) int {
 	item, ok := doc.itemsByLV[targetLV]
 	if !ok {
 		panic("Could not find item")
@@ -193,50 +193,136 @@ func findItemIdxAtLV(doc *crdtDoc, targetLV lv) int {
 	return nodeIdx + posInNode
 }
 
-func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[T, struct{}]) {
+func canMerge[T any](log *opLog[T], left *crdtItem, right *crdtItem) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	if left.deleted != right.deleted || left.curState != right.curState {
+		return false
+	}
+
+	if int(left.lv) >= len(log.ops) || int(right.lv) >= len(log.ops) {
+		return false
+	}
+
+	opL := log.ops[left.lv]
+	opR := log.ops[right.lv]
+
+	if opL.id.agent != opR.id.agent {
+		return false
+	}
+
+	// Contiguous in seq and LV
+	if opL.id.seq+left.length != opR.id.seq {
+		return false
+	}
+	if left.lv+lv(left.length) != right.lv {
+		return false
+	}
+
+	// Origin check
+	if right.originLeft != left.lv+lv(left.length-1) {
+		return false
+	}
+	if left.originRight != right.originRight {
+		return false
+	}
+
+	return true
+}
+
+func mergeLeft(doc *crdtDoc, idx int) {
+	leftPtr, _ := doc.items.GetAt(idx - 1)
+	rightPtr, _ := doc.items.GetAt(idx)
+	left := *leftPtr
+	right := *rightPtr
+
+	// Update left item
+	left.length += right.length
+	left.originRight = right.originRight
+
+	// Update itemsByLV
+	for i := 0; i < right.length; i++ {
+		doc.itemsByLV[right.lv+lv(i)] = left
+	}
+
+	// Delete right item
+	doc.items.DeleteAt(idx)
+
+	// Update summary
+	left.node.UpdateSummaryUpward(doc.items)
+}
+
+func tryMergeAt[T any](doc *crdtDoc, log *opLog[T], idx int) {
+	if idx > 0 {
+		leftPtr, _ := doc.items.GetAt(idx - 1)
+		rightPtr, _ := doc.items.GetAt(idx)
+		if canMerge(log, *leftPtr, *rightPtr) {
+			mergeLeft(doc, idx)
+			idx--
+		}
+	}
+	if idx < doc.items.Size()-1 {
+		leftPtr, _ := doc.items.GetAt(idx)
+		rightPtr, _ := doc.items.GetAt(idx + 1)
+		if canMerge(log, *leftPtr, *rightPtr) {
+			mergeLeft(doc, idx+1)
+		}
+	}
+}
+
+func getLogicalPos(doc *crdtDoc, targetLV lv) (int, int) {
+	if targetLV == -1 {
+		return -1, 0
+	}
+	item, ok := doc.itemsByLV[targetLV]
+	if !ok {
+		panic("Could not find item")
+	}
+	return findItemIdxAtLVInternal(doc, item.lv), int(targetLV - item.lv)
+}
+
+func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[T, struct{}]) int {
 	scanIdx := idx
 	scanEndPos := endPos
 
-	left := scanIdx - 1
-	right := doc.items.Size()
+	leftIdx, leftOffset := getLogicalPos(doc, newItem.originLeft)
+	rightIdx, rightOffset := doc.items.Size(), 0
 	if newItem.originRight != -1 {
-		right = findItemIdxAtLV(doc, newItem.originRight)
+		rightIdx, rightOffset = getLogicalPos(doc, newItem.originRight)
 	}
 
 	scanning := false
 
-	if scanIdx < right {
+	if scanIdx < doc.items.Size() {
 		node, pos, err := doc.items.GetAtNode(scanIdx)
 		if err != nil {
 			panic("GetAtNode failed")
 		}
 
-		for scanIdx < right {
+		for scanIdx < doc.items.Size() {
 			other := node.Items()[pos]
 
 			if other.curState != stateNotYetInserted {
 				break
 			}
 
-			oLeft := -1
-			if other.originLeft != -1 {
-				oLeft = findItemIdxAtLV(doc, other.originLeft)
-			}
-
-			oRight := doc.items.Size()
+			oLeftIdx, oLeftOffset := getLogicalPos(doc, other.originLeft)
+			oRightIdx, oRightOffset := doc.items.Size(), 0
 			if other.originRight != -1 {
-				oRight = findItemIdxAtLV(doc, other.originRight)
+				oRightIdx, oRightOffset = getLogicalPos(doc, other.originRight)
 			}
 
 			newItemAgent := log.ops[newItem.lv].id.agent
 			otherAgent := log.ops[other.lv].id.agent
 
-			if oLeft < left || (oLeft == left && oRight == right && newItemAgent < otherAgent) {
+			if oLeftIdx < leftIdx || (oLeftIdx == leftIdx && oLeftOffset < leftOffset) ||
+				(oLeftIdx == leftIdx && oLeftOffset == leftOffset && oRightIdx == rightIdx && oRightOffset == rightOffset && newItemAgent < otherAgent) {
 				break
 			}
 
-			if oLeft == left {
-				scanning = oRight < right
+			if oLeftIdx == leftIdx && oLeftOffset == leftOffset {
+				scanning = oRightIdx < rightIdx || (oRightIdx == rightIdx && oRightOffset < rightOffset)
 			}
 
 			if !other.deleted {
@@ -269,6 +355,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 			panic("Snapshot insert failed")
 		}
 	}
+	return idx
 }
 
 func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
@@ -289,6 +376,14 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
 
 	item := node.Items()[posInNode]
 	m := crdtSummaryConfig.FromItem(item)
+
+	if targetPos > acc[0] && targetPos < acc[0]+m[0] {
+		idx := node.Index() + posInNode
+		offset := targetPos - acc[0]
+		split(doc, idx, offset)
+		return findByCurrentPos(doc, targetPos)
+	}
+
 	return node.Index() + posInNode + 1, acc[1] + m[1]
 }
 
@@ -310,7 +405,7 @@ func split(doc *crdtDoc, idx int, offset int) {
 	// Create second part
 	second := &crdtItem{
 		lv:          item.lv + lv(offset),
-		originLeft:  item.originLeft,
+		originLeft:  item.lv + lv(offset-1),
 		originRight: item.originRight,
 		deleted:     item.deleted,
 		curState:    item.curState,
@@ -361,6 +456,12 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 		itemPtr, _ := doc.items.GetAt(idx)
 		item := *itemPtr
 
+		if item.length > 1 {
+			split(doc, idx, 1)
+			itemPtr, _ = doc.items.GetAt(idx)
+			item = *itemPtr
+		}
+
 		if !item.deleted {
 			item.deleted = true
 			if snapshot != nil {
@@ -376,6 +477,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 		item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
 
 		doc.delTargets[opLV] = item.lv
+		tryMergeAt(doc, log, idx)
 
 	} else {
 		idx, endPos := findByCurrentPos(doc, o.pos)
@@ -390,7 +492,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 		originLeft := lv(-1)
 		if idx > 0 {
 			prevPtr, _ := doc.items.GetAt(idx - 1)
-			originLeft = (*prevPtr).lv
+			originLeft = (*prevPtr).lv + lv((*prevPtr).length-1)
 		}
 
 		originRight := lv(-1)
@@ -413,7 +515,8 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 		}
 		doc.itemsByLV[opLV] = item
 
-		integrate(doc, log, item, idx, endPos, snapshot)
+		idx = integrate(doc, log, item, idx, endPos, snapshot)
+		tryMergeAt(doc, log, idx)
 	}
 }
 

@@ -18,7 +18,7 @@ const (
 
 type op[T any] struct {
 	opType  opType
-	content T
+	content T   // TODO: This should be a slice or a 'content' interface supporting length for RLE
 	pos     int // Original position for local ops
 	id      id
 	parents []lv

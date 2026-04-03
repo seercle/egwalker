@@ -803,6 +803,33 @@ func (n *Node[T, S]) UpdateSummaryUpward(tree *BxTree[T, S]) {
 	}
 }
 
+// SummaryBefore returns the accumulated summary of all items before this node.
+func (n *Node[T, S]) SummaryBefore(tree *BxTree[T, S]) S {
+	if n == nil {
+		panic("bxtree: SummaryBefore called on nil node")
+	}
+	var s S
+	first := true
+
+	curr := n
+	for curr.parent != nil {
+		parent := curr.parent
+		for _, child := range parent.children {
+			if child == curr {
+				break
+			}
+			if first {
+				s = child.summary
+				first = false
+			} else {
+				s = tree.summarizer.Add(s, child.summary)
+			}
+		}
+		curr = parent
+	}
+	return s
+}
+
 func (n *Node[T, S]) getParentIndex() int {
 	if n == nil {
 		panic("bxtree: getParentIndex called on nil node")

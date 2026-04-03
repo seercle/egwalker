@@ -1,6 +1,7 @@
 package crdt
 
 import (
+	"egwalker/bxtree"
 	"reflect"
 	"testing"
 )
@@ -456,5 +457,74 @@ func TestArrayOfArray_RecursiveSync(t *testing.T) {
 
 	if len(res) != 4 {
 		t.Errorf("Expected 4 items in recursively merged nested array, got %v", res)
+	}
+}
+
+func TestItemMerging(t *testing.T) {
+	doc := NewRuneDocument(1)
+
+	// Consecutive insertions
+	doc.Ins(0, "abc")
+	doc.Ins(3, "def")
+
+	// We can manually checkout the document to inspect the crdtDoc structure
+	cDoc := &crdtDoc{
+		items: bxtree.New(
+			bxtree.WithSummarizer(crdtSummaryConfig),
+			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+				item.node = node
+			}),
+		),
+		currentVersion: []lv{},
+		delTargets:     make(map[lv]lv),
+		itemsByLV:      make(map[lv]*crdtItem),
+	}
+
+	for i := 0; i < len(doc.opLog.ops); i++ {
+		do1Operation(cDoc, doc.opLog, lv(i), nil)
+	}
+
+	// Verify that we only have 1 merged item instead of 2 separate ones.
+	if cDoc.items.Size() != 1 {
+		t.Errorf("Expected 1 merged item, got %d", cDoc.items.Size())
+	}
+
+	// Check length of the merged item
+	itemPtr, _ := cDoc.items.GetAt(0)
+	if (*itemPtr).length != 6 {
+		t.Errorf("Expected item length 6, got %d", (*itemPtr).length)
+	}
+}
+
+func TestItemMerging_SplitAndReMerge(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, "abc")
+	doc.Ins(3, "def")
+
+	// Insert in middle, should split the existing merged item.
+	doc.Ins(3, "X")
+
+	cDoc := &crdtDoc{
+		items: bxtree.New(
+			bxtree.WithSummarizer(crdtSummaryConfig),
+			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+				item.node = node
+			}),
+		),
+		currentVersion: []lv{},
+		delTargets:     make(map[lv]lv),
+		itemsByLV:      make(map[lv]*crdtItem),
+	}
+
+	for i := 0; i < len(doc.opLog.ops); i++ {
+		do1Operation(cDoc, doc.opLog, lv(i), nil)
+	}
+
+	// Expected: "abc" (3 chars), "X" (1 char), "def" (3 chars).
+	// Because "X" was inserted at index 3, it splits "abcdef" into "abc" and "def",
+	// and then "X" is inserted between them.
+	// In the CRDT logic, "X" will be between them because its originLeft is the last char of "abc".
+	if cDoc.items.Size() != 3 {
+		t.Errorf("Expected 3 items, got %d", cDoc.items.Size())
 	}
 }
