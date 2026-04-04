@@ -477,7 +477,7 @@ func TestItemMerging(t *testing.T) {
 		),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
-		itemsByLV:      make(map[lv]*crdtItem),
+		sortedItems:    []*crdtItem{},
 	}
 
 	for i := 0; i < len(doc.opLog.ops); i++ {
@@ -513,7 +513,7 @@ func TestItemMerging_SplitAndReMerge(t *testing.T) {
 		),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
-		itemsByLV:      make(map[lv]*crdtItem),
+		sortedItems:    []*crdtItem{},
 	}
 
 	for i := 0; i < len(doc.opLog.ops); i++ {

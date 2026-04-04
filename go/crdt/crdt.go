@@ -92,9 +92,45 @@ func (s crdtSummarizer) Sub(a, b crdtSummary) crdtSummary {
 
 var crdtSummaryConfig = crdtSummarizer{}
 
+func addItemLV(doc *crdtDoc, item *crdtItem) {
+	idx := sort.Search(len(doc.sortedItems), func(i int) bool { return doc.sortedItems[i].lv >= item.lv })
+	if idx < len(doc.sortedItems) && doc.sortedItems[idx].lv == item.lv {
+		doc.sortedItems[idx] = item // Update existing entry
+		return
+	}
+	// Insert at idx
+	doc.sortedItems = append(doc.sortedItems, nil)
+	copy(doc.sortedItems[idx+1:], doc.sortedItems[idx:])
+	doc.sortedItems[idx] = item
+}
+
+func removeItemLV(doc *crdtDoc, targetLV lv) {
+	idx := sort.Search(len(doc.sortedItems), func(i int) bool { return doc.sortedItems[i].lv >= targetLV })
+	if idx < len(doc.sortedItems) && doc.sortedItems[idx].lv == targetLV {
+		doc.sortedItems = append(doc.sortedItems[:idx], doc.sortedItems[idx+1:]...)
+	}
+}
+
+func findItemAtLV(doc *crdtDoc, targetLV lv) *crdtItem {
+	if len(doc.sortedItems) == 0 {
+		return nil
+	}
+
+	idx := sort.Search(len(doc.sortedItems), func(i int) bool { return doc.sortedItems[i].lv > targetLV })
+	if idx == 0 {
+		return nil
+	}
+
+	item := doc.sortedItems[idx-1]
+	if targetLV < item.lv+lv(item.length) {
+		return item
+	}
+	return nil
+}
+
 func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
-	item, ok := doc.itemsByLV[targetLV]
-	if !ok || item == nil {
+	item := findItemAtLV(doc, targetLV)
+	if item == nil {
 		return nil
 	}
 	if item.length == 1 {
@@ -107,11 +143,11 @@ func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
 		split(doc, idx, offset)
 		idx++
 	}
-	item = doc.itemsByLV[targetLV]
+	item = findItemAtLV(doc, targetLV)
 	if item.length > 1 {
 		split(doc, idx, 1)
 	}
-	return doc.itemsByLV[targetLV]
+	return findItemAtLV(doc, targetLV)
 }
 
 func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
@@ -171,8 +207,8 @@ func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 }
 
 func findItemIdxAtLVInternal(doc *crdtDoc, targetLV lv) int {
-	item, ok := doc.itemsByLV[targetLV]
-	if !ok {
+	item := findItemAtLV(doc, targetLV)
+	if item == nil {
 		panic("Could not find item")
 	}
 	if item.node == nil {
@@ -241,10 +277,9 @@ func mergeLeft(doc *crdtDoc, idx int) {
 	left.length += right.length
 	left.originRight = right.originRight
 
-	// Update itemsByLV
-	for i := 0; i < right.length; i++ {
-		doc.itemsByLV[right.lv+lv(i)] = left
-	}
+	// Update sortedItems index
+	removeItemLV(doc, right.lv)
+	addItemLV(doc, left)
 
 	// Delete right item
 	doc.items.DeleteAt(idx)
@@ -275,8 +310,8 @@ func getLogicalPos(doc *crdtDoc, targetLV lv) (int, int) {
 	if targetLV == -1 {
 		return -1, 0
 	}
-	item, ok := doc.itemsByLV[targetLV]
-	if !ok {
+	item := findItemAtLV(doc, targetLV)
+	if item == nil {
 		panic("Could not find item")
 	}
 	return findItemIdxAtLVInternal(doc, item.lv), int(targetLV - item.lv)
@@ -419,10 +454,8 @@ func split(doc *crdtDoc, idx int, offset int) {
 	// Insert second part
 	doc.items.InsertAt(idx+1, second)
 
-	// Update the mapping for the entire range of the second part
-	for i := 0; i < second.length; i++ {
-		doc.itemsByLV[second.lv+lv(i)] = second
-	}
+	// Update the mapping for the second part
+	addItemLV(doc, second)
 }
 
 func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct{}], opLV lv) {
@@ -513,7 +546,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 			curState:    stateInserted,
 			length:      1,
 		}
-		doc.itemsByLV[opLV] = item
+		addItemLV(doc, item)
 
 		idx = integrate(doc, log, item, idx, endPos, snapshot)
 		tryMergeAt(doc, log, idx)
@@ -545,7 +578,7 @@ func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 		),
 		currentVersion: []lv{},
 		delTargets:     make(map[lv]lv),
-		itemsByLV:      make(map[lv]*crdtItem),
+		sortedItems:    []*crdtItem{},
 	}
 
 	snapshot := bxtree.New[T, struct{}]()
@@ -688,7 +721,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 		),
 		currentVersion: visit.commonVersion,
 		delTargets:     make(map[lv]lv),
-		itemsByLV:      make(map[lv]*crdtItem),
+		sortedItems:    []*crdtItem{},
 	}
 
 	maxFrontier := -1
@@ -699,17 +732,17 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 	}
 	placeholderLength := max(0, maxFrontier+1)
 
-	for i := range placeholderLength {
+	if placeholderLength > 0 {
 		item := &crdtItem{
-			lv:          lv(i) + 1e12,
+			lv:          1e12,
 			curState:    stateInserted,
 			deleted:     false,
 			originLeft:  -1,
 			originRight: -1,
-			length:      1,
+			length:      placeholderLength,
 		}
 		doc.items.InsertAt(doc.items.Size(), item)
-		doc.itemsByLV[item.lv] = item
+		addItemLV(doc, item)
 	}
 
 	for _, curLV := range visit.sharedOps {

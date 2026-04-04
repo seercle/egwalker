@@ -61,8 +61,8 @@ type crdtSummary [2]int
 type crdtDoc struct {
 	items          *bxtree.BxTree[*crdtItem, crdtSummary]
 	currentVersion []lv
-	delTargets     map[lv]lv        // Map op_lv (delete op) -> target_lv
-	itemsByLV      map[lv]*crdtItem // Map lv -> crdt_item
+	delTargets     map[lv]lv   // Map op_lv (delete op) -> target_lv
+	sortedItems    []*crdtItem // Sorted list of items by start LV
 }
 
 type opsToVisit struct {
