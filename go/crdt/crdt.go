@@ -610,6 +610,7 @@ func compareArrays(a, b []lv) int {
 }
 
 func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
+	// Phase 1: Find Common Ancestor (CCA) using the original Priority Queue approach
 	pq := pheap.NewAny(pheap.WithLess(func(a, b mergePoint) bool {
 		return compareArrays(a.v, b.v) < 0
 	}))
@@ -632,8 +633,11 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 	enq(b, false)
 
 	var commonVersion []lv
-	var sharedOps, bOnlyOps []lv
+	var sharedOpsSet = make(map[lv]bool)
+	var bOnlyOpsSet = make(map[lv]bool)
+	var allDeltaOps = make(map[lv]bool)
 
+	// We need to keep track of which ops belong to which side in the delta
 	for {
 		item, ok := pq.Pop()
 		if !ok {
@@ -672,10 +676,11 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 			}
 		} else {
 			curLV := v[0]
+			allDeltaOps[curLV] = true
 			if isInA {
-				sharedOps = append(sharedOps, curLV)
+				sharedOpsSet[curLV] = true
 			} else {
-				bOnlyOps = append(bOnlyOps, curLV)
+				bOnlyOpsSet[curLV] = true
 			}
 
 			o := log.ops[curLV]
@@ -683,18 +688,148 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 		}
 	}
 
-	rev := func(s []lv) []lv {
-		r := make([]lv, len(s))
-		for i, v := range s {
-			r[len(s)-1-i] = v
+	// Phase 2: Build Child Mapping for the Delta Subgraph
+	children := make(map[lv][]lv)
+	for curLV := range allDeltaOps {
+		o := log.ops[curLV]
+		for _, p := range o.parents {
+			if allDeltaOps[p] {
+				children[p] = append(children[p], curLV)
+			}
 		}
-		return r
+	}
+
+	// Also add children for the commonVersion ops that are in the delta's direct ancestry
+	// Actually, easier: iterate all delta ops and if a parent is in commonVersion, add it.
+	ccaSet := make(map[lv]bool)
+	for _, v := range commonVersion {
+		ccaSet[v] = true
+	}
+	
+	roots := []lv{}
+	for curLV := range allDeltaOps {
+		o := log.ops[curLV]
+		isRoot := true
+		for _, p := range o.parents {
+			if allDeltaOps[p] {
+				isRoot = false
+			}
+			if ccaSet[p] {
+				children[p] = append(children[p], curLV)
+			}
+		}
+		if isRoot {
+			roots = append(roots, curLV)
+		}
+	}
+
+	// Phase 3: Calculate Weights (Iterative descendant count within Delta)
+	weights := make(map[lv]int)
+	
+	// To calculate weights iteratively, we need to process nodes in reverse topological order (bottom-up)
+	// We can use the fact that larger LVs are generally descendants.
+	// But to be sure, we'll use a Kahn-like approach but for weights.
+	inDegree := make(map[lv]int)
+	for curLV := range allDeltaOps {
+		o := log.ops[curLV]
+		for _, p := range o.parents {
+			if allDeltaOps[p] {
+				inDegree[p]++
+			}
+		}
+	}
+
+	// Leaf nodes in the Delta subgraph (no children in Delta)
+	queue := []lv{}
+	for curLV := range allDeltaOps {
+		if inDegree[curLV] == 0 {
+			queue = append(queue, curLV)
+		}
+	}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		
+		w := 1
+		for _, child := range children[cur] {
+			w += weights[child]
+		}
+		weights[cur] = w
+
+		// Move up to parents
+		o := log.ops[cur]
+		for _, p := range o.parents {
+			if allDeltaOps[p] {
+				inDegree[p]--
+				if inDegree[p] == 0 {
+					queue = append(queue, p)
+				}
+			}
+		}
+	}
+
+	// Phase 4: Heuristic DFS Topological Sort (Iterative using a stack)
+	var sharedOps, bOnlyOps []lv
+	visited := make(map[lv]bool)
+	
+	// Sort roots by weight (ascending) initially
+	sort.Slice(roots, func(i, j int) bool {
+		return weights[roots[i]] < weights[roots[j]]
+	})
+
+	stack := make([]lv, 0, len(roots))
+	// Push roots in reverse order so lightest is popped first
+	for i := len(roots) - 1; i >= 0; i-- {
+		stack = append(stack, roots[i])
+	}
+
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		if visited[cur] {
+			continue
+		}
+
+		// Check if all parents in Delta are visited
+		ready := true
+		o := log.ops[cur]
+		for _, p := range o.parents {
+			if allDeltaOps[p] && !visited[p] {
+				ready = false
+				break
+			}
+		}
+
+		if !ready {
+			continue
+		}
+
+		visited[cur] = true
+		if sharedOpsSet[cur] {
+			sharedOps = append(sharedOps, cur)
+		} else {
+			bOnlyOps = append(bOnlyOps, cur)
+		}
+
+		// Add children to stack
+		childList := children[cur]
+		// Sort children by weight DESCENDING so that when we push them onto the stack,
+		// the ASCENDING order (lightest first) is preserved for popping.
+		sort.Slice(childList, func(i, j int) bool {
+			return weights[childList[i]] > weights[childList[j]]
+		})
+
+		for _, child := range childList {
+			stack = append(stack, child)
+		}
 	}
 
 	return opsToVisit{
 		commonVersion: commonVersion,
-		sharedOps:     rev(sharedOps),
-		bOnlyOps:      rev(bOnlyOps),
+		sharedOps:     sharedOps,
+		bOnlyOps:      bOnlyOps,
 	}
 }
 

@@ -76,7 +76,7 @@ func (doc *Document[T]) MergeFrom(other *Document[T]) {
 	if doc == other {
 		return
 	}
-	// Recursive merge for items with the same identity (LV)
+	// 1. Recursive merge for items with the same identity (LV)
 	for _, o := range other.opLog.ops {
 		if lastSeq, ok := doc.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
@@ -86,7 +86,11 @@ func (doc *Document[T]) MergeFrom(other *Document[T]) {
 			}
 		}
 	}
+
+	// 2. Batch merge into opLog
 	mergeInto(doc.opLog, other.opLog)
+
+	// 3. Perform a single checkoutFancy to move the state
 	checkoutFancy(doc.opLog, doc.branch, doc.opLog.frontier)
 }
 

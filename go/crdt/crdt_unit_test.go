@@ -6,6 +6,29 @@ import (
 	"testing"
 )
 
+func TestVeryDeepHistory(t *testing.T) {
+	doc1 := NewRuneDocument(1)
+	// Use doc.Ins to keep snapshot in sync.
+	// Alternating 1 and 3 prevents merging.
+	docA := NewRuneDocument(3)
+	for i := 0; i < 1000; i++ {
+		doc1.Ins(doc1.Len(), "a")
+		docA.MergeFrom(doc1)
+		docA.Ins(docA.Len(), "z")
+		doc1.MergeFrom(docA)
+	}
+
+	doc2 := NewRuneDocument(2)
+	doc2.MergeFrom(doc1)
+	doc2.Ins(doc2.Len(), "b")
+
+	// doc1 adds something else concurrently
+	doc1.Ins(doc1.Len(), "c")
+
+	// Merge back
+	doc1.MergeFrom(doc2)
+}
+
 func TestRuneDocument_Basic(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, "Hello")
