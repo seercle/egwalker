@@ -107,6 +107,13 @@ func (log *opLog[T]) isAncestor(ancestorLV, descendantLV lv) bool {
 		return false
 	}
 
+	// If they are in the same run, the one with smaller LV is an ancestor
+	ancIdx, _ := log.getOpByLV(ancestorLV)
+	desIdx, _ := log.getOpByLV(descendantLV)
+	if ancIdx == desIdx {
+		return ancestorLV < descendantLV
+	}
+
 	visited := make(map[lv]bool)
 	stack := []lv{descendantLV}
 	for len(stack) > 0 {
@@ -116,15 +123,32 @@ func (log *opLog[T]) isAncestor(ancestorLV, descendantLV lv) bool {
 		if curr == ancestorLV {
 			return true
 		}
+		
+		opIdx, offset := log.getOpByLV(curr)
+		
+		// If ancestor is in this same run but earlier, it's an ancestor
+		if opIdx == ancIdx && ancestorLV < curr {
+			return true
+		}
+
 		if curr < ancestorLV {
 			continue
 		}
 
-		opIdx, _ := log.getOpByLV(curr)
-		for _, p := range log.ops[opIdx].parents {
-			if !visited[p] {
-				visited[p] = true
-				stack = append(stack, p)
+		// Only traverse parents from the START of the run
+		if offset == 0 {
+			for _, p := range log.ops[opIdx].parents {
+				if !visited[p] {
+					visited[p] = true
+					stack = append(stack, p)
+				}
+			}
+		} else {
+			// If we are in the middle of a run, we "move" to the start of the run (implicitly)
+			startLV := log.opStartLVs[opIdx]
+			if !visited[startLV] {
+				visited[startLV] = true
+				stack = append(stack, startLV)
 			}
 		}
 	}
@@ -154,17 +178,18 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 	return sortLVs(f)
 }
 
-func pushRemoteOp[T any](log *opLog[T], o op[T], parentIds []id) {
+func (log *opLog[T]) pushRemoteOp(o op[T], parentIds []id) {
 	agent := o.id.agent
 	seq := o.id.seq
 
-	lastKnownSeq, ok := log.version[agent]
-	if !ok {
-		lastKnownSeq = -1
-	}
-
-	if lastKnownSeq >= seq+o.length-1 {
-		return // Already have the whole run
+	// Check for duplicates/overlaps (simplified for now: skip if we already have this exact start)
+	idxs := log.agentOps[agent]
+	insertIdx := sort.Search(len(idxs), func(i int) bool {
+		return log.ops[idxs[i]].id.seq >= seq
+	})
+	
+	if insertIdx < len(idxs) && log.ops[idxs[insertIdx]].id.seq == seq {
+		return // Already have this run
 	}
 
 	var curLV lv
@@ -184,12 +209,18 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parentIds []id) {
 	opIdx := len(log.ops)
 	log.ops = append(log.ops, o)
 	log.opStartLVs = append(log.opStartLVs, curLV)
-	log.agentOps[agent] = append(log.agentOps[agent], opIdx)
+	
+	// Insert into agentOps to keep it sorted by seq
+	log.agentOps[agent] = append(log.agentOps[agent], 0)
+	copy(log.agentOps[agent][insertIdx+1:], log.agentOps[agent][insertIdx:])
+	log.agentOps[agent][insertIdx] = opIdx
 	
 	lastLVOfRun := curLV + lv(o.length-1)
 	log.frontier = advanceFrontier(log.frontier, lastLVOfRun, o.parents)
 
-	log.version[agent] = max(log.version[agent], seq+o.length-1)
+	if seq+o.length-1 > log.version[agent] {
+		log.version[agent] = seq + o.length - 1
+	}
 }
 
 func mergeInto[T any](dest *opLog[T], src *opLog[T]) {
@@ -203,6 +234,6 @@ func mergeInto[T any](dest *opLog[T], src *opLog[T]) {
 			}
 		}
 		new_op := o
-		pushRemoteOp(dest, new_op, parent_ids)
+		dest.pushRemoteOp(new_op, parent_ids)
 	}
 }
