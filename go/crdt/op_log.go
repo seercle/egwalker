@@ -33,7 +33,6 @@ func (log *opLog[T]) pushLocalOp(agent int, o op[T]) {
 	o.parents = parents_copy
 
 	log.ops = append(log.ops, o)
-	log.idToLV[o.id] = cur_lv
 	log.frontier = []lv{cur_lv}
 	log.version[agent] = seq
 }
@@ -49,7 +48,8 @@ func localInsert[T any](log *opLog[T], agent int, pos int, content []T) {
 func localInsertOne[T any](log *opLog[T], agent int, pos int, content T) {
 	log.pushLocalOp(agent, op[T]{
 		opType:  opTypeIns,
-		content: content,
+		content: []T{content},
+		length:  1,
 		pos:     pos,
 	})
 }
@@ -64,11 +64,33 @@ func localDelete[T any](log *opLog[T], agent int, pos int, del_len int) {
 	}
 }
 
-func idToLV[T any](log *opLog[T], target_id id) lv {
-	if lv, ok := log.idToLV[target_id]; ok {
-		return lv
+func (log *opLog[T]) getOpByLV(v lv) (opIdx int, offset int) {
+	opIdx = sort.Search(len(log.opStartLVs), func(i int) bool {
+		return log.opStartLVs[i] > v
+	}) - 1
+	if opIdx < 0 {
+		panic("LV not found")
 	}
-	panic("Could not find id in oplog")
+	offset = int(v - log.opStartLVs[opIdx])
+	return opIdx, offset
+}
+
+func (log *opLog[T]) resolveID(target id) lv {
+	idxs := log.agentOps[target.agent]
+	i := sort.Search(len(idxs), func(i int) bool {
+		return log.ops[idxs[i]].id.seq > target.seq
+	}) - 1
+	if i < 0 {
+		panic("Sequence number not found")
+	}
+	opIdx := idxs[i]
+	o := log.ops[opIdx]
+	offset := target.seq - o.id.seq
+	return log.opStartLVs[opIdx] + lv(offset)
+}
+
+func idToLV[T any](log *opLog[T], target_id id) lv {
+	return log.resolveID(target_id)
 }
 
 func (log *opLog[T]) isAncestor(ancestorLV, descendantLV lv) bool {
@@ -148,7 +170,6 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
 	o.parents = sortLVs(parents)
 
 	log.ops = append(log.ops, o)
-	log.idToLV[o.id] = cur_lv
 	log.frontier = advanceFrontier(log.frontier, cur_lv, o.parents)
 
 	if seq != last_known_seq+1 {

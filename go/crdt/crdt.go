@@ -385,7 +385,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	}
 
 	if snapshot != nil {
-		err := snapshot.InsertAt(endPos, o.content)
+		err := snapshot.InsertRange(endPos, o.content)
 		if err != nil {
 			panic("Snapshot insert failed")
 		}
