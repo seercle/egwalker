@@ -177,19 +177,52 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 	f = append(f, cur_lv)
 	return sortLVs(f)
 }
-
 func (log *opLog[T]) pushRemoteOp(o op[T], parentIds []id) {
 	agent := o.id.agent
 	seq := o.id.seq
 
-	// Check for duplicates/overlaps (simplified for now: skip if we already have this exact start)
+	// Check for duplicates/overlaps
 	idxs := log.agentOps[agent]
 	insertIdx := sort.Search(len(idxs), func(i int) bool {
 		return log.ops[idxs[i]].id.seq >= seq
 	})
-	
+
 	if insertIdx < len(idxs) && log.ops[idxs[insertIdx]].id.seq == seq {
-		return // Already have this run
+		if o.length <= log.ops[idxs[insertIdx]].length {
+			return // Already have this run or a longer one starting at same seq
+		}
+		// The new run starts at the same seq but is longer. Shift it.
+		overlap := log.ops[idxs[insertIdx]].length
+		o.id.seq += overlap
+		o.length -= overlap
+		if o.opType == opTypeIns {
+			o.content = o.content[overlap:]
+		}
+		// After shifting, we might still overlap with subsequent runs? 
+		// For now, let's keep it simple.
+	}
+
+	// Check if this run is already covered by a previous run
+	if insertIdx > 0 {
+		prevOpIdx := idxs[insertIdx-1]
+		prevOp := log.ops[prevOpIdx]
+		if seq < prevOp.id.seq+prevOp.length {
+			overlap := prevOp.id.seq+prevOp.length - seq
+			if o.length <= overlap {
+				return // Fully covered
+			}
+			// Partially covered: shift the new run
+			o.id.seq += overlap
+			o.length -= overlap
+			if o.opType == opTypeIns {
+				o.content = o.content[overlap:]
+			}
+		}
+	}
+
+	// Double check if we still need to insert (in case we truncated the whole run)
+	if o.length <= 0 {
+		return
 	}
 
 	var curLV lv

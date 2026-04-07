@@ -56,7 +56,8 @@ func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
 			bOnly = append(bOnly, curLV)
 		}
 
-		o := log.ops[curLV]
+		opIdx, _ := log.getOpByLV(curLV)
+		o := log.ops[opIdx]
 		for _, p := range o.parents {
 			enq(p, flag)
 		}
