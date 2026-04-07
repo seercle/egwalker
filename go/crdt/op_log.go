@@ -19,49 +19,49 @@ func newOpLog[T any]() *opLog[T] {
 }
 
 func (log *opLog[T]) pushLocalOp(agent int, o op[T]) {
-	last_seq, ok := log.version[agent]
+	lastSeq, ok := log.version[agent]
 	if !ok {
-		last_seq = -1
+		lastSeq = -1
 	}
-	seq := last_seq + 1
+	seq := lastSeq + 1
 
-	cur_lv := lv(len(log.ops))
+	var curLV lv
+	if len(log.ops) == 0 {
+		curLV = 0
+	} else {
+		lastIdx := len(log.ops) - 1
+		curLV = log.opStartLVs[lastIdx] + lv(log.ops[lastIdx].length)
+	}
+	
 	o.id = id{agent: agent, seq: seq}
+	o.parents = make([]lv, len(log.frontier))
+	copy(o.parents, log.frontier)
 
-	parents_copy := make([]lv, len(log.frontier))
-	copy(parents_copy, log.frontier)
-	o.parents = parents_copy
-
+	opIdx := len(log.ops)
 	log.ops = append(log.ops, o)
-	log.frontier = []lv{cur_lv}
-	log.version[agent] = seq
+	log.opStartLVs = append(log.opStartLVs, curLV)
+	log.agentOps[agent] = append(log.agentOps[agent], opIdx)
+	
+	lastLVOfRun := curLV + lv(o.length-1)
+	log.frontier = []lv{lastLVOfRun}
+	log.version[agent] = seq + o.length - 1
 }
 
 func localInsert[T any](log *opLog[T], agent int, pos int, content []T) {
-	current_pos := pos
-	for _, c := range content {
-		localInsertOne(log, agent, current_pos, c)
-		current_pos++
-	}
-}
-
-func localInsertOne[T any](log *opLog[T], agent int, pos int, content T) {
 	log.pushLocalOp(agent, op[T]{
 		opType:  opTypeIns,
-		content: []T{content},
-		length:  1,
+		content: content,
+		length:  len(content),
 		pos:     pos,
 	})
 }
 
-func localDelete[T any](log *opLog[T], agent int, pos int, del_len int) {
-	for del_len > 0 {
-		log.pushLocalOp(agent, op[T]{
-			opType: opTypeDel,
-			pos:    pos,
-		})
-		del_len--
-	}
+func localDelete[T any](log *opLog[T], agent int, pos int, delLen int) {
+	log.pushLocalOp(agent, op[T]{
+		opType: opTypeDel,
+		length: delLen,
+		pos:    pos,
+	})
 }
 
 func (log *opLog[T]) getOpByLV(v lv) (opIdx int, offset int) {
@@ -154,35 +154,42 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 	return sortLVs(f)
 }
 
-func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
+func pushRemoteOp[T any](log *opLog[T], o op[T], parentIds []id) {
 	agent := o.id.agent
 	seq := o.id.seq
 
-	last_known_seq, ok := log.version[agent]
+	lastKnownSeq, ok := log.version[agent]
 	if !ok {
-		last_known_seq = -1
+		lastKnownSeq = -1
 	}
 
-	if last_known_seq >= seq {
-		return // Already have the op
+	if lastKnownSeq >= seq+o.length-1 {
+		return // Already have the whole run
 	}
 
-	cur_lv := lv(len(log.ops))
+	var curLV lv
+	if len(log.ops) == 0 {
+		curLV = 0
+	} else {
+		lastIdx := len(log.ops) - 1
+		curLV = log.opStartLVs[lastIdx] + lv(log.ops[lastIdx].length)
+	}
 
-	// Resolve parents
-	parents := make([]lv, len(parent_ids))
-	for i, pid := range parent_ids {
-		parents[i] = idToLV(log, pid)
+	parents := make([]lv, len(parentIds))
+	for i, pid := range parentIds {
+		parents[i] = log.resolveID(pid)
 	}
 	o.parents = sortLVs(parents)
 
+	opIdx := len(log.ops)
 	log.ops = append(log.ops, o)
-	log.frontier = advanceFrontier(log.frontier, cur_lv, o.parents)
+	log.opStartLVs = append(log.opStartLVs, curLV)
+	log.agentOps[agent] = append(log.agentOps[agent], opIdx)
+	
+	lastLVOfRun := curLV + lv(o.length-1)
+	log.frontier = advanceFrontier(log.frontier, lastLVOfRun, o.parents)
 
-	if seq != last_known_seq+1 {
-		panic("Seq numbers out of order")
-	}
-	log.version[agent] = seq
+	log.version[agent] = max(log.version[agent], seq+o.length-1)
 }
 
 func mergeInto[T any](dest *opLog[T], src *opLog[T]) {
