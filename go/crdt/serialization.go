@@ -2,10 +2,12 @@ package crdt
 
 import (
 	"fmt"
+	"sort"
 )
 
 // ColumnarData represents the opLog in a columnar format for efficient compression.
 type ColumnarData[T any] struct {
+	OpLengths []int
 	Types     []opType
 	TypeRuns  []int
 	Agents    []int
@@ -26,18 +28,23 @@ func (log *opLog[T]) Marshal() *ColumnarData[T] {
 	}
 
 	res := &ColumnarData[T]{
-		Content:  make([]T, 0, len(log.ops)),
-		Parents:  make([][]lv, 0, len(log.ops)),
-		Frontier: log.frontier,
+		OpLengths: make([]int, 0, len(log.ops)),
+		Content:   make([]T, 0, len(log.ops)),
+		Parents:   make([][]lv, 0, len(log.ops)),
+		Frontier:  log.frontier,
 	}
 
 	var lastType opType
 	var lastAgent int
+	var lastSeq int
+	var lastLen int
 	var typeRun int
 	var agentRun int
 	var lastPos int
 
 	for i, o := range log.ops {
+		res.OpLengths = append(res.OpLengths, o.length)
+
 		// --- 1. Run-Length Encode Types ---
 		if i == 0 {
 			lastType = o.opType
@@ -54,14 +61,20 @@ func (log *opLog[T]) Marshal() *ColumnarData[T] {
 		// --- 2. Run-Length Encode Agents & Seqs ---
 		if i == 0 {
 			lastAgent = o.id.agent
+			lastSeq = o.id.seq
+			lastLen = o.length
 			agentRun = 1
 			res.Seqs = append(res.Seqs, o.id.seq)
-		} else if o.id.agent == lastAgent {
+		} else if o.id.agent == lastAgent && o.id.seq == lastSeq+lastLen {
 			agentRun++
+			lastSeq = o.id.seq
+			lastLen = o.length
 		} else {
 			res.Agents = append(res.Agents, lastAgent)
 			res.AgentRuns = append(res.AgentRuns, agentRun)
 			lastAgent = o.id.agent
+			lastSeq = o.id.seq
+			lastLen = o.length
 			agentRun = 1
 			res.Seqs = append(res.Seqs, o.id.seq)
 		}
@@ -98,18 +111,15 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 		return log
 	}
 
-	totalOps := 0
-	for _, r := range data.TypeRuns {
-		totalOps += r
-	}
-
+	totalOps := len(data.OpLengths)
 	log.ops = make([]op[T], totalOps)
+	log.opStartLVs = make([]lv, totalOps)
 
 	// --- 1. Expand Types ---
 	opIdx := 0
 	for i, t := range data.Types {
 		run := data.TypeRuns[i]
-		for j := range run {
+		for j := 0; j < run; j++ {
 			log.ops[opIdx+j].opType = t
 		}
 		opIdx += run
@@ -119,9 +129,11 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 	opIdx = 0
 	for i, agent := range data.Agents {
 		run := data.AgentRuns[i]
-		startSeq := data.Seqs[i]
-		for j := range run {
-			log.ops[opIdx+j].id = id{agent: agent, seq: startSeq + j}
+		currentSeq := data.Seqs[i]
+		for j := 0; j < run; j++ {
+			log.ops[opIdx+j].id = id{agent: agent, seq: currentSeq}
+			log.ops[opIdx+j].length = data.OpLengths[opIdx+j]
+			currentSeq += log.ops[opIdx+j].length
 		}
 		opIdx += run
 	}
@@ -140,21 +152,38 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 
 	// --- 4. Content & Parents & Maps ---
 	contentIdx := 0
+	currentLV := lv(0)
 	for i := 0; i < totalOps; i++ {
 		if log.ops[i].opType == opTypeIns {
-			// This is a temporary hack to make it compile.
-			// In a real RLE implementation, we'd need to know the length.
-			log.ops[i].content = data.Content[contentIdx : contentIdx+1]
-			log.ops[i].length = 1
-			contentIdx++
+			length := log.ops[i].length
+			log.ops[i].content = data.Content[contentIdx : contentIdx+length]
+			contentIdx += length
 		}
 		log.ops[i].parents = data.Parents[i]
 
-		// Update version map
+		// Rebuild metadata
+		log.opStartLVs[i] = currentLV
+		currentLV += lv(log.ops[i].length)
+
 		agent := log.ops[i].id.agent
 		seq := log.ops[i].id.seq
-		if currentSeq, ok := log.version[agent]; !ok || seq > currentSeq {
-			log.version[agent] = seq
+		
+		// Rebuild agentOps correctly (sorted by seq)
+		idxs := log.agentOps[agent]
+		if len(idxs) == 0 || seq > log.ops[idxs[len(idxs)-1]].id.seq {
+			log.agentOps[agent] = append(idxs, i)
+		} else {
+			insertIdx := sort.Search(len(idxs), func(j int) bool {
+				return log.ops[idxs[j]].id.seq >= seq
+			})
+			log.agentOps[agent] = append(idxs, 0)
+			copy(log.agentOps[agent][insertIdx+1:], log.agentOps[agent][insertIdx:])
+			log.agentOps[agent][insertIdx] = i
+		}
+		
+		lastSeqOfRun := seq + log.ops[i].length - 1
+		if currentSeq, ok := log.version[agent]; !ok || lastSeqOfRun > currentSeq {
+			log.version[agent] = lastSeqOfRun
 		}
 	}
 
@@ -164,10 +193,11 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 // Stats prints comparison between row-based and columnar representation.
 func (log *opLog[T]) PrintCompressionStats() {
 	fmt.Printf("OpLog Stats:\n")
-	fmt.Printf("  Total Operations: %d\n", len(log.ops))
+	fmt.Printf("  Total Runs: %d\n", len(log.ops))
 
 	data := log.Marshal()
 	fmt.Printf("Columnar Breakdown:\n")
+	fmt.Printf("  OpLengths Column:    %d\n", len(data.OpLengths))
 	fmt.Printf("  Type Column Groups:  %d (RLE)\n", len(data.Types))
 	fmt.Printf("  Agent Column Groups: %d (RLE)\n", len(data.Agents))
 	fmt.Printf("  Position Deltas:     %d (Delta)\n", len(data.Positions))
