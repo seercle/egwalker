@@ -72,6 +72,9 @@ func (log *opLog[T]) getOpByLV(v lv) (opIdx int, offset int) {
 		panic("LV not found")
 	}
 	offset = int(v - log.opStartLVs[opIdx])
+	if offset >= log.ops[opIdx].length {
+		panic("LV offset out of bounds")
+	}
 	return opIdx, offset
 }
 
@@ -86,6 +89,9 @@ func (log *opLog[T]) resolveID(target id) lv {
 	opIdx := idxs[i]
 	o := log.ops[opIdx]
 	offset := target.seq - o.id.seq
+	if offset >= o.length {
+		panic("Sequence number out of bounds for run")
+	}
 	return log.opStartLVs[opIdx] + lv(offset)
 }
 
@@ -114,7 +120,8 @@ func (log *opLog[T]) isAncestor(ancestorLV, descendantLV lv) bool {
 			continue
 		}
 
-		for _, p := range log.ops[curr].parents {
+		opIdx, _ := log.getOpByLV(curr)
+		for _, p := range log.ops[opIdx].parents {
 			if !visited[p] {
 				visited[p] = true
 				stack = append(stack, p)
@@ -182,7 +189,11 @@ func mergeInto[T any](dest *opLog[T], src *opLog[T]) {
 	for _, o := range src.ops {
 		parent_ids := make([]id, len(o.parents))
 		for i, p_lv := range o.parents {
-			parent_ids[i] = src.ops[p_lv].id
+			opIdx, offset := src.getOpByLV(p_lv)
+			parent_ids[i] = id{
+				agent: src.ops[opIdx].id.agent,
+				seq:   src.ops[opIdx].id.seq + offset,
+			}
 		}
 		new_op := o
 		pushRemoteOp(dest, new_op, parent_ids)
