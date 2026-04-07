@@ -6,7 +6,7 @@ type lv int
 
 type id struct {
 	agent int
-	seq   int
+	seq   int // Starting sequence number for this run
 }
 
 type opType string
@@ -18,19 +18,21 @@ const (
 
 type op[T any] struct {
 	opType  opType
-	content T   // TODO: This should be a slice or a 'content' interface supporting length for RLE
-	pos     int // Original position for local ops
-	id      id
-	parents []lv
+	content []T  // Slice of items for insertions (empty for deletions)
+	length  int  // Total number of items in this run
+	pos     int  // Starting document position for local ops
+	id      id   // ID of the FIRST item in the run
+	parents []lv // LVs that the START of this run directly depends on
 }
 
 type remoteVersion map[int]int
 
 type opLog[T any] struct {
-	ops      []op[T]
-	frontier []lv
-	version  remoteVersion
-	idToLV   map[id]lv
+	ops        []op[T]
+	opStartLVs []lv          // Starting LV for each op in 'ops' (sorted)
+	agentOps   map[int][]int // Maps agent ID -> list of indexes into 'ops', sorted by seq
+	frontier   []lv          // Current maxima (ends of runs)
+	version    remoteVersion // Max seq seen per agent
 }
 
 type diffResult struct {
@@ -103,6 +105,7 @@ type ArrayDocument[T any] struct {
 	Document[T]
 }
 
+/*
 // MapOp represents a set operation on a MapDocument.
 type MapOp[K comparable, V any] struct {
 	Key      K
@@ -116,6 +119,7 @@ type MapDocument[K comparable, V any] struct {
 	opLog    *opLog[MapOp[K, V]]
 	keyIndex map[K][]lv
 }
+*/
 
 // Mergeable is an interface for documents that can be merged recursively.
 type Mergeable interface {
@@ -140,8 +144,10 @@ func (doc *ArrayDocument[T]) MergeFromAny(other any) {
 	}
 }
 
+/*
 func (doc *MapDocument[K, V]) MergeFromAny(other any) {
 	if o, ok := other.(*MapDocument[K, V]); ok {
 		doc.MergeFrom(o)
 	}
 }
+*/

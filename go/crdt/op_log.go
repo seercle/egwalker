@@ -10,10 +10,11 @@ import (
 
 func newOpLog[T any]() *opLog[T] {
 	return &opLog[T]{
-		ops:      []op[T]{},
-		frontier: []lv{},
-		version:  make(remoteVersion),
-		idToLV:   make(map[id]lv),
+		ops:        []op[T]{},
+		opStartLVs: []lv{},
+		agentOps:   make(map[int][]int),
+		frontier:   []lv{},
+		version:    make(remoteVersion),
 	}
 }
 
