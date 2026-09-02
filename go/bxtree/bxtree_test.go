@@ -7,28 +7,6 @@ import (
 	"testing"
 )
 
-func expectPanic(t *testing.T, name string, want string, f func()) {
-	t.Helper()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Errorf("%s: expected panic, but it did not", name)
-			return
-		}
-		if r != want {
-			t.Errorf("%s: expected panic message %q, got %q", name, want, r)
-		}
-	}()
-	f()
-}
-
-// Helpers
-type countSummarizer struct{}
-
-func (s countSummarizer) FromItem(item int) int { return 1 }
-func (s countSummarizer) Add(a, b int) int      { return a + b }
-func (s countSummarizer) Sub(a, b int) int      { return a - b }
-
 func setupCountSummary() Summarizer[int, int] {
 	return countSummarizer{}
 }
