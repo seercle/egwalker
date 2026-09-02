@@ -6,7 +6,10 @@ import (
 
 func ExampleNew() {
 	// Create a simple tree of strings
-	tree := New[string, struct{}]()
+	tree, err := New[string, struct{}]()
+	if err != nil {
+		panic(err)
+	}
 
 	// O(log N) operations
 	tree.InsertAt(0, "World")
@@ -31,9 +34,12 @@ func (s readmeSummarizer) Sub(a, b int) int      { return a - b }
 
 func ExampleSummarizer() {
 	// Initialize tree with the summarizer
-	tree := New[int, int](
+	tree, err := New[int, int](
 		WithSummarizer[int, int](readmeSummarizer{}),
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	tree.InsertRange(0, []int{10, 20, 30, 40})
 

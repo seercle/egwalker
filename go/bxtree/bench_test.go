@@ -30,7 +30,7 @@ func BenchmarkInsertRandom(b *testing.B) {
 		b.Run(fmt.Sprintf("BxTree/%d", size), func(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
-				tree := New[int, struct{}]()
+				tree := mustNewB[int, struct{}](b)
 				r := rand.New(rand.NewSource(42))
 				b.StartTimer()
 				for i := range size {
@@ -66,7 +66,7 @@ func BenchmarkDeleteRandom(b *testing.B) {
 		b.Run(fmt.Sprintf("BxTree/%d", size), func(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
-				tree := New[int, struct{}]()
+				tree := mustNewB[int, struct{}](b)
 				for i := range size {
 					tree.InsertAt(i, i)
 				}
@@ -93,7 +93,7 @@ func BenchmarkReadRandom(b *testing.B) {
 	})
 
 	b.Run("BxTree", func(b *testing.B) {
-		tree := New[int, struct{}]()
+		tree := mustNewB[int, struct{}](b)
 		for i := range size {
 			tree.InsertAt(i, i)
 		}
@@ -120,7 +120,7 @@ func BenchmarkIteration(b *testing.B) {
 	})
 
 	b.Run("BxTree", func(b *testing.B) {
-		tree := New[int, struct{}]()
+		tree := mustNewB[int, struct{}](b)
 		for i := range size {
 			tree.InsertAt(i, i)
 		}
@@ -139,7 +139,7 @@ func BenchmarkSummaryOverhead(b *testing.B) {
 	size := 50_000
 	b.Run("NoSummary", func(b *testing.B) {
 		for b.Loop() {
-			tree := New[int, struct{}]()
+			tree := mustNewB[int, struct{}](b)
 			for i := range size {
 				tree.InsertAt(i, i)
 			}
@@ -149,7 +149,7 @@ func BenchmarkSummaryOverhead(b *testing.B) {
 	b.Run("WithSummary", func(b *testing.B) {
 		config := countSummarizer{}
 		for b.Loop() {
-			tree := New(WithSummarizer(config))
+			tree := mustNewB(b, WithSummarizer(config))
 			for i := range size {
 				tree.InsertAt(i, i)
 			}
@@ -164,7 +164,7 @@ func BenchmarkRangeOperations(b *testing.B) {
 	b.Run("InsertRange", func(b *testing.B) {
 		items := make([]int, chunkSize)
 		for b.Loop() {
-			tree := New[int, struct{}]()
+			tree := mustNewB[int, struct{}](b)
 			for i := 0; i < size/chunkSize; i++ {
 				tree.InsertRange(tree.Size(), items)
 			}
@@ -174,7 +174,7 @@ func BenchmarkRangeOperations(b *testing.B) {
 	b.Run("DeleteRange", func(b *testing.B) {
 		for b.Loop() {
 			b.StopTimer()
-			tree := New[int, struct{}]()
+			tree := mustNewB[int, struct{}](b)
 			for i := range size {
 				tree.InsertAt(i, i)
 			}

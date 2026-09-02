@@ -6,7 +6,10 @@ import (
 
 // buildCountTree returns a count-summarized tree holding items 0..size-1.
 func buildCountTree(size int) *BxTree[int, int] {
-	tree := New(WithSummarizer(countSummarizer{}))
+	tree, err := New(WithSummarizer(countSummarizer{}))
+	if err != nil {
+		panic(err)
+	}
 	for i := 0; i < size; i++ {
 		if err := tree.InsertAt(i, i); err != nil {
 			panic(err)
@@ -71,7 +74,7 @@ func TestUpdateSummaryAndUpward(t *testing.T) {
 }
 
 func TestFindPathEdges(t *testing.T) {
-	tree := New[int, int](WithSummarizer(sumSummary{}))
+	tree := mustNew(t, WithSummarizer(sumSummary{}))
 	if err := tree.InsertRange(0, []int{10, 20, 30, 40}); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +98,7 @@ func TestFindPathEdges(t *testing.T) {
 	}
 
 	// Empty tree: FindPath returns (nil, -1, zero).
-	empty := New[int, int](WithSummarizer(sumSummary{}))
+	empty := mustNew(t, WithSummarizer(sumSummary{}))
 	if n, p, a := empty.FindPath(func(acc, cur int) bool { return true }); n != nil || p != -1 || a != 0 {
 		t.Errorf("FindPath on empty tree = (%v, %d, %d), want (nil, -1, 0)", n, p, a)
 	}

@@ -9,7 +9,7 @@ import (
 // replayDoc rebuilds a raw crdtDoc from a document's op log, item by item.
 func replayDoc(doc *RuneDocument) *crdtDoc {
 	cDoc := &crdtDoc{
-		items: bxtree.New(
+		items: newBxTree(
 			bxtree.WithSummarizer(crdtSummaryConfig),
 			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 				item.node = node

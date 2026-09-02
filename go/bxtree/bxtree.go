@@ -23,6 +23,10 @@ func WithOnItemMoved[T any, S any](f func(item T, node *Node[T, S])) Option[T, S
 
 // WithInternalNodeSize sets the minimum and maximum number of children for internal nodes.
 // Larger sizes increase branching factor and reduce tree height but increase work per node.
+//
+// Supported sizes require min >= 2, min <= max, and max >= 2*min-1 so that
+// split/merge can keep every non-root node within [min, max]. New returns an
+// *InvalidNodeSizeError for any other configuration.
 func WithInternalNodeSize[T any, S any](min, max int) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.internalMinSize = min
@@ -32,6 +36,10 @@ func WithInternalNodeSize[T any, S any](min, max int) Option[T, S] {
 
 // WithLeafNodeSize sets the minimum and maximum number of items for leaf nodes.
 // Larger sizes improve cache locality but increase the cost of insertions and deletions.
+//
+// Supported sizes require min >= 1, min <= max, and max >= 2*min-1 so that
+// split/merge can keep every non-root node within [min, max]. New returns an
+// *InvalidNodeSizeError for any other configuration.
 func WithLeafNodeSize[T any, S any](min, max int) Option[T, S] {
 	return func(tree *BxTree[T, S]) {
 		tree.leafMinSize = min
@@ -62,7 +70,9 @@ func (tree *BxTree[T, S]) onItemsMoved(node *Node[T, S], items []T) {
 }
 
 // New creates a new empty BxTree with the provided options.
-func New[T any, S any](opts ...Option[T, S]) *BxTree[T, S] {
+// It returns an error if the configured node sizes are unsupported; see
+// WithLeafNodeSize and WithInternalNodeSize for the supported envelope.
+func New[T any, S any](opts ...Option[T, S]) (*BxTree[T, S], error) {
 	tree := &BxTree[T, S]{
 		internalMinSize: DefaultInternalMinSize,
 		internalMaxSize: DefaultInternalMaxSize,
@@ -72,16 +82,53 @@ func New[T any, S any](opts ...Option[T, S]) *BxTree[T, S] {
 	for _, opt := range opts {
 		opt(tree)
 	}
-	return tree
+	if err := validateNodeSizes(tree); err != nil {
+		return nil, err
+	}
+	return tree, nil
+}
+
+// validateNodeSizes checks that the configured leaf/internal node sizes are
+// within the envelope the tree's split, borrow, and merge operations can
+// maintain. Every non-root node must stay within [min, max]; split divides an
+// overflowing max+1 node into two halves (each >= min) and merge combines at
+// most (min-1)+min items/children, so both require max >= 2*min-1. Internal
+// nodes additionally need min >= 2: a non-root internal node with a single
+// child cannot be rebalanced by the delete path.
+func validateNodeSizes[T any, S any](tree *BxTree[T, S]) error {
+	if tree.leafMinSize < 1 {
+		return &InvalidNodeSizeError{Kind: "leaf", Min: tree.leafMinSize, Max: tree.leafMaxSize, Reason: "min must be >= 1"}
+	}
+	if tree.leafMaxSize < tree.leafMinSize {
+		return &InvalidNodeSizeError{Kind: "leaf", Min: tree.leafMinSize, Max: tree.leafMaxSize, Reason: "max must be >= min"}
+	}
+	if tree.leafMaxSize < 2*tree.leafMinSize-1 {
+		return &InvalidNodeSizeError{Kind: "leaf", Min: tree.leafMinSize, Max: tree.leafMaxSize, Reason: "max must be >= 2*min-1"}
+	}
+	if tree.internalMinSize < 2 {
+		return &InvalidNodeSizeError{Kind: "internal", Min: tree.internalMinSize, Max: tree.internalMaxSize, Reason: "min must be >= 2"}
+	}
+	if tree.internalMaxSize < tree.internalMinSize {
+		return &InvalidNodeSizeError{Kind: "internal", Min: tree.internalMinSize, Max: tree.internalMaxSize, Reason: "max must be >= min"}
+	}
+	if tree.internalMaxSize < 2*tree.internalMinSize-1 {
+		return &InvalidNodeSizeError{Kind: "internal", Min: tree.internalMinSize, Max: tree.internalMaxSize, Reason: "max must be >= 2*min-1"}
+	}
+	return nil
 }
 
 // NewFromSlice creates a new BxTree initialized with the provided items.
 // The tree is built bottom-up for maximum efficiency.
-func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
-	tree := New(opts...)
+// It returns an error if the configured node sizes are unsupported; see
+// WithLeafNodeSize and WithInternalNodeSize for the supported envelope.
+func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S], error) {
+	tree, err := New(opts...)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(items) == 0 {
-		return tree
+		return tree, nil
 	}
 
 	// 1. Create all leaf nodes
@@ -175,7 +222,7 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 	}
 
 	tree.root = currentLevel[0]
-	return tree
+	return tree, nil
 }
 
 // Size returns the total number of items in the tree.

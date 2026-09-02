@@ -1,6 +1,6 @@
-package bxtree
-
 // Package-wide test utilities for the bxtree package.
+
+package bxtree
 
 import (
 	"reflect"
@@ -12,6 +12,33 @@ type countSummarizer struct{}
 func (s countSummarizer) FromItem(item int) int { return 1 }
 func (s countSummarizer) Add(a, b int) int      { return a + b }
 func (s countSummarizer) Sub(a, b int) int      { return a - b }
+
+func mustNew[T any, S any](t *testing.T, opts ...Option[T, S]) *BxTree[T, S] {
+	t.Helper()
+	tree, err := New(opts...)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return tree
+}
+
+func mustNewFromSlice[T any, S any](t *testing.T, items []T, opts ...Option[T, S]) *BxTree[T, S] {
+	t.Helper()
+	tree, err := NewFromSlice(items, opts...)
+	if err != nil {
+		t.Fatalf("NewFromSlice: %v", err)
+	}
+	return tree
+}
+
+func mustNewB[T any, S any](b *testing.B, opts ...Option[T, S]) *BxTree[T, S] {
+	b.Helper()
+	tree, err := New(opts...)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return tree
+}
 
 func expectPanic(t *testing.T, name string, want string, f func()) {
 	t.Helper()

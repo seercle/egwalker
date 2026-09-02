@@ -2,6 +2,17 @@ package crdt
 
 import "egwalker/bxtree"
 
+// newBxTree constructs a bxtree, panicking if construction fails. crdt only
+// ever builds trees with the default node sizes (it passes no With*NodeSize
+// options), which are always valid, so the error is unreachable.
+func newBxTree[T any, S any](opts ...bxtree.Option[T, S]) *bxtree.BxTree[T, S] {
+	tree, err := bxtree.New(opts...)
+	if err != nil {
+		panic("crdt: bxtree.New: " + err.Error())
+	}
+	return tree
+}
+
 type lv int
 
 type id struct {

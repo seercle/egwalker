@@ -15,7 +15,7 @@ import (
 // are tight; default sizes rarely do. The failing operation is a deterministic
 // DeleteAt (op 215 of this seed's sequence).
 func TestDeleteDoesNotOverfillInternalNode(t *testing.T) {
-	tree := New(
+	tree := mustNew(t,
 		WithSummarizer[int, int](countSummarizer{}),
 		WithLeafNodeSize[int, int](4, 8),
 		WithInternalNodeSize[int, int](2, 4),
@@ -54,7 +54,7 @@ func TestDeleteDoesNotOverfillInternalNode(t *testing.T) {
 func TestRandomOpsMaintainOccupancy(t *testing.T) {
 	for seed := int64(0); seed < 30; seed++ {
 		t.Run(fmt.Sprintf("seed%d", seed), func(t *testing.T) {
-			tree := New(
+			tree := mustNew(t,
 				WithSummarizer[int, int](countSummarizer{}),
 				WithLeafNodeSize[int, int](4, 8),
 				WithInternalNodeSize[int, int](2, 4),

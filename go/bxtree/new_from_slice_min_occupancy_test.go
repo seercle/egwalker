@@ -21,7 +21,7 @@ func TestExpectationNewFromSliceMinOccupancy(t *testing.T) {
 	for i := range items {
 		items[i] = i
 	}
-	tree := NewFromSlice(items, WithSummarizer[int, int](countSummarizer{}))
+	tree := mustNewFromSlice(t, items, WithSummarizer[int, int](countSummarizer{}))
 
 	violations := 0
 	root := tree.Root()

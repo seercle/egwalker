@@ -570,7 +570,7 @@ func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.
 
 func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 	doc := &crdtDoc{
-		items: bxtree.New(
+		items: newBxTree(
 			bxtree.WithSummarizer(crdtSummaryConfig),
 			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 				item.node = node
@@ -581,7 +581,7 @@ func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 		sortedItems:    []*crdtItem{},
 	}
 
-	snapshot := bxtree.New[T, struct{}]()
+	snapshot := newBxTree[T, struct{}]()
 
 	for i := 0; i < len(log.ops); i++ {
 		do1Operation(doc, log, lv(i), snapshot)
@@ -835,7 +835,7 @@ func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
 
 func newBranch[T any]() *branch[T] {
 	return &branch[T]{
-		snapshot: bxtree.New[T, struct{}](),
+		snapshot: newBxTree[T, struct{}](),
 		frontier: []lv{},
 	}
 }
@@ -848,7 +848,7 @@ func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
 	visit := findOpsToVisit(log, b.frontier, mergeFrontier)
 
 	doc := &crdtDoc{
-		items: bxtree.New(
+		items: newBxTree(
 			bxtree.WithSummarizer(crdtSummaryConfig),
 			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
 				item.node = node

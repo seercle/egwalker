@@ -8,7 +8,7 @@ import (
 func TestSmallNodeConfigRandomOps(t *testing.T) {
 	// The option funcs are generic; New cannot infer T/S from them alone, so
 	// the type arguments must be written explicitly on each option call.
-	tree := New(
+	tree := mustNew(t,
 		WithSummarizer[int, int](countSummarizer{}),
 		WithLeafNodeSize[int, int](4, 8),
 		WithInternalNodeSize[int, int](2, 4),

@@ -62,7 +62,7 @@ func TestNewFromSliceNoSingletonInternal(t *testing.T) {
 			for i := range items {
 				items[i] = i
 			}
-			tree := NewFromSlice(items, cfg.opts...)
+			tree := mustNewFromSlice(t, items, cfg.opts...)
 			if tree.Size() != n {
 				t.Fatalf("%s config, n=%d: Size=%d", cfg.name, n, tree.Size())
 			}
@@ -82,7 +82,7 @@ func TestNewFromSliceNoSingletonInternal(t *testing.T) {
 
 func TestNewFromSlice(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		tree := NewFromSlice[int, struct{}](nil)
+		tree := mustNewFromSlice[int, struct{}](t, nil)
 		if tree.Size() != 0 {
 			t.Errorf("Expected size 0, got %d", tree.Size())
 		}
@@ -96,7 +96,7 @@ func TestNewFromSlice(t *testing.T) {
 		}
 
 		config := setupCountSummary()
-		tree := NewFromSlice(items, WithSummarizer(config))
+		tree := mustNewFromSlice(t, items, WithSummarizer(config))
 
 		if tree.Size() != size {
 			t.Errorf("Expected size %d, got %d", size, tree.Size())
@@ -126,7 +126,7 @@ func TestNewFromSlice(t *testing.T) {
 			node *Node[*item, struct{}]
 		}
 		items := []*item{{}, {}, {}}
-		tree := NewFromSlice(items, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
+		tree := mustNewFromSlice(t, items, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
 			it.node = n
 		}))
 
@@ -147,7 +147,7 @@ func TestNewFromSliceRespectsSizeOptions(t *testing.T) {
 	for i := range items {
 		items[i] = i
 	}
-	tree := NewFromSlice(items,
+	tree := mustNewFromSlice(t, items,
 		WithSummarizer[int, int](countSummarizer{}),
 		WithLeafNodeSize[int, int](4, 8),
 		WithInternalNodeSize[int, int](2, 4),

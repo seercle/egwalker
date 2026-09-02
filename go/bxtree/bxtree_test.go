@@ -12,7 +12,7 @@ func setupCountSummary() Summarizer[int, int] {
 }
 
 func TestNew(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 	if tree.Size() != 0 {
 		t.Errorf("New tree should have size 0, got %d", tree.Size())
 	}
@@ -41,7 +41,7 @@ func TestNilTree(t *testing.T) {
 	expectPanic(t, "Last", "bxtree: Last called on nil tree", func() { tree.Last() })
 
 	// Test nil arguments on non-nil tree
-	tree = New[int, int]()
+	tree = mustNew[int, int](t)
 	expectPanic(t, "ForEachNilFunc", "bxtree: ForEach called with nil function", func() { tree.ForEach(nil) })
 	expectPanic(t, "FindPathNilPred", "bxtree: FindPath called with nil predicate", func() { tree.FindPath(nil) })
 }
@@ -65,7 +65,7 @@ func TestNilNode(t *testing.T) {
 }
 
 func TestIndexOutOfBounds(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 
 	t.Run("EmptyTree", func(t *testing.T) {
 		if _, err := tree.GetAt(0); err != ErrIndexOutOfBounds {
@@ -92,7 +92,7 @@ func TestIndexOutOfBounds(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 
 	t.Run("Sequential", func(t *testing.T) {
 		for i := range 100 {
@@ -106,7 +106,7 @@ func TestInsert(t *testing.T) {
 	})
 
 	t.Run("Prepend", func(t *testing.T) {
-		tree := New[int, struct{}]()
+		tree := mustNew[int, struct{}](t)
 		for i := range 100 {
 			tree.InsertAt(0, i)
 		}
@@ -117,7 +117,7 @@ func TestInsert(t *testing.T) {
 	})
 
 	t.Run("Range", func(t *testing.T) {
-		tree := New[int, struct{}]()
+		tree := mustNew[int, struct{}](t)
 		items := []int{1, 2, 3, 4, 5}
 		tree.InsertRange(0, items)
 		if tree.Size() != 5 {
@@ -133,7 +133,7 @@ func TestInsert(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	t.Run("Single", func(t *testing.T) {
-		tree := New[int, struct{}]()
+		tree := mustNew[int, struct{}](t)
 		for i := range 10 {
 			tree.InsertAt(i, i)
 		}
@@ -148,7 +148,7 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("Range", func(t *testing.T) {
-		tree := New[int, struct{}]()
+		tree := mustNew[int, struct{}](t)
 		for i := range 100 {
 			tree.InsertAt(i, i)
 		}
@@ -163,7 +163,7 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("Emptying", func(t *testing.T) {
-		tree := New[int, struct{}]()
+		tree := mustNew[int, struct{}](t)
 		tree.InsertAt(0, 1)
 		tree.DeleteAt(0)
 		if tree.Size() != 0 || tree.Root() != nil {
@@ -173,7 +173,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestPointers(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 	count := 1000 // Enough to cause multiple splits
 
 	for i := range count {
@@ -210,7 +210,7 @@ func TestPointers(t *testing.T) {
 }
 
 func TestSummary(t *testing.T) {
-	tree := New(WithSummarizer(setupCountSummary()))
+	tree := mustNew(t, WithSummarizer(setupCountSummary()))
 
 	// Initial inserts
 	for i := range 100 {
@@ -255,7 +255,7 @@ func TestOnItemMoved(t *testing.T) {
 		node *Node[*item, struct{}]
 	}
 
-	tree := NewFromSlice(nil, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
+	tree := mustNewFromSlice(t, nil, WithOnItemMoved(func(it *item, n *Node[*item, struct{}]) {
 		it.node = n
 	}))
 
@@ -289,7 +289,7 @@ func TestOnItemMoved(t *testing.T) {
 func TestStressRandom(t *testing.T) {
 	seed := int64(42)
 	rng := rand.New(rand.NewSource(seed))
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 	var mirror []int
 
 	for range 5000 {
@@ -328,7 +328,7 @@ func TestStressRandom(t *testing.T) {
 }
 
 func TestForEach(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 
 	t.Run("Empty", func(t *testing.T) {
 		count := 0
@@ -350,7 +350,7 @@ func TestForEach(t *testing.T) {
 }
 
 func TestIterator(t *testing.T) {
-	tree := New[int, struct{}]()
+	tree := mustNew[int, struct{}](t)
 	for i := range 100 {
 		tree.InsertAt(i, i)
 	}

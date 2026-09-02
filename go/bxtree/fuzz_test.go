@@ -28,9 +28,17 @@ func FuzzBxTree(f *testing.F) {
 
 		var tree *BxTree[int, int]
 		if withSummary {
-			tree = New(WithSummarizer(countSummary))
+			tr, err := New(WithSummarizer(countSummary))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree = tr
 		} else {
-			tree = New[int, int]()
+			tr, err := New[int, int]()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree = tr
 		}
 		var reference []int
 
