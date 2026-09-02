@@ -20,7 +20,9 @@
 │   ├── bxtree/             # Positional B+Tree implementation
 │   │   ├── bxtree.go       # Core B+Tree logic (Insert, Delete, Search)
 │   │   ├── types.go        # B+Tree node, summary, and summarizer types
-│   │   └── unit_test.go    # Comprehensive B+Tree tests
+│   │   ├── bxtree_test.go  # B+Tree unit tests
+│   │   ├── fuzz_test.go    # Native fuzz target (FuzzBxTree)
+│   │   └── bench_test.go   # B+Tree benchmarks
 │   ├── pheap/              # Pairing heap implementation
 │   │   ├── pheap.go        # Pairing heap operations (Push, Pop, Peek)
 │   │   └── types.go        # Pairing heap node and structure types
@@ -29,7 +31,7 @@
 │   │   ├── document.go     # High-level Document, RuneDocument, MapDocument APIs
 │   │   ├── op_log.go       # Causal operation log and frontier management
 │   │   ├── types.go        # CRDT internal types (item, op, lv)
-│   │   └── fuzzer_test.go  # Randomized property-based testing
+│   │   └── fuzz_test.go    # Native fuzz targets (FuzzDocumentOps, FuzzMergeConvergence, FuzzMapDocument, FuzzArrayDocument)
 │   ├── main.go             # Usage examples and interactive demo
 │   └── go.mod              # Go module definition
 ├── resources/              # Research papers and trace data
@@ -50,7 +52,7 @@ Since the Go module root is within the `go/` directory, all `go` commands should
 - **Build**: `go build -C go ./...`
 - **Run Example**: `go run -C go main.go`
 - **Test All**: `go test -C go ./...`
-- **Run Fuzzers**: `go test -C go ./bxtree -fuzz=FuzzTree` (and similar for other packages)
+- **Run Fuzzers**: native Go fuzz targets run their seed corpora under `go test`; deep search uses `-fuzz`, e.g. `go test -C go ./crdt -fuzz=FuzzMergeConvergence -fuzztime=30s` (also `FuzzDocumentOps`, `FuzzMapDocument`, `FuzzArrayDocument`, `go test -C go ./pheap -fuzz=FuzzHeap`, `go test -C go ./bxtree -fuzz=FuzzBxTree`)
 - **Visualize Traces**: `python scripts/plot-trace.py` (requires dependencies from `flake.nix`)
 
 ## Implementation Status & Comparison with Research Paper
@@ -81,7 +83,7 @@ This implementation is based on the research paper **"Collaborative Text Editing
 ## Development Conventions
 
 - **Generics**: All data structures and document types are generic where possible.
-- **Testing**: The project emphasizes robustness through extensive unit tests and fuzzer tests (`fuzzer_test.go` files).
+- **Testing**: The project emphasizes robustness through extensive unit tests and native Go fuzz targets (`fuzz_test.go` files: `FuzzBxTree`, `FuzzHeap`, `FuzzDocumentOps`, `FuzzMergeConvergence`, `FuzzMapDocument`, `FuzzArrayDocument`).
 - **CRDT Logic**: The `opLog` maintains causality and history, while `bxtree` provides efficient snapshots of the document state.
 - **Nested Documents**: `MapDocument` supports recursive merging if its values implement the `Mergeable` interface.
 - **Environment**: Use `nix develop` or `direnv` to ensure all dependencies (Go, Python packages, Graphviz) are available.

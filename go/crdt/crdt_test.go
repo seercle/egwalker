@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+// replayDoc rebuilds a raw crdtDoc from a document's op log, item by item.
+func replayDoc(doc *RuneDocument) *crdtDoc {
+	cDoc := &crdtDoc{
+		items: bxtree.New(
+			bxtree.WithSummarizer(crdtSummaryConfig),
+			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
+				item.node = node
+			}),
+		),
+		currentVersion: []lv{},
+		delTargets:     make(map[lv]lv),
+		sortedItems:    []*crdtItem{},
+	}
+
+	for i := 0; i < len(doc.opLog.ops); i++ {
+		do1Operation(cDoc, doc.opLog, lv(i), nil)
+	}
+	return cDoc
+}
+
 func TestVeryDeepHistory(t *testing.T) {
 	doc1 := NewRuneDocument(1)
 	// Use doc.Ins to keep snapshot in sync.
@@ -491,21 +511,7 @@ func TestItemMerging(t *testing.T) {
 	doc.Ins(3, "def")
 
 	// We can manually checkout the document to inspect the crdtDoc structure
-	cDoc := &crdtDoc{
-		items: bxtree.New(
-			bxtree.WithSummarizer(crdtSummaryConfig),
-			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
-				item.node = node
-			}),
-		),
-		currentVersion: []lv{},
-		delTargets:     make(map[lv]lv),
-		sortedItems:    []*crdtItem{},
-	}
-
-	for i := 0; i < len(doc.opLog.ops); i++ {
-		do1Operation(cDoc, doc.opLog, lv(i), nil)
-	}
+	cDoc := replayDoc(doc)
 
 	// Verify that we only have 1 merged item instead of 2 separate ones.
 	if cDoc.items.Size() != 1 {
@@ -527,21 +533,7 @@ func TestItemMerging_SplitAndReMerge(t *testing.T) {
 	// Insert in middle, should split the existing merged item.
 	doc.Ins(3, "X")
 
-	cDoc := &crdtDoc{
-		items: bxtree.New(
-			bxtree.WithSummarizer(crdtSummaryConfig),
-			bxtree.WithOnItemMoved(func(item *crdtItem, node *bxtree.Node[*crdtItem, crdtSummary]) {
-				item.node = node
-			}),
-		),
-		currentVersion: []lv{},
-		delTargets:     make(map[lv]lv),
-		sortedItems:    []*crdtItem{},
-	}
-
-	for i := 0; i < len(doc.opLog.ops); i++ {
-		do1Operation(cDoc, doc.opLog, lv(i), nil)
-	}
+	cDoc := replayDoc(doc)
 
 	// Expected: "abc" (3 chars), "X" (1 char), "def" (3 chars).
 	// Because "X" was inserted at index 3, it splits "abcdef" into "abc" and "def",

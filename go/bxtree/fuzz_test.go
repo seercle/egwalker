@@ -1,7 +1,6 @@
 package bxtree
 
 import (
-	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -122,65 +121,17 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) i
 	return size
 }
 
-func TestFuzzTree(t *testing.T) {
-	seedCount := 50
-	for _, withSummary := range []bool{true, false} {
-		for seed := range seedCount {
-			src := rand.NewSource(int64(seed))
-			r := rand.New(src)
-
-			var tree *BxTree[int, int]
-			if withSummary {
-				tree = New(WithSummarizer(countSummary))
-			} else {
-				tree = New[int, int]()
-			}
-			var reference []int
-
-			for op := range 200 {
-				length := len(reference)
-
-				if length == 0 || r.Float64() < 0.7 {
-					val := r.Intn(1000)
-					pos := 0
-					if length > 0 {
-						pos = r.Intn(length + 1)
-					}
-
-					err := tree.InsertAt(pos, val)
-					if err != nil {
-						t.Fatalf("Seed %d, Op %d: InsertAt(%d) failed: %v", seed, op, pos, err)
-					}
-
-					reference = append(reference, 0)
-					copy(reference[pos+1:], reference[pos:])
-					reference[pos] = val
-				} else {
-					pos := r.Intn(length)
-					delLen := r.Intn(5) + 1
-					if pos+delLen > length {
-						delLen = length - pos
-					}
-
-					err := tree.DeleteRange(pos, delLen)
-					if err != nil {
-						t.Fatalf("Seed %d, Op %d: DeleteRange(%d, %d) failed: %v", seed, op, pos, delLen, err)
-					}
-
-					reference = append(reference[:pos], reference[pos+delLen:]...)
-				}
-
-				if op%20 == 0 {
-					verifyTree(t, tree, reference)
-				}
-			}
-			verifyTree(t, tree, reference)
-		}
-	}
-}
-
 func FuzzBxTree(f *testing.F) {
-	f.Add([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+	for _, s := range [][]byte{
+		{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+		{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		{2, 10, 20, 30, 40, 50, 60, 70, 80, 90},
+		{1, 5, 3, 9, 7, 2, 8, 4, 6, 0, 1, 2, 3, 4, 5},
+	} {
+		f.Add(s)
+	}
+
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < 3 {
 			return
@@ -244,6 +195,10 @@ func FuzzBxTree(f *testing.F) {
 				}
 
 				reference = append(reference[:pos], reference[pos+delLen:]...)
+			}
+
+			if len(reference)%10 == 0 {
+				verifyTree(t, tree, reference)
 			}
 		}
 
