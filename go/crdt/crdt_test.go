@@ -47,6 +47,22 @@ func TestVeryDeepHistory(t *testing.T) {
 
 	// Merge back
 	doc1.MergeFrom(doc2)
+
+	// Fully sync every replica so all three converge, then assert invariants.
+	// Total visible runes: 1000 'a' + 1000 'z' + 'b' + 'c' = 2002.
+	docA.MergeFrom(doc1)
+	doc2.MergeFrom(doc1)
+
+	const wantLen = 2002
+	for name, d := range map[string]*RuneDocument{"doc1": doc1, "docA": docA, "doc2": doc2} {
+		if d.Len() != wantLen {
+			t.Errorf("%s: Len()=%d, want %d", name, d.Len(), wantLen)
+		}
+		if d.GetString() != doc1.GetString() {
+			t.Errorf("%s: diverged from doc1", name)
+		}
+		d.Check()
+	}
 }
 
 func TestRuneDocument_Basic(t *testing.T) {
