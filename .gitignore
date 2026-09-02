@@ -1,6 +1,13 @@
+# Go
 go/**/*.prof
 go/**/*.test
 go/**/*.out
 go/**/*.csv
+
+# Nix
 .direnv
 .envrc
+
+# AI
+docs/superpowers/plans
+.superpowers
