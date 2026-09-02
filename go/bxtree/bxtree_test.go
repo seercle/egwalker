@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func expectPanic(t *testing.T, name string, want string, f func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Errorf("%s: expected panic, but it did not", name)
+			return
+		}
+		if r != want {
+			t.Errorf("%s: expected panic message %q, got %q", name, want, r)
+		}
+	}()
+	f()
+}
+
 // Helpers
 type countSummarizer struct{}
 
@@ -31,69 +46,41 @@ func TestNew(t *testing.T) {
 func TestNilTree(t *testing.T) {
 	var tree *BxTree[int, int]
 
-	expectPanic := func(name string, expectedMessage string, f func()) {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Errorf("%s: expected panic, but it did not", name)
-				return
-			}
-			if r != expectedMessage {
-				t.Errorf("%s: expected panic message %q, got %q", name, expectedMessage, r)
-			}
-		}()
-		f()
-	}
-
-	expectPanic("Size", "bxtree: Size called on nil tree", func() { tree.Size() })
-	expectPanic("All", "bxtree: All called on nil tree", func() { tree.All() })
-	expectPanic("Reverse", "bxtree: Reverse called on nil tree", func() { tree.Reverse() })
-	expectPanic("ForEach", "bxtree: ForEach called on nil tree", func() { tree.ForEach(func(int) {}) })
-	expectPanic("Print", "bxtree: Print called on nil tree", func() { tree.Print() })
-	expectPanic("GetAt", "bxtree: GetAt called on nil tree", func() { tree.GetAt(0) })
-	expectPanic("GetAtNode", "bxtree: GetAtNode called on nil tree", func() { tree.GetAtNode(0) })
-	expectPanic("InsertAt", "bxtree: InsertAt called on nil tree", func() { tree.InsertAt(0, 1) })
-	expectPanic("InsertRange", "bxtree: InsertRange called on nil tree", func() { tree.InsertRange(0, []int{1}) })
-	expectPanic("DeleteAt", "bxtree: DeleteAt called on nil tree", func() { tree.DeleteAt(0) })
-	expectPanic("DeleteRange", "bxtree: DeleteRange called on nil tree", func() { tree.DeleteRange(0, 1) })
-	expectPanic("FindPath", "bxtree: FindPath called on nil tree", func() { tree.FindPath(nil) })
-	expectPanic("Root", "bxtree: Root called on nil tree", func() { tree.Root() })
-	expectPanic("First", "bxtree: First called on nil tree", func() { tree.First() })
-	expectPanic("Last", "bxtree: Last called on nil tree", func() { tree.Last() })
+	expectPanic(t, "Size", "bxtree: Size called on nil tree", func() { tree.Size() })
+	expectPanic(t, "All", "bxtree: All called on nil tree", func() { tree.All() })
+	expectPanic(t, "Reverse", "bxtree: Reverse called on nil tree", func() { tree.Reverse() })
+	expectPanic(t, "ForEach", "bxtree: ForEach called on nil tree", func() { tree.ForEach(func(int) {}) })
+	expectPanic(t, "Print", "bxtree: Print called on nil tree", func() { tree.Print() })
+	expectPanic(t, "GetAt", "bxtree: GetAt called on nil tree", func() { tree.GetAt(0) })
+	expectPanic(t, "GetAtNode", "bxtree: GetAtNode called on nil tree", func() { tree.GetAtNode(0) })
+	expectPanic(t, "InsertAt", "bxtree: InsertAt called on nil tree", func() { tree.InsertAt(0, 1) })
+	expectPanic(t, "InsertRange", "bxtree: InsertRange called on nil tree", func() { tree.InsertRange(0, []int{1}) })
+	expectPanic(t, "DeleteAt", "bxtree: DeleteAt called on nil tree", func() { tree.DeleteAt(0) })
+	expectPanic(t, "DeleteRange", "bxtree: DeleteRange called on nil tree", func() { tree.DeleteRange(0, 1) })
+	expectPanic(t, "FindPath", "bxtree: FindPath called on nil tree", func() { tree.FindPath(nil) })
+	expectPanic(t, "Root", "bxtree: Root called on nil tree", func() { tree.Root() })
+	expectPanic(t, "First", "bxtree: First called on nil tree", func() { tree.First() })
+	expectPanic(t, "Last", "bxtree: Last called on nil tree", func() { tree.Last() })
 
 	// Test nil arguments on non-nil tree
 	tree = New[int, int]()
-	expectPanic("ForEachNilFunc", "bxtree: ForEach called with nil function", func() { tree.ForEach(nil) })
-	expectPanic("FindPathNilPred", "bxtree: FindPath called with nil predicate", func() { tree.FindPath(nil) })
+	expectPanic(t, "ForEachNilFunc", "bxtree: ForEach called with nil function", func() { tree.ForEach(nil) })
+	expectPanic(t, "FindPathNilPred", "bxtree: FindPath called with nil predicate", func() { tree.FindPath(nil) })
 }
 
 func TestNilNode(t *testing.T) {
 	var n *Node[int, int]
 
-	expectPanic := func(name string, expectedMessage string, f func()) {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Errorf("%s: expected panic, but it did not", name)
-				return
-			}
-			if r != expectedMessage {
-				t.Errorf("%s: expected panic message %q, got %q", name, expectedMessage, r)
-			}
-		}()
-		f()
-	}
-
-	expectPanic("Summary", "bxtree: Summary called on nil node", func() { n.Summary() })
-	expectPanic("Items", "bxtree: Items called on nil node", func() { n.Items() })
-	expectPanic("IsLeaf", "bxtree: IsLeaf called on nil node", func() { n.IsLeaf() })
-	expectPanic("Next", "bxtree: Next called on nil node", func() { n.Next() })
-	expectPanic("Prev", "bxtree: Prev called on nil node", func() { n.Prev() })
-	expectPanic("Parent", "bxtree: Parent called on nil node", func() { n.Parent() })
-	expectPanic("Children", "bxtree: Children called on nil node", func() { n.Children() })
-	expectPanic("Index", "bxtree: Index called on nil node", func() { n.Index() })
-	expectPanic("SummaryAddUpward", "bxtree: SummaryAddUpward called on nil node", func() { n.SummaryAddUpward(0, nil) })
-	expectPanic("SummaryAddUpwardNilTree", "bxtree: SummaryAddUpward called with nil tree", func() {
+	expectPanic(t, "Summary", "bxtree: Summary called on nil node", func() { n.Summary() })
+	expectPanic(t, "Items", "bxtree: Items called on nil node", func() { n.Items() })
+	expectPanic(t, "IsLeaf", "bxtree: IsLeaf called on nil node", func() { n.IsLeaf() })
+	expectPanic(t, "Next", "bxtree: Next called on nil node", func() { n.Next() })
+	expectPanic(t, "Prev", "bxtree: Prev called on nil node", func() { n.Prev() })
+	expectPanic(t, "Parent", "bxtree: Parent called on nil node", func() { n.Parent() })
+	expectPanic(t, "Children", "bxtree: Children called on nil node", func() { n.Children() })
+	expectPanic(t, "Index", "bxtree: Index called on nil node", func() { n.Index() })
+	expectPanic(t, "SummaryAddUpward", "bxtree: SummaryAddUpward called on nil node", func() { n.SummaryAddUpward(0, nil) })
+	expectPanic(t, "SummaryAddUpwardNilTree", "bxtree: SummaryAddUpward called with nil tree", func() {
 		node := &Node[int, int]{}
 		node.SummaryAddUpward(0, nil)
 	})

@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func expectPanic(t *testing.T, name string, want string, f func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Errorf("%s: expected panic, but it did not", name)
+			return
+		}
+		if r != want {
+			t.Errorf("%s: expected panic message %q, got %q", name, want, r)
+		}
+	}()
+	f()
+}
+
 func TestPairingHeap(t *testing.T) {
 	// Use as a max-heap (default)
 	h := New[int]()
@@ -68,24 +83,10 @@ func TestMinHeap(t *testing.T) {
 func TestNilHeap(t *testing.T) {
 	var h *PairingHeap[int]
 
-	expectPanic := func(name string, expectedMessage string, f func()) {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Errorf("%s: expected panic, but it did not", name)
-				return
-			}
-			if r != expectedMessage {
-				t.Errorf("%s: expected panic message %q, got %q", name, expectedMessage, r)
-			}
-		}()
-		f()
-	}
-
-	expectPanic("Size", "pheap: Size called on nil heap", func() { h.Size() })
-	expectPanic("Push", "pheap: Push called on nil heap", func() { h.Push(1) })
-	expectPanic("Pop", "pheap: Pop called on nil heap", func() { h.Pop() })
-	expectPanic("Peek", "pheap: Peek called on nil heap", func() { h.Peek() })
+	expectPanic(t, "Size", "pheap: Size called on nil heap", func() { h.Size() })
+	expectPanic(t, "Push", "pheap: Push called on nil heap", func() { h.Push(1) })
+	expectPanic(t, "Pop", "pheap: Pop called on nil heap", func() { h.Pop() })
+	expectPanic(t, "Peek", "pheap: Peek called on nil heap", func() { h.Peek() })
 }
 
 func TestNewAny(t *testing.T) {
@@ -108,10 +109,7 @@ func TestNewAny(t *testing.T) {
 		t.Errorf("expected Bob, got %s", val.name)
 	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for NewAny without WithLess")
-		}
-	}()
-	NewAny[int]()
+	expectPanic(t, "NewAnyWithoutLess", "pheap: less function must be provided for NewAny", func() {
+		NewAny[int]()
+	})
 }
