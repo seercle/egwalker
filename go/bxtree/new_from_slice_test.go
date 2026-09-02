@@ -51,7 +51,11 @@ func TestNewFromSliceNoSingletonInternal(t *testing.T) {
 		// internal level groups into internalMax + 1 children -> trailing
 		// singleton without the fix.
 		nForced := leafMax[ci] * (internalMax[ci] + 1)
-		sizes := []int{nForced, nForced + 3*leafMax[ci], 3, leafMax[ci]*(internalMax[ci]+3) + 7}
+		// (internalMax+1)^2 leaves force an upper-level grouping (one full group
+		// of internalMax plus a tail of internalMax+1) that also overflows one
+		// internal node, i.e. a ≡ 1 (mod max) tail one level further up.
+		nUpper := leafMax[ci] * (internalMax[ci] + 1) * (internalMax[ci] + 1)
+		sizes := []int{nForced, nForced + 3*leafMax[ci], 3, leafMax[ci]*(internalMax[ci]+3) + 7, nUpper}
 
 		for _, n := range sizes {
 			items := make([]int, n)

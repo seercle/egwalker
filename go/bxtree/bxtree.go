@@ -147,21 +147,30 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 			nextLevel = append(nextLevel, nd)
 		}
 
-		// Group children into internal nodes of at most max each. Delete
-		// rebalancing merges sibling pairs and cannot handle a non-root
-		// internal node with a single child, so when the tail would be one
-		// lone child, shrink the previous group to max-1 so the tail holds
-		// two children instead.
-		start := 0
-		for n-start > max {
-			end := start + max
-			if n-end == 1 {
-				end--
+		if max > 2 {
+			// Group children into internal nodes of at most max each. Delete
+			// rebalancing merges sibling pairs and cannot handle a non-root
+			// internal node with a single child, so when the tail would be one
+			// lone child, shrink the previous group to max-1 so the tail holds
+			// two children instead.
+			start := 0
+			for n-start > max {
+				end := start + max
+				if n-end == 1 {
+					end--
+				}
+				makeNode(start, end)
+				start = end
 			}
-			makeNode(start, end)
-			start = end
+			makeNode(start, n)
+		} else {
+			// max <= 2: the borrow-grouping above is not valid (max == 1 can
+			// shrink a group so it never advances), so fall back to plain
+			// chunking, which is finite if degenerate.
+			for i := 0; i < n; i += max {
+				makeNode(i, min(i+max, n))
+			}
 		}
-		makeNode(start, n)
 		currentLevel = nextLevel
 	}
 
