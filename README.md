@@ -4,9 +4,9 @@
 
 ## Main Technologies
 
-- **Go (1.25.5)**: Core implementation language, utilizing generics for flexibility.
-- **Nix**: Development environment management (`shell.nix`).
-- **Python (3.13)**: Used for visualization and trace analysis (`scripts/plot-trace.py`).
+- **Go (1.26.6)**: Core implementation language, utilizing generics for flexibility.
+- **Nix**: Development environment management via a pinned `flake.nix` (nixpkgs `nixos-26.05`, locked in `flake.lock`).
+- **Python (3.13.15)**: Used for visualization and trace analysis (`scripts/plot-trace.py`).
 - **Data Structures**:
     - **`bxtree`**: A high-performance, positional B+Tree with customizable summaries, used for O(log N) indexed operations and metadata tracking.
     - **`pheap`**: A fast, generic pairing heap implementation.
@@ -37,7 +37,8 @@
 │   └── editing-trace.json  # Real-world editing trace for benchmarking
 ├── scripts/                # Support scripts
 │   └── plot-trace.py       # Performance visualization script
-└── shell.nix               # Nix development shell configuration
+├── flake.nix               # Nix development environment (pinned nixpkgs)
+└── flake.lock              # Locks flake inputs to exact revisions
 ```
 
 ## Building and Running
@@ -50,7 +51,7 @@ Since the Go module root is within the `go/` directory, all `go` commands should
 - **Run Example**: `go run -C go main.go`
 - **Test All**: `go test -C go ./...`
 - **Run Fuzzers**: `go test -C go ./bxtree -fuzz=FuzzTree` (and similar for other packages)
-- **Visualize Traces**: `python scripts/plot-trace.py` (requires dependencies from `shell.nix`)
+- **Visualize Traces**: `python scripts/plot-trace.py` (requires dependencies from `flake.nix`)
 
 ## Implementation Status & Comparison with Research Paper
 
@@ -83,4 +84,4 @@ This implementation is based on the research paper **"Collaborative Text Editing
 - **Testing**: The project emphasizes robustness through extensive unit tests and fuzzer tests (`fuzzer_test.go` files).
 - **CRDT Logic**: The `opLog` maintains causality and history, while `bxtree` provides efficient snapshots of the document state.
 - **Nested Documents**: `MapDocument` supports recursive merging if its values implement the `Mergeable` interface.
-- **Environment**: Use `nix-shell` or `direnv` to ensure all dependencies (Go, Python packages, Graphviz) are available.
+- **Environment**: Use `nix develop` or `direnv` to ensure all dependencies (Go, Python packages, Graphviz) are available.

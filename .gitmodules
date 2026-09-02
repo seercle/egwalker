@@ -1,3 +1,0 @@
-[submodule "resources/fugue-crdt"]
-	path = resources/fugue-crdt
-	url = https://github.com/seercle/fugue-crdt.git
