@@ -93,6 +93,16 @@ func TestCompressionRatio(t *testing.T) {
 	localInsert(log, 1, 0, make([]rune, N))
 
 	data := log.Marshal()
+
+	// The implemented RLE must collapse all N identical types and agents
+	// into a single run each.
+	if len(data.Types) != 1 || len(data.TypeRuns) != 1 || data.TypeRuns[0] != N {
+		t.Errorf("type RLE: got %d run(s) with lengths %v, want 1 run of length %d", len(data.Types), data.TypeRuns, N)
+	}
+	if len(data.Agents) != 1 || len(data.AgentRuns) != 1 || data.AgentRuns[0] != N {
+		t.Errorf("agent RLE: got %d run(s) with lengths %v, want 1 run of length %d", len(data.Agents), data.AgentRuns, N)
+	}
+
 	rowSize, colSize := estimateSize(log, data)
 
 	t.Logf("Compression Results for %d consecutive inserts:", N)
@@ -100,24 +110,44 @@ func TestCompressionRatio(t *testing.T) {
 	t.Logf("  Columnar (Unpacked):   ~%d bytes", colSize)
 	t.Logf("  Reduction:             %.2fx", float64(rowSize)/float64(colSize))
 
-	// Even without bit-packing, the reduction is massive because we replaced
-	// 10,000 "Type" and "Agent" fields with just 1 entry + 1 count.
+	if colSize >= rowSize {
+		t.Errorf("columnar representation not smaller than row-based: col=%d, row=%d", colSize, rowSize)
+	}
 }
 
 func TestMixedCompression(t *testing.T) {
 	log := newOpLog[rune]()
 
-	// Scenario: Two users alternating every 10 characters
+	// Scenario: Two users alternating every 10 characters -> 100 agent runs.
 	for i := range 100 {
 		agent := (i % 2) + 1
 		localInsert(log, agent, i*10, make([]rune, 10))
 	}
 
 	data := log.Marshal()
+
+	// 100 groups of 10 same-agent ops => exactly 100 agent runs of length 10.
+	if len(data.Agents) != 100 || len(data.AgentRuns) != 100 {
+		t.Fatalf("agent RLE: got %d agent run(s) / %d lengths, want 100 each", len(data.Agents), len(data.AgentRuns))
+	}
+	for i, r := range data.AgentRuns {
+		if r != 10 {
+			t.Errorf("agent run %d has length %d, want 10", i, r)
+		}
+	}
+	// All ops are inserts, so type RLE stays a single run.
+	if len(data.Types) != 1 || len(data.TypeRuns) != 1 || data.TypeRuns[0] != 1000 {
+		t.Errorf("type RLE: got %v, want single run of 1000", data.TypeRuns)
+	}
+
 	rowSize, colSize := estimateSize(log, data)
 
 	t.Logf("Compression Results for alternating users (1,000 total ops):")
 	t.Logf("  Row-based (In-Memory): ~%d bytes", rowSize)
 	t.Logf("  Columnar (Unpacked):   ~%d bytes", colSize)
 	t.Logf("  Reduction:             %.2fx", float64(rowSize)/float64(colSize))
+
+	if colSize >= rowSize {
+		t.Errorf("columnar representation not smaller than row-based: col=%d, row=%d", colSize, rowSize)
+	}
 }
