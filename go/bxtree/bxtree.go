@@ -705,91 +705,129 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 	parent := n.parent
 	idx := n.getParentIndex()
 
-	if n.isLeaf {
-		if idx > 0 {
-			left := parent.children[idx-1]
-			if len(left.items) > tree.leafMinSize {
-				// Borrow from left
-				item := left.items[len(left.items)-1]
-				left.items = left.items[:len(left.items)-1]
-				left.size--
-				n.items = append([]T{item}, n.items...)
-				n.size++
-
-				if tree.summarizer != nil {
-					m := tree.summarizer.FromItem(item)
-					left.summary = tree.summarizer.Sub(left.summary, m)
-					n.summary = tree.summarizer.Add(n.summary, m)
-				}
-
-				tree.onItemsMoved(n, []T{item})
-				return
-			}
+	count := func(nd *Node[T, S]) int {
+		if nd.isLeaf {
+			return len(nd.items)
 		}
-		if idx < len(parent.children)-1 {
-			right := parent.children[idx+1]
-			if len(right.items) > tree.leafMinSize {
-				// Borrow from right
-				item := right.items[0]
-				right.items = right.items[1:]
-				right.size--
-				n.items = append(n.items, item)
-				n.size++
-
-				if tree.summarizer != nil {
-					m := tree.summarizer.FromItem(item)
-					right.summary = tree.summarizer.Sub(right.summary, m)
-					n.summary = tree.summarizer.Add(n.summary, m)
-				}
-
-				tree.onItemsMoved(n, []T{item})
-				return
-			}
-		}
-	} else {
-		if idx > 0 {
-			left := parent.children[idx-1]
-			if len(left.children) > tree.internalMinSize {
-				child := left.children[len(left.children)-1]
-				left.children = left.children[:len(left.children)-1]
-				left.size -= child.size
-				n.children = append([]*Node[T, S]{child}, n.children...)
-				n.size += child.size
-				child.parent = n
-
-				if tree.summarizer != nil {
-					left.summary = tree.summarizer.Sub(left.summary, child.summary)
-					n.summary = tree.summarizer.Add(n.summary, child.summary)
-				}
-
-				return
-			}
-		}
-		if idx < len(parent.children)-1 {
-			right := parent.children[idx+1]
-			if len(right.children) > tree.internalMinSize {
-				child := right.children[0]
-				right.children = right.children[1:]
-				right.size -= child.size
-				n.children = append(n.children, child)
-				n.size += child.size
-				child.parent = n
-
-				if tree.summarizer != nil {
-					right.summary = tree.summarizer.Sub(right.summary, child.summary)
-					n.summary = tree.summarizer.Add(n.summary, child.summary)
-				}
-
-				return
-			}
-		}
+		return len(nd.children)
+	}
+	lo, hi := tree.leafMinSize, tree.leafMaxSize
+	if !n.isLeaf {
+		lo, hi = tree.internalMinSize, tree.internalMaxSize
 	}
 
+	// Prefer the richer neighbour (more items/children), so a redistribution
+	// raises the underfull node as much as possible.
+	var nb *Node[T, S]
 	if idx > 0 {
-		tree.merge(parent.children[idx-1], n)
-	} else {
-		tree.merge(n, parent.children[idx+1])
+		nb = parent.children[idx-1]
 	}
+	if idx+1 < len(parent.children) && (nb == nil || count(parent.children[idx+1]) > count(nb)) {
+		nb = parent.children[idx+1]
+	}
+
+	// If the two nodes can be split so both hold at least the minimum, move
+	// items/children from the neighbour into the underfull node until the pair
+	// is as evenly filled as the min/max envelope allows. Otherwise the only
+	// option is to merge them (merged size < 2*lo <= hi, so it never overfills).
+	if count(n)+count(nb) >= 2*lo {
+		target := (count(n) + count(nb) + 1) / 2
+		if target > hi {
+			target = hi
+		}
+		if n.isLeaf {
+			tree.redistributeLeaves(n, nb, target-len(n.items))
+		} else {
+			tree.redistributeChildren(n, nb, target-len(n.children))
+		}
+		return
+	}
+
+	// Merge the underfull node with its richer neighbour. The left node
+	// survives (it absorbs the right one), preserving the leaf chain.
+	if idx > 0 && nb.getParentIndex() < idx {
+		tree.merge(nb, n)
+	} else {
+		tree.merge(n, nb)
+	}
+}
+
+// redistributeLeaves moves `move` items from leaf nb (the richer neighbour)
+// into leaf n (the underfull node), keeping both siblings within the tree's
+// [min, max] envelope. Items move across the shared boundary only, so global
+// order is preserved. The leaf chain is untouched: both leaves survive.
+func (tree *BxTree[T, S]) redistributeLeaves(n, nb *Node[T, S], move int) {
+	if move <= 0 {
+		return
+	}
+
+	var moved []T
+	if nb.getParentIndex() < n.getParentIndex() {
+		// nb is immediately left of n: take nb's trailing items into n's front.
+		cut := len(nb.items) - move
+		moved = append([]T(nil), nb.items[cut:]...)
+		nb.items = nb.items[:cut:cut]
+		n.items = append(moved, n.items...)
+	} else {
+		// nb is immediately right of n: take nb's leading items onto n's back.
+		moved = append([]T(nil), nb.items[:move]...)
+		nb.items = nb.items[move:]
+		n.items = append(n.items, moved...)
+	}
+	n.size = len(n.items)
+	nb.size = len(nb.items)
+
+	if tree.summarizer != nil {
+		n.summary = tree.summarizeItems(n.items)
+		nb.summary = tree.summarizeItems(nb.items)
+	}
+	tree.onItemsMoved(n, moved)
+}
+
+// redistributeChildren moves `move` child subtrees from internal node nb (the
+// richer neighbour) into internal node n (the underfull node), keeping both
+// within the tree's [min, max] envelope. Children cross the shared boundary
+// only, so key order is preserved.
+func (tree *BxTree[T, S]) redistributeChildren(n, nb *Node[T, S], move int) {
+	if move <= 0 {
+		return
+	}
+
+	var moved []*Node[T, S]
+	if nb.getParentIndex() < n.getParentIndex() {
+		// nb is immediately left of n: take nb's trailing children into n's front.
+		cut := len(nb.children) - move
+		moved = append([]*Node[T, S](nil), nb.children[cut:]...)
+		nb.children = nb.children[:cut:cut]
+		n.children = append(moved, n.children...)
+	} else {
+		// nb is immediately right of n: take nb's leading children onto n's back.
+		moved = append([]*Node[T, S](nil), nb.children[:move]...)
+		nb.children = nb.children[move:]
+		n.children = append(n.children, moved...)
+	}
+	for _, child := range moved {
+		child.parent = n
+	}
+
+	recompute := func(nd *Node[T, S]) {
+		var size int
+		var s S
+		for i, child := range nd.children {
+			size += child.size
+			if tree.summarizer != nil {
+				if i == 0 {
+					s = child.summary
+				} else {
+					s = tree.summarizer.Add(s, child.summary)
+				}
+			}
+		}
+		nd.size = size
+		nd.summary = s
+	}
+	recompute(n)
+	recompute(nb)
 }
 
 func (tree *BxTree[T, S]) merge(left, right *Node[T, S]) {
