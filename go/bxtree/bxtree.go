@@ -119,19 +119,20 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 	var currentLevel []*Node[T, S] = leaves
 	for len(currentLevel) > 1 {
 		var nextLevel []*Node[T, S]
-		for i := 0; i < len(currentLevel); i += tree.internalMaxSize {
-			end := min(i+tree.internalMaxSize, len(currentLevel))
+		children := currentLevel
+		n := len(children)
+		max := tree.internalMaxSize
 
-			n := &Node[T, S]{
+		makeNode := func(start, end int) {
+			nd := &Node[T, S]{
 				isLeaf:   false,
-				children: make([]*Node[T, S], end-i),
+				children: make([]*Node[T, S], end-start),
 			}
-			copy(n.children, currentLevel[i:end])
-
+			copy(nd.children, children[start:end])
 			var size int
 			var s S
-			for j, child := range n.children {
-				child.parent = n
+			for j, child := range nd.children {
+				child.parent = nd
 				size += child.size
 				if tree.summarizer != nil {
 					if j == 0 {
@@ -141,10 +142,26 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) *BxTree[T, S] {
 					}
 				}
 			}
-			n.size = size
-			n.summary = s
-			nextLevel = append(nextLevel, n)
+			nd.size = size
+			nd.summary = s
+			nextLevel = append(nextLevel, nd)
 		}
+
+		// Group children into internal nodes of at most max each. Delete
+		// rebalancing merges sibling pairs and cannot handle a non-root
+		// internal node with a single child, so when the tail would be one
+		// lone child, shrink the previous group to max-1 so the tail holds
+		// two children instead.
+		start := 0
+		for n-start > max {
+			end := start + max
+			if n-end == 1 {
+				end--
+			}
+			makeNode(start, end)
+			start = end
+		}
+		makeNode(start, n)
 		currentLevel = nextLevel
 	}
 
