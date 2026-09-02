@@ -113,3 +113,45 @@ func TestNewAny(t *testing.T) {
 		NewAny[int]()
 	})
 }
+
+func TestPeekEmpty(t *testing.T) {
+	h := New[int]()
+	if v, ok := h.Peek(); ok || v != 0 {
+		t.Errorf("Peek on empty heap = (%d, %v), want (0, false)", v, ok)
+	}
+}
+
+func TestDuplicateValues(t *testing.T) {
+	h := New[int]()
+	for range 5 {
+		h.Push(7)
+		h.Push(3)
+	}
+	if h.Size() != 10 {
+		t.Fatalf("size = %d, want 10", h.Size())
+	}
+	sevens := 0
+	for h.Size() > 0 {
+		v, ok := h.Pop()
+		if !ok {
+			t.Fatal("Pop on non-empty heap returned ok=false")
+		}
+		if v == 7 {
+			sevens++
+		}
+	}
+	if sevens != 5 {
+		t.Errorf("popped %d sevens, want 5", sevens)
+	}
+}
+
+func TestSingleElement(t *testing.T) {
+	h := New[int]()
+	h.Push(42)
+	if v, _ := h.Pop(); v != 42 {
+		t.Errorf("Pop = %d, want 42", v)
+	}
+	if _, ok := h.Pop(); ok {
+		t.Error("Pop on empty heap should return ok=false")
+	}
+}
