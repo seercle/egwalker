@@ -118,7 +118,9 @@ func validateNodeSizes[T any, S any](tree *BxTree[T, S]) error {
 }
 
 // NewFromSlice creates a new BxTree initialized with the provided items.
-// The tree is built bottom-up for maximum efficiency.
+// The tree is built bottom-up for maximum efficiency. Items are distributed
+// across each level so every non-root node holds between its configured min
+// and max; only the (single-node) root may hold fewer than the minimum.
 // It returns an error if the configured node sizes are unsupported; see
 // WithLeafNodeSize and WithInternalNodeSize for the supported envelope.
 func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S], error) {
@@ -131,19 +133,39 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S],
 		return tree, nil
 	}
 
+	// splitSizes distributes total units across k = ceil(total/hi) sizes that
+	// sum to total and are as equal as possible (base = total/k, with the first
+	// total%k at base+1). Whenever k > 1 the validated envelope hi >= 2*lo-1
+	// guarantees every size is within [lo, hi]; a single size (k == 1) is the
+	// future root, which is exempt from the minimum.
+	splitSizes := func(total, lo, hi int) []int {
+		k := (total + hi - 1) / hi
+		sizes := make([]int, k)
+		base := total / k
+		extra := total % k
+		for i := range sizes {
+			sizes[i] = base
+			if i < extra {
+				sizes[i]++
+			}
+		}
+		return sizes
+	}
+
 	// 1. Create all leaf nodes
 	var leaves []*Node[T, S]
 	var prevLeaf *Node[T, S]
 
-	for i := 0; i < len(items); i += tree.leafMaxSize {
-		end := min(i+tree.leafMaxSize, len(items))
+	start := 0
+	for _, sz := range splitSizes(len(items), tree.leafMinSize, tree.leafMaxSize) {
+		end := start + sz
 
 		leaf := &Node[T, S]{
 			isLeaf: true,
-			items:  make([]T, end-i),
-			size:   end - i,
+			items:  make([]T, sz),
+			size:   sz,
 		}
-		copy(leaf.items, items[i:end])
+		copy(leaf.items, items[start:end])
 
 		if tree.summarizer != nil {
 			leaf.summary = tree.summarizeItems(leaf.items)
@@ -159,6 +181,7 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S],
 		prevLeaf = leaf
 
 		tree.onItemsMoved(leaf, leaf.items)
+		start = end
 	}
 	tree.last = prevLeaf
 
@@ -167,8 +190,6 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S],
 	for len(currentLevel) > 1 {
 		var nextLevel []*Node[T, S]
 		children := currentLevel
-		n := len(children)
-		max := tree.internalMaxSize
 
 		makeNode := func(start, end int) {
 			nd := &Node[T, S]{
@@ -194,29 +215,14 @@ func NewFromSlice[T any, S any](items []T, opts ...Option[T, S]) (*BxTree[T, S],
 			nextLevel = append(nextLevel, nd)
 		}
 
-		if max > 2 {
-			// Group children into internal nodes of at most max each. Delete
-			// rebalancing merges sibling pairs and cannot handle a non-root
-			// internal node with a single child, so when the tail would be one
-			// lone child, shrink the previous group to max-1 so the tail holds
-			// two children instead.
-			start := 0
-			for n-start > max {
-				end := start + max
-				if n-end == 1 {
-					end--
-				}
-				makeNode(start, end)
-				start = end
-			}
-			makeNode(start, n)
-		} else {
-			// max <= 2: the borrow-grouping above is not valid (max == 1 can
-			// shrink a group so it never advances), so fall back to plain
-			// chunking, which is finite if degenerate.
-			for i := 0; i < n; i += max {
-				makeNode(i, min(i+max, n))
-			}
+		// Distribute this level's children across internal nodes within
+		// [internalMin, internalMax]. The envelope guarantees no non-root
+		// internal node underflows (in particular none holds a single child),
+		// so delete rebalancing can always operate on the result.
+		start := 0
+		for _, sz := range splitSizes(len(children), tree.internalMinSize, tree.internalMaxSize) {
+			makeNode(start, start+sz)
+			start += sz
 		}
 		currentLevel = nextLevel
 	}

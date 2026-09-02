@@ -1,6 +1,7 @@
 package bxtree
 
 import (
+	"sort"
 	"testing"
 )
 
@@ -157,4 +158,119 @@ func TestNewFromSliceRespectsSizeOptions(t *testing.T) {
 	}
 	checkNodeBounds(t, tree)
 	verifyTree(t, tree, items)
+}
+
+// occupancySizes returns tree sizes designed to exercise min/max occupancy
+// boundaries at every level for a config with the given node sizes: item tails
+// at each leaf fan-out multiple, leaf counts just above/below each internal
+// fan-out multiple, a full contiguous range for structurally cheap configs, and
+// a deterministic spread over larger sizes.
+func occupancySizes(leafMin, leafMax, internalMax int) []int {
+	set := map[int]bool{}
+	add := func(n int) {
+		if n >= 0 {
+			set[n] = true
+		}
+	}
+
+	// Exhaustive contiguous sweep for configs small enough to make it cheap.
+	if leafMax*internalMax <= 300 {
+		for n := 0; n <= leafMax*internalMax*internalMax+leafMax*internalMax; n++ {
+			add(n)
+		}
+	}
+
+	// Leaf counts around internal grouping boundaries, with item offsets that
+	// land leaves on every min/max edge. internalMax+2 leaves force one level
+	// above internalMax, and internalMax^2+1 leaves force two levels.
+	leafCounts := make([]int, 0, internalMax+2+3)
+	for r := 1; r <= internalMax+2; r++ {
+		leafCounts = append(leafCounts, r)
+	}
+	leafCounts = append(leafCounts, internalMax*internalMax-1, internalMax*internalMax, internalMax*internalMax+1)
+	for _, leaves := range leafCounts {
+		for _, t := range []int{0, 1, leafMin - 1, leafMin, leafMin + 1, leafMax - 1, leafMax} {
+			add(leaves*leafMax + t)
+		}
+	}
+
+	// Deterministic spread across larger multi-level sizes.
+	for i := 0; i < 40; i++ {
+		add((i*7919)%(leafMax*internalMax*internalMax) + leafMax*internalMax)
+	}
+
+	sizes := make([]int, 0, len(set))
+	for n := range set {
+		sizes = append(sizes, n)
+	}
+	sort.Ints(sizes)
+	return sizes
+}
+
+// TestNewFromSliceMinOccupancy verifies that bulk loading distributes items
+// across leaf and internal levels so every non-root node lands within its
+// configured [min, max]; only the root is exempt from the minimum. Previously
+// the loader max-filled nodes and dumped the remainder into a trailing node
+// that could fall below min (e.g. 129 items at default sizes made a 1-item
+// leaf).
+func TestNewFromSliceMinOccupancy(t *testing.T) {
+	configs := []struct {
+		name                     string
+		leafMin, leafMax         int
+		internalMin, internalMax int
+	}{
+		{"default", 64, 128, 16, 32},
+		{"small", 4, 8, 2, 4},
+		{"odd", 3, 5, 2, 3},
+		{"single-item-leaves", 1, 1, 16, 32},
+	}
+
+	for _, cfg := range configs {
+		t.Run(cfg.name, func(t *testing.T) {
+			opts := []Option[int, int]{
+				WithLeafNodeSize[int, int](cfg.leafMin, cfg.leafMax),
+				WithInternalNodeSize[int, int](cfg.internalMin, cfg.internalMax),
+				WithSummarizer[int, int](countSummarizer{}),
+			}
+
+			for _, n := range occupancySizes(cfg.leafMin, cfg.leafMax, cfg.internalMax) {
+				items := make([]int, n)
+				for i := range items {
+					items[i] = i
+				}
+				tree := mustNewFromSlice(t, items, opts...)
+
+				if n == 0 {
+					if tree.Size() != 0 {
+						t.Fatalf("n=%d: Size=%d, want 0", n, tree.Size())
+					}
+					continue
+				}
+				if tree.Size() != n {
+					t.Fatalf("n=%d: Size=%d", n, tree.Size())
+				}
+
+				// verifyNode checks every node stays within [min, max] (root
+				// exempt from the minimum) plus size/summary consistency.
+				verifyNode(t, tree.Root(), tree)
+
+				// Full structural + content check for reasonably-sized trees.
+				if n <= 20000 {
+					verifyTree(t, tree, items)
+				} else {
+					got := 0
+					ok := true
+					tree.ForEach(func(v int) {
+						if v != got {
+							ok = false
+						}
+						got++
+					})
+					if !ok || got != n {
+						t.Fatalf("n=%d: ForEach content/order mismatch", n)
+					}
+				}
+			}
+		})
+	}
 }

@@ -80,10 +80,6 @@ This implementation is based on the research paper **"Collaborative Text Editing
 - **Critical Version Detection & Truncation (Section 3.5):** The paper proposes identifying "critical versions" to discard old history. Currently, the `opLog` grows indefinitely. Implementing this would allow the system to truncate the log and significantly reduce memory usage for long-running sessions.
 - **Binary Compression (Section 3.8):** The columnar format is currently raw Go types. Adding **Varint encoding** for integers and **LZ4/Zstd compression** for content would bring the storage size down to the "orders of magnitude smaller" claims of the paper.
 
-### Known Limitations
-
-- **`bxtree.NewFromSlice` does not guarantee minimum node occupancy:** The bulk loader fills leaf/internal nodes to their configured maximum and dumps whatever remains into the rightmost node. Max sizes (`leafMaxSize`, `internalMaxSize`) are always respected, but the trailing node can fall below the minimum — e.g. at default sizes (leaf min/max 64/128, internal 16/32), 129 items produce a 1-item leaf and 4224 items (33 leaves → internal groups 31+2) produce a 2-child internal node (min 16). This is tolerated by the delete path (rebalancing keeps every non-root internal node at ≥2 children and handles underfull nodes), so it is a structural/occupancy note rather than a correctness bug. The one correctness-bearing invariant — no non-root internal node with a single child, which would panic delete rebalancing — is enforced (fixed in `cf34356`, degenerate-config guard in `fa2cefb`). Redistributing bulk-loaded trees so they honor the configured min occupancies as well is future work.
-
 ## Development Conventions
 
 - **Generics**: All data structures and document types are generic where possible.
