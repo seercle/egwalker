@@ -634,6 +634,21 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 		return
 	}
 
+	// Rebalancing only applies when this node has dropped below its minimum
+	// occupancy (the root's single-child collapse is handled above). Without
+	// this guard, a healthy parent (still >= its minimum) would be merged with
+	// a sibling after a child merge, over-filling an internal node past its
+	// internalMaxSize.
+	if n.isLeaf {
+		if len(n.items) >= tree.leafMinSize {
+			return
+		}
+	} else {
+		if len(n.children) >= tree.internalMinSize {
+			return
+		}
+	}
+
 	parent := n.parent
 	idx := n.getParentIndex()
 

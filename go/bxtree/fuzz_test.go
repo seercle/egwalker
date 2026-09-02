@@ -118,6 +118,26 @@ func verifyNode[T any, S any](t *testing.T, n *Node[T, S], tree *BxTree[T, S]) i
 		t.Errorf("Node summary mismatch: got %v, want %v", n.Summary(), summary)
 	}
 
+	// Occupancy invariants: no node may exceed its configured maximum, and
+	// every non-root node must meet its configured minimum. The root is exempt
+	// from the minimum (it may legitimately hold fewer items/children).
+	isRoot := n == tree.Root()
+	if n.IsLeaf() {
+		if len(n.Items()) > tree.leafMaxSize {
+			t.Errorf("Leaf occupancy violation: %d items exceeds leafMaxSize %d", len(n.Items()), tree.leafMaxSize)
+		}
+		if !isRoot && len(n.Items()) < tree.leafMinSize {
+			t.Errorf("Leaf occupancy violation: %d items below leafMinSize %d (non-root)", len(n.Items()), tree.leafMinSize)
+		}
+	} else {
+		if len(n.Children()) > tree.internalMaxSize {
+			t.Errorf("Internal occupancy violation: %d children exceeds internalMaxSize %d", len(n.Children()), tree.internalMaxSize)
+		}
+		if !isRoot && len(n.Children()) < tree.internalMinSize {
+			t.Errorf("Internal occupancy violation: %d children below internalMinSize %d (non-root)", len(n.Children()), tree.internalMinSize)
+		}
+	}
+
 	return size
 }
 
