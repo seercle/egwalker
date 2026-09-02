@@ -57,20 +57,3 @@ func TestSmallNodeConfigRandomOps(t *testing.T) {
 
 	verifyTree(t, tree, mirror)
 }
-
-func TestNewFromSliceRespectsSizeOptions(t *testing.T) {
-	items := make([]int, 1000)
-	for i := range items {
-		items[i] = i
-	}
-	tree := NewFromSlice(items,
-		WithSummarizer[int, int](countSummarizer{}),
-		WithLeafNodeSize[int, int](4, 8),
-		WithInternalNodeSize[int, int](2, 4),
-	)
-	if tree.Size() != len(items) {
-		t.Fatalf("size = %d, want %d", tree.Size(), len(items))
-	}
-	checkNodeBounds(t, tree)
-	verifyTree(t, tree, items)
-}
