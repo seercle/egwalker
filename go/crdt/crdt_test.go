@@ -559,3 +559,44 @@ func TestItemMerging_SplitAndReMerge(t *testing.T) {
 		t.Errorf("Expected 3 items, got %d", cDoc.items.Size())
 	}
 }
+
+func TestMapDocument_MissingKey(t *testing.T) {
+	m := NewMapDocument[string, string](1)
+	if v, ok := m.Get("absent"); ok || v != "" {
+		t.Errorf("Get(missing) = (%q, %v), want (\"\", false)", v, ok)
+	}
+	if got := m.Keys(); len(got) != 0 {
+		t.Errorf("Keys on empty map = %v, want []", got)
+	}
+}
+
+func TestGenericMergeFromAny(t *testing.T) {
+	a := NewDocument[int](1)
+	b := NewDocument[int](2)
+	a.Ins(0, []int{1})
+	b.MergeFrom(&a)
+	b.Ins(1, []int{2})
+
+	(&a).MergeFromAny(&b)
+	if a.Len() != 2 {
+		t.Fatalf("Len after MergeFromAny = %d, want 2", a.Len())
+	}
+	var got []int
+	a.branch.snapshot.ForEach(func(v int) { got = append(got, v) })
+	if !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Errorf("content after MergeFromAny = %v, want [1 2]", got)
+	}
+	a.Check()
+}
+
+func TestIDToLVUnknown(t *testing.T) {
+	log := newOpLog[rune]()
+	log.pushLocalOp(1, op[rune]{opType: opTypeIns, content: 'a', pos: 0})
+	defer func() {
+		r := recover()
+		if r != "Could not find id in oplog" {
+			t.Errorf("panic = %v, want %q", r, "Could not find id in oplog")
+		}
+	}()
+	idToLV(log, id{agent: 99, seq: 0})
+}

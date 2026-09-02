@@ -2,6 +2,7 @@ package crdt
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 )
@@ -149,5 +150,48 @@ func TestMixedCompression(t *testing.T) {
 
 	if colSize >= rowSize {
 		t.Errorf("columnar representation not smaller than row-based: col=%d, row=%d", colSize, rowSize)
+	}
+}
+
+func TestSerialization_RLEStructure(t *testing.T) {
+	// One agent inserting 50 runes => single type run and single agent run.
+	log := newOpLog[rune]()
+	const n = 50
+	localInsert(log, 1, 0, make([]rune, n))
+	data := log.Marshal()
+	if len(data.Types) != 1 || data.TypeRuns[0] != n {
+		t.Errorf("type RLE: %v (len %d), want one run of %d", data.TypeRuns, len(data.TypeRuns), n)
+	}
+	if len(data.Agents) != 1 || data.AgentRuns[0] != n {
+		t.Errorf("agent RLE: %v (len %d), want one run of %d", data.AgentRuns, len(data.AgentRuns), n)
+	}
+	if len(data.Positions) != n || len(data.Content) != n {
+		t.Errorf("positions/content length = %d/%d, want %d", len(data.Positions), len(data.Content), n)
+	}
+}
+
+func TestSerialization_RoundTripCheckout(t *testing.T) {
+	// Build a real document with inserts, deletes, and a concurrent branch.
+	d1 := NewRuneDocument(1)
+	d2 := NewRuneDocument(2)
+
+	d1.Ins(0, "Hello")
+	d2.MergeFrom(d1)
+	d2.Del(1, 2) // remove 'e' and 'l' -> "Hlo"
+	d2.Ins(d2.Len(), "y")
+	d1.Ins(d1.Len(), "!") // concurrent to d2's edits
+	d1.MergeFrom(d2)
+
+	want := d1.GetString()
+
+	round := Unmarshal(d1.opLog.Marshal())
+	if len(round.ops) != len(d1.opLog.ops) {
+		t.Fatalf("round-trip op count = %d, want %d", len(round.ops), len(d1.opLog.ops))
+	}
+
+	var sb strings.Builder
+	checkout(round).ForEach(func(r rune) { sb.WriteRune(r) })
+	if got := sb.String(); got != want {
+		t.Errorf("checkout after round-trip = %q, want %q", got, want)
 	}
 }
