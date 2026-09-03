@@ -10,7 +10,7 @@ import (
 // Diff Algorithm (Internal)
 // ==========================================
 
-func diff[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) diffResult {
+func diff[C content[C]](log *opLog[C], a []lv, b []lv) diffResult {
 	flags := make(map[lv]diffFlag)
 	numShared := 0
 
@@ -155,7 +155,7 @@ func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
 // itself is the target; for a delete op the target is the character the delete
 // removed (looked up in delTargets). Items are atomized so each character is
 // toggled independently.
-func toggleRunChar[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, delta int) {
+func toggleRunChar[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, delta int) {
 	o := log.opAt(opLV)
 	var targetLV lv
 	if o.opType == opTypeIns {
@@ -190,7 +190,7 @@ func toggleRunChar[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv,
 // retreat un-applies (winds back) the run op containing opLV. A run op is
 // atomic: every character it covers is toggled, one at a time, so per-character
 // item/split state is preserved.
-func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
+func retreat[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv) {
 	i := log.opIdxAt(opLV)
 	for k := 0; k < log.ops[i].length; k++ {
 		toggleRunChar(doc, log, log.opLV[i]+lv(k), -1)
@@ -199,7 +199,7 @@ func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
 
 // advance re-applies (winds forward) the run op containing opLV, character by
 // character.
-func advance[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
+func advance[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv) {
 	i := log.opIdxAt(opLV)
 	for k := 0; k < log.ops[i].length; k++ {
 		toggleRunChar(doc, log, log.opLV[i]+lv(k), +1)
@@ -229,7 +229,7 @@ func findItemIdxAtLVInternal(doc *crdtDoc, targetLV lv) int {
 	return nodeIdx + posInNode
 }
 
-func canMerge[E any, C content[E]](log *opLog[E, C], left *crdtItem, right *crdtItem) bool {
+func canMerge[C content[C]](log *opLog[C], left *crdtItem, right *crdtItem) bool {
 	if left == nil || right == nil {
 		return false
 	}
@@ -291,7 +291,7 @@ func mergeLeft(doc *crdtDoc, idx int) {
 	left.node.UpdateSummaryUpward(doc.items)
 }
 
-func tryMergeAt[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], idx int) {
+func tryMergeAt[C content[C]](doc *crdtDoc, log *opLog[C], idx int) {
 	if idx > 0 {
 		leftPtr, _ := doc.items.GetAt(idx - 1)
 		rightPtr, _ := doc.items.GetAt(idx)
@@ -320,7 +320,7 @@ func getLogicalPos(doc *crdtDoc, targetLV lv) (int, int) {
 	return findItemIdxAtLVInternal(doc, item.lv), int(targetLV - item.lv)
 }
 
-func integrate[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[E, struct{}]) int {
+func integrate[C content[C]](doc *crdtDoc, log *opLog[C], newItem *crdtItem, idx int, endPos int, snapshot *contentTree[C]) int {
 	scanIdx := idx
 	scanEndPos := endPos
 
@@ -388,10 +388,7 @@ func integrate[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], newItem *crd
 	}
 
 	if snapshot != nil {
-		err := snapshot.InsertRange(endPos, o.content.Elems())
-		if err != nil {
-			panic("Snapshot insert failed")
-		}
+		snapshot.Insert(endPos, o.content)
 	}
 	return idx
 }
@@ -463,8 +460,11 @@ func split(doc *crdtDoc, idx int, offset int) {
 
 // deleteOne deletes the single visible character at doc position pos of the
 // staged state, recording the deletion target for the delete-run character lv
-// opLV so retreat/advance can toggle it back independently.
-func deleteOne[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv, pos int) {
+// opLV so retreat/advance can toggle it back independently. It returns the
+// visible position (endPos) of the character removed from the staged state, or
+// -1 when the target character was already deleted by a concurrent op (in which
+// case the snapshot is untouched).
+func deleteOne[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, pos int) int {
 	idx, endPos := findByCurrentPos(doc, pos)
 
 	node, nodePos, err := doc.items.GetAtNode(idx)
@@ -498,25 +498,25 @@ func deleteOne[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bx
 		item = *itemPtr
 	}
 
-	if !item.deleted {
-		item.deleted = true
-		if snapshot != nil {
-			err := snapshot.DeleteAt(endPos)
-			if err != nil {
-				panic("Snapshot delete failed")
-			}
-		}
-		item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
+	if item.deleted {
+		item.curState = 1 // Deleted(1)
+		item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
+		doc.delTargets[opLV] = item.lv
+		tryMergeAt(doc, log, idx)
+		return -1
 	}
 
+	item.deleted = true
+	item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
 	item.curState = 1 // Deleted(1)
 	item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
 
 	doc.delTargets[opLV] = item.lv
 	tryMergeAt(doc, log, idx)
+	return endPos
 }
 
-func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv) {
+func apply[C content[C]](doc *crdtDoc, log *opLog[C], snapshot *contentTree[C], opLV lv) {
 	idx := log.opIdxAt(opLV)
 	o := &log.ops[idx]
 	first := log.opLV[idx]
@@ -524,8 +524,15 @@ func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree
 	if o.opType == opTypeDel {
 		// A delete run removes o.length visible characters at positions
 		// pos..pos+o.length-1 of the staged state, one character at a time.
+		// Each deleteOne reports the visible position it removed; characters
+		// already deleted by a concurrent op are skipped (-1) and leave the
+		// snapshot untouched. checkoutFancy replays shared ops with a nil
+		// snapshot (their content is already in the branch).
 		for i := 0; i < o.length; i++ {
-			deleteOne(doc, log, snapshot, first+lv(i), o.pos)
+			endPos := deleteOne(doc, log, first+lv(i), o.pos)
+			if endPos >= 0 && snapshot != nil {
+				snapshot.Delete(endPos, 1)
+			}
 		}
 		return
 	}
@@ -569,7 +576,7 @@ func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree
 	tryMergeAt(doc, log, posIdx)
 }
 
-func do1Operation[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, snapshot *bxtree.BxTree[E, struct{}]) {
+func do1Operation[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, snapshot *contentTree[C]) {
 	idx := log.opIdxAt(opLV)
 	o := &log.ops[idx]
 	first := log.opLV[idx]
@@ -588,7 +595,7 @@ func do1Operation[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, 
 	doc.currentVersion = []lv{end}
 }
 
-func checkout[E any, C content[E]](log *opLog[E, C]) *bxtree.BxTree[E, struct{}] {
+func checkout[C content[C]](log *opLog[C]) *contentTree[C] {
 	doc := &crdtDoc{
 		items: newBxTree(
 			bxtree.WithSummarizer(crdtSummaryConfig),
@@ -601,7 +608,7 @@ func checkout[E any, C content[E]](log *opLog[E, C]) *bxtree.BxTree[E, struct{}]
 		sortedItems:    []*crdtItem{},
 	}
 
-	snapshot := newBxTree[E, struct{}]()
+	snapshot := newContentTree[C]()
 
 	for i := 0; i < len(log.ops); i++ {
 		do1Operation(doc, log, log.opLV[i], snapshot)
@@ -629,7 +636,7 @@ func compareArrays(a, b []lv) int {
 	return 0
 }
 
-func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsToVisit {
+func findOpsToVisit[C content[C]](log *opLog[C], a []lv, b []lv) opsToVisit {
 	// Phase 1: Find Common Ancestor (CCA) using the original Priority Queue approach
 	pq := pheap.NewAny(pheap.WithLess(func(a, b mergePoint) bool {
 		return compareArrays(a.v, b.v) < 0
@@ -853,14 +860,14 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 	}
 }
 
-func newBranch[T any]() *branch[T] {
-	return &branch[T]{
-		snapshot: newBxTree[T, struct{}](),
+func newBranch[C content[C]]() *branch[C] {
+	return &branch[C]{
+		snapshot: newContentTree[C](),
 		frontier: []lv{},
 	}
 }
 
-func checkoutFancy[E any, C content[E]](log *opLog[E, C], b *branch[E], mergeFrontier []lv) {
+func checkoutFancy[C content[C]](log *opLog[C], b *branch[C], mergeFrontier []lv) {
 	if mergeFrontier == nil {
 		mergeFrontier = log.frontier
 	}

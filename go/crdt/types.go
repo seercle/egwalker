@@ -27,7 +27,7 @@ const (
 	opTypeDel opType = "del"
 )
 
-type op[E any, C content[E]] struct {
+type op[C content[C]] struct {
 	opType  opType
 	content C
 	length  int // Number of characters/elements this op spans (set at push)
@@ -38,8 +38,8 @@ type op[E any, C content[E]] struct {
 
 type remoteVersion map[int]int
 
-type opLog[E any, C content[E]] struct {
-	ops      []op[E, C]
+type opLog[C content[C]] struct {
+	ops      []op[C]
 	opLV     []lv // opLV[i] is op i's first LV
 	totalLV  lv   // Running character count covered by ops
 	frontier []lv
@@ -90,8 +90,8 @@ type mergePoint struct {
 	isInA bool
 }
 
-type branch[T any] struct {
-	snapshot *bxtree.BxTree[T, struct{}]
+type branch[C content[C]] struct {
+	snapshot *contentTree[C]
 	frontier []lv
 }
 
@@ -100,26 +100,6 @@ const (
 	stateInserted       = 0
 )
 
-// Document represents a generic CRDT document. E is the element type held in
-// the document's snapshot; C is the run content type used to store inserts in
-// the op log (an op's content is a whole run: consecutive same-agent inserts
-// collapse into a single multi-character run op).
-type Document[E any, C content[E]] struct {
-	opLog  *opLog[E, C]
-	agent  int
-	branch *branch[E]
-}
-
-// RuneDocument represents a CRDT text document.
-type RuneDocument struct {
-	Document[rune, runeText]
-}
-
-// ArrayDocument represents a generic CRDT array document.
-type ArrayDocument[T any] struct {
-	Document[T, itemRun[T]]
-}
-
 // MapOp represents a set operation on a MapDocument.
 type MapOp[K comparable, V any] struct {
 	Key      K
@@ -127,38 +107,7 @@ type MapOp[K comparable, V any] struct {
 	IsDelete bool
 }
 
-// MapDocument represents a CRDT map document using LWW strategy.
-type MapDocument[K comparable, V any] struct {
-	agent    int
-	opLog    *opLog[MapOp[K, V], mapRun[K, V]]
-	keyIndex map[K][]lv
-}
-
 // Mergeable is an interface for documents that can be merged recursively.
 type Mergeable interface {
 	MergeFromAny(other any)
-}
-
-func (doc *Document[E, C]) MergeFromAny(other any) {
-	if o, ok := other.(*Document[E, C]); ok {
-		doc.MergeFrom(o)
-	}
-}
-
-func (doc *RuneDocument) MergeFromAny(other any) {
-	if o, ok := other.(*RuneDocument); ok {
-		doc.MergeFrom(o)
-	}
-}
-
-func (doc *ArrayDocument[T]) MergeFromAny(other any) {
-	if o, ok := other.(*ArrayDocument[T]); ok {
-		doc.MergeFrom(o)
-	}
-}
-
-func (doc *MapDocument[K, V]) MergeFromAny(other any) {
-	if o, ok := other.(*MapDocument[K, V]); ok {
-		doc.MergeFrom(o)
-	}
 }

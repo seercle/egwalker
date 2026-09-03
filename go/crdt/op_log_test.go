@@ -10,10 +10,10 @@ import (
 func TestRunOpsLocalInsertCollapses(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, "hello")
-	if got := len(doc.opLog.ops); got != 1 {
+	if got := len(doc.doc.opLog.ops); got != 1 {
 		t.Fatalf("5-char insert made %d ops, want 1 run op", got)
 	}
-	if got := doc.opLog.ops[0].length; got != 5 {
+	if got := doc.doc.opLog.ops[0].length; got != 5 {
 		t.Fatalf("run op length = %d, want 5", got)
 	}
 	if got := doc.GetString(); got != "hello" {
@@ -28,7 +28,7 @@ func TestRunOpsLocalInsertCollapses(t *testing.T) {
 func TestRunOpsLargeContiguousInsertCollapses(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, strings.Repeat("a", 5000))
-	if got := len(doc.opLog.ops); got != 1 {
+	if got := len(doc.doc.opLog.ops); got != 1 {
 		t.Fatalf("contiguous 5000-char insert produced %d ops; want a single run op", got)
 	}
 	if got := doc.GetString(); got != strings.Repeat("a", 5000) {
@@ -42,7 +42,7 @@ func TestRunOpsMergeAcrossInsCalls(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, "ab")
 	doc.Ins(2, "cd") // adjacent, same agent, linear tail
-	if got := len(doc.opLog.ops); got != 1 {
+	if got := len(doc.doc.opLog.ops); got != 1 {
 		t.Fatalf("adjacent Ins calls made %d ops, want 1 run op", got)
 	}
 	doc.Check()
@@ -65,14 +65,14 @@ func TestRunOpsDoNotMergeAcrossDivergence(t *testing.T) {
 	b.MergeFrom(a)
 	b.Ins(2, "X")  // b diverges on top of a's linear tail
 	a.MergeFrom(b) // a adopts b's divergent op: its tail op is now agent 2's "X"
-	if got := len(a.opLog.ops); got != 2 {
+	if got := len(a.doc.opLog.ops); got != 2 {
 		t.Fatalf("after the diverging merge a has %d ops, want 2 (its ab run + b's X)", got)
 	}
 	a.Ins(3, "cd") // contiguous agent-1 append; pre-divergence it would collapse into "ab"
-	if got := len(a.opLog.ops); got != 3 {
+	if got := len(a.doc.opLog.ops); got != 3 {
 		t.Fatalf("contiguous append after divergence made %d ops, want 3 (must not collapse into the ab run)", got)
 	}
-	if got := a.opLog.ops[0].length; got != 2 {
+	if got := a.doc.opLog.ops[0].length; got != 2 {
 		t.Fatalf("ab run op length = %d, want 2 (the held run must not be mutated)", got)
 	}
 	if got := a.GetString(); got != "abXcd" {
@@ -87,7 +87,7 @@ func TestRunOpsTwoAgentsNoMerge(t *testing.T) {
 	doc.Ins(0, "a")
 	doc.MergeFrom(func() *RuneDocument { d := NewRuneDocument(2); d.Ins(0, "b"); return d }())
 	doc.Ins(1, "c")
-	if got := len(doc.opLog.ops); got != 3 {
+	if got := len(doc.doc.opLog.ops); got != 3 {
 		t.Fatalf("3 non-adjacent-agent edits made %d ops, want 3 (no cross-agent merge)", got)
 	}
 	doc.Check()
@@ -98,7 +98,7 @@ func TestRunOpsDeleteCollapses(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, "abcdefgh")
 	doc.Del(2, 4) // contiguous range delete
-	if got := len(doc.opLog.ops); got != 2 {
+	if got := len(doc.doc.opLog.ops); got != 2 {
 		t.Fatalf("insert+range-delete made %d ops, want 2 (one run op each)", got)
 	}
 	if doc.GetString() != "abgh" {
@@ -113,7 +113,7 @@ func TestRunOpsMergeRemote(t *testing.T) {
 	a.Ins(0, strings.Repeat("x", 300))
 	b := NewRuneDocument(2)
 	b.MergeFrom(a)
-	if got := len(b.opLog.ops); got != 1 {
+	if got := len(b.doc.opLog.ops); got != 1 {
 		t.Fatalf("merged run made %d ops, want 1", got)
 	}
 	if b.GetString() != a.GetString() {
@@ -129,7 +129,7 @@ func TestRunOpsCheckoutLengthMatches(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, "abcdef")
 	doc.Ins(3, "XY") // splits the run region
-	doc.Check()      // checkout(doc.opLog) must equal the snapshot
+	doc.Check()      // checkout(doc.doc.opLog) must equal the snapshot
 	if doc.GetString() != "abcXYdef" {
 		t.Fatalf("content diverged: %q", doc.GetString())
 	}
@@ -218,14 +218,14 @@ func TestRunOpsSerializationRoundTrip(t *testing.T) {
 	d1 := NewRuneDocument(1)
 	d1.Ins(0, strings.Repeat("a", 5000))
 	d1.Del(2, 3)
-	data := d1.opLog.Marshal()
-	round := Unmarshal[rune, runeText](data)
-	if len(round.ops) != len(d1.opLog.ops) {
-		t.Fatalf("round-trip op count %d != %d", len(round.ops), len(d1.opLog.ops))
+	data := d1.doc.opLog.Marshal()
+	round := Unmarshal[runeText](data)
+	if len(round.ops) != len(d1.doc.opLog.ops) {
+		t.Fatalf("round-trip op count %d != %d", len(round.ops), len(d1.doc.opLog.ops))
 	}
 	out := checkout(round)
-	if out.Size() != d1.Len() {
-		t.Fatalf("round-trip checkout size %d != %d", out.Size(), d1.Len())
+	if out.Len() != d1.Len() {
+		t.Fatalf("round-trip checkout size %d != %d", out.Len(), d1.Len())
 	}
 	got := d1.GetString() // also verify via checkout equality below
 	_ = got
@@ -249,12 +249,12 @@ func TestRunOpsMergeableChildrenNoCollapse(t *testing.T) {
 
 	// Mergeable content must never collapse: each child keeps its own length-1
 	// op so recursive merge can match it by id.
-	if got := len(p1.opLog.ops); got != 2 {
+	if got := len(p1.doc.opLog.ops); got != 2 {
 		t.Fatalf("one Ins of 2 Mergeable children made %d ops, want 2 (no collapse)", got)
 	}
-	if p1.opLog.ops[0].length != 1 || p1.opLog.ops[1].length != 1 {
+	if p1.doc.opLog.ops[0].length != 1 || p1.doc.opLog.ops[1].length != 1 {
 		t.Fatalf("Mergeable children collapsed into runs of length %d and %d, want 1 each",
-			p1.opLog.ops[0].length, p1.opLog.ops[1].length)
+			p1.doc.opLog.ops[0].length, p1.doc.opLog.ops[1].length)
 	}
 
 	// Build a distinct replica of the parent whose ops reference independent
@@ -262,19 +262,19 @@ func TestRunOpsMergeableChildrenNoCollapse(t *testing.T) {
 	// explicitly to make cross-replica reconciliation genuine.)
 	p2 := NewArrayDocument[*RuneDocument](2)
 	p2.MergeFrom(p1)
-	for i := range p2.opLog.ops {
-		o := &p2.opLog.ops[i]
-		src := o.content.Elems()
+	for i := range p2.doc.opLog.ops {
+		o := &p2.doc.opLog.ops[i]
+		src := []*RuneDocument(o.content)
 		replicas := make([]*RuneDocument, len(src))
 		for j, c := range src {
-			replica := NewRuneDocument(c.agent + 10)
+			replica := NewRuneDocument(c.doc.agent + 10)
 			replica.MergeFrom(c)
 			replicas[j] = replica
 		}
 		o.content = itemRun[*RuneDocument](replicas)
 	}
-	p2.branch.snapshot = checkout(p2.opLog)
-	p2.branch.frontier = append([]lv{}, p2.opLog.frontier...)
+	p2.doc.branch.snapshot = checkout(p2.doc.opLog)
+	p2.doc.branch.frontier = append([]lv{}, p2.doc.opLog.frontier...)
 	p2.Check()
 
 	items2 := p2.GetItems()
@@ -354,11 +354,11 @@ func TestRunOpsOriginalReMergeCloneAppend(t *testing.T) {
 	orig := NewRuneDocument(1)
 	orig.Ins(0, strings.Repeat("a", 50))
 
-	cloneLog := Unmarshal[rune, runeText](orig.opLog.Marshal())
-	clone := &RuneDocument{Document: Document[rune, runeText]{
+	cloneLog := Unmarshal[runeText](orig.doc.opLog.Marshal())
+	clone := &RuneDocument{doc: &doc[runeText]{
 		opLog:  cloneLog,
 		agent:  1,
-		branch: &branch[rune]{snapshot: checkout(cloneLog), frontier: append([]lv{}, cloneLog.frontier...)},
+		branch: &branch[runeText]{snapshot: checkout(cloneLog), frontier: append([]lv{}, cloneLog.frontier...)},
 	}}
 	clone.Check()
 	clone.Ins(clone.Len(), strings.Repeat("b", 20)) // clone extends the run

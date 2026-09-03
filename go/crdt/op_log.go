@@ -9,9 +9,9 @@ import (
 // OpLog Functions (Internal)
 // ==========================================
 
-func newOpLog[E any, C content[E]]() *opLog[E, C] {
-	return &opLog[E, C]{
-		ops:      []op[E, C]{},
+func newOpLog[C content[C]]() *opLog[C] {
+	return &opLog[C]{
+		ops:      []op[C]{},
 		opLV:     []lv{},
 		totalLV:  0,
 		frontier: []lv{},
@@ -20,21 +20,8 @@ func newOpLog[E any, C content[E]]() *opLog[E, C] {
 	}
 }
 
-// mergeable reports whether a run op may be collapsed. Content whose elements
-// are themselves Mergeable documents must stay per-element so the
-// recursive-merge path (document.go) can still match ops by id.
-func (log *opLog[E, C]) mergeable(o op[E, C]) bool {
-	if len(o.content.Elems()) == 0 {
-		return true
-	}
-	if _, ok := any(o.content.Elems()[0]).(Mergeable); ok {
-		return false
-	}
-	return true
-}
-
 // covers reports whether the character lv x lies inside some run op's span.
-func (log *opLog[E, C]) covers(x lv) bool {
+func (log *opLog[C]) covers(x lv) bool {
 	i := sort.Search(len(log.opLV), func(i int) bool { return log.opLV[i] > x })
 	return i > 0 && x < log.opLV[i-1]+lv(log.ops[i-1].length)
 }
@@ -43,7 +30,7 @@ func (log *opLog[E, C]) covers(x lv) bool {
 // contains the character lv x. Every character lv belongs to exactly one run op
 // (insert runs and delete runs both occupy length character slots), so the
 // first-LV table partitions [0, totalLV).
-func (log *opLog[E, C]) opIdxAt(x lv) int {
+func (log *opLog[C]) opIdxAt(x lv) int {
 	i := sort.Search(len(log.opLV), func(i int) bool { return log.opLV[i] > x })
 	if !(i > 0 && x < log.opLV[i-1]+lv(log.ops[i-1].length)) {
 		panic(fmt.Sprintf("oplog: lv %d not covered by any op", x))
@@ -52,18 +39,18 @@ func (log *opLog[E, C]) opIdxAt(x lv) int {
 }
 
 // opAt resolves an arbitrary character lv to its containing run op.
-func (log *opLog[E, C]) opAt(x lv) *op[E, C] {
+func (log *opLog[C]) opAt(x lv) *op[C] {
 	return &log.ops[log.opIdxAt(x)]
 }
 
 // seqAt returns the per-agent sequence number of the character at lv x.
-func (log *opLog[E, C]) seqAt(x lv) int {
+func (log *opLog[C]) seqAt(x lv) int {
 	i := log.opIdxAt(x)
 	return log.ops[i].id.seq + int(x-log.opLV[i])
 }
 
 // endLV returns the last character lv covered by run op i (its causal head).
-func (log *opLog[E, C]) endLV(i int) lv {
+func (log *opLog[C]) endLV(i int) lv {
 	return log.opLV[i] + lv(log.ops[i].length) - 1
 }
 
@@ -71,7 +58,7 @@ func (log *opLog[E, C]) endLV(i int) lv {
 // insert op merges into log.ops[len-1] iff the tail op is the sole causal head,
 // both are inserts from the same agent, the seq/pos are character-adjacent, and
 // neither content holds Mergeable elements.
-func (log *opLog[E, C]) pushLocalOp(agent int, o op[E, C]) lv {
+func (log *opLog[C]) pushLocalOp(agent int, o op[C]) lv {
 	lastSeq, ok := log.version[agent]
 	if !ok {
 		lastSeq = -1
@@ -91,9 +78,9 @@ func (log *opLog[E, C]) pushLocalOp(agent int, o op[E, C]) lv {
 		log.ops[last].id.agent == agent &&
 		o.id.seq == log.ops[last].id.seq+log.ops[last].length &&
 		o.pos == log.ops[last].pos+log.ops[last].length &&
-		log.mergeable(o) && log.mergeable(log.ops[last]) {
+		o.content.Collapsible() && log.ops[last].content.Collapsible() {
 
-		log.ops[last].content = log.ops[last].content.Concat(o.content).(C)
+		log.ops[last].content = log.ops[last].content.Concat(o.content)
 		log.ops[last].length = log.ops[last].content.Len()
 		first := log.opLV[last]
 		end := first + lv(log.ops[last].length) - 1
@@ -116,56 +103,28 @@ func (log *opLog[E, C]) pushLocalOp(agent int, o op[E, C]) lv {
 	return first
 }
 
-// localInsert pushes the whole element slice as a single run op. Content whose
-// elements are Mergeable is never collapsed: the recursive-merge path
-// (document.go) matches ops by id and reconciles one element per op, so each
-// Mergeable element must keep its own length-1 op (as the pre-RLE code did).
-func localInsert[E any, C content[E]](log *opLog[E, C], agent int, pos int, elems []E) {
-	if len(elems) == 0 {
-		return
-	}
-	var zero C
-	for _, e := range elems {
-		if _, ok := any(e).(Mergeable); ok {
-			for i, e := range elems {
-				log.pushLocalOp(agent, op[E, C]{
-					opType:  opTypeIns,
-					content: zero.fromOne(e).(C),
-					pos:     pos + i,
-				})
-			}
-			return
-		}
-	}
-	log.pushLocalOp(agent, op[E, C]{
-		opType:  opTypeIns,
-		content: zero.fromElems(elems).(C),
-		pos:     pos,
-	})
-}
-
 // localDelete pushes a contiguous range delete as a single run op whose length
 // is the number of characters deleted. Delete runs carry no content; length is
 // authoritative.
-func localDelete[E any, C content[E]](log *opLog[E, C], agent int, pos int, delLen int) {
+func localDelete[C content[C]](log *opLog[C], agent int, pos int, delLen int) {
 	if delLen <= 0 {
 		return
 	}
-	log.pushLocalOp(agent, op[E, C]{
+	log.pushLocalOp(agent, op[C]{
 		opType: opTypeDel,
 		length: delLen,
 		pos:    pos,
 	})
 }
 
-func idToLV[E any, C content[E]](log *opLog[E, C], target_id id) lv {
+func idToLV[C content[C]](log *opLog[C], target_id id) lv {
 	if lv, ok := log.idToLV[target_id]; ok {
 		return lv
 	}
 	panic("Could not find id in oplog")
 }
 
-func (log *opLog[E, C]) isAncestor(ancestorLV, descendantLV lv) bool {
+func (log *opLog[C]) isAncestor(ancestorLV, descendantLV lv) bool {
 	if ancestorLV == descendantLV {
 		return true
 	}
@@ -223,13 +182,13 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 // contains `seq`. Used to parent a split-off extension op correctly when a run
 // op re-arrives in extended form, and to re-encode parent references across
 // replicas whose run boundaries differ.
-func (log *opLog[E, C]) opEndLVForSeq(agent, seq int) lv {
+func (log *opLog[C]) opEndLVForSeq(agent, seq int) lv {
 	return log.endLV(log.runIdxForSeq(agent, seq))
 }
 
 // runIdxForSeq returns the index of the run op from `agent` whose seq range
 // contains `seq`.
-func (log *opLog[E, C]) runIdxForSeq(agent, seq int) int {
+func (log *opLog[C]) runIdxForSeq(agent, seq int) int {
 	for i := len(log.ops) - 1; i >= 0; i-- {
 		o := &log.ops[i]
 		if o.id.agent == agent && seq >= o.id.seq && seq < o.id.seq+o.length {
@@ -244,38 +203,37 @@ func (log *opLog[E, C]) runIdxForSeq(agent, seq int) int {
 // split preserves the lv span, so no later opLV/parent/frontier renumbering is
 // needed; only the idToLV entries for the two halves change. It returns the
 // prefix op's end lv.
-func (log *opLog[E, C]) splitRunOp(j, k int) lv {
+func (log *opLog[C]) splitRunOp(j, k int) lv {
 	o := log.ops[j]
 	if o.opType != opTypeIns || k <= 0 || k >= o.length {
 		panic("oplog: invalid run split")
 	}
-	elems := o.content.Elems()
+	prefix, suffix := o.content.SplitAt(k)
 	prefixEnd := log.opLV[j] + lv(k) - 1
 
-	var zero C
-	suffix := op[E, C]{
+	suffixOp := op[C]{
 		opType:  opTypeIns,
-		content: zero.fromElems(elems[k:]).(C),
+		content: suffix,
 		length:  o.length - k,
 		pos:     o.pos + k,
 		id:      id{agent: o.id.agent, seq: o.id.seq + k},
 		parents: []lv{prefixEnd},
 	}
 
-	o.content = zero.fromElems(elems[:k]).(C)
+	o.content = prefix
 	o.length = k
 	log.ops[j] = o
 
-	log.ops = append(log.ops, op[E, C]{})
+	log.ops = append(log.ops, op[C]{})
 	copy(log.ops[j+2:], log.ops[j+1:])
-	log.ops[j+1] = suffix
+	log.ops[j+1] = suffixOp
 
 	log.opLV = append(log.opLV, 0)
 	copy(log.opLV[j+2:], log.opLV[j+1:])
 	log.opLV[j+1] = prefixEnd + 1
 
 	log.idToLV[o.id] = prefixEnd
-	log.idToLV[suffix.id] = log.endLV(j + 1)
+	log.idToLV[suffixOp.id] = log.endLV(j + 1)
 	return prefixEnd
 }
 
@@ -285,7 +243,7 @@ func (log *opLog[E, C]) splitRunOp(j, k int) lv {
 // reference resolves to a real boundary. This keeps ancestry, and therefore the
 // winding-based origin computation, identical across replicas whose run
 // boundaries differ.
-func (log *opLog[E, C]) resolveParentLV(agent, seq int) lv {
+func (log *opLog[C]) resolveParentLV(agent, seq int) lv {
 	j := log.runIdxForSeq(agent, seq)
 	o := &log.ops[j]
 	if seq == o.id.seq+o.length-1 {
@@ -302,7 +260,7 @@ func (log *opLog[E, C]) resolveParentLV(agent, seq int) lv {
 // prefix against the held copy, derive the unknown suffix, and append it as a
 // NEW op at the log tail with the synthetic id {agent, last_known_seq+1} and a
 // single parent edge to the end lv of the op covering the last known seq.
-func pushRemoteOp[E any, C content[E]](log *opLog[E, C], o op[E, C], parent_ids []id) {
+func pushRemoteOp[C content[C]](log *opLog[C], o op[C], parent_ids []id) {
 	parents := make([]lv, len(parent_ids))
 	for i, pid := range parent_ids {
 		parents[i] = idToLV(log, pid)
@@ -312,7 +270,7 @@ func pushRemoteOp[E any, C content[E]](log *opLog[E, C], o op[E, C], parent_ids 
 
 // pushRemoteOpLV appends a run op received from another replica whose parent
 // references are already resolved to destination character lvs.
-func pushRemoteOpLV[E any, C content[E]](log *opLog[E, C], o op[E, C], parents []lv) {
+func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 	agent := o.id.agent
 	seq := o.id.seq
 
@@ -346,16 +304,14 @@ func pushRemoteOpLV[E any, C content[E]](log *opLog[E, C], o op[E, C], parents [
 			panic("overlapping seq range without a matching op id")
 		}
 		offset := last_known_seq + 1 - seq
-		elems := o.content.Elems()
-		if o.opType == opTypeDel || offset >= len(elems) {
+		if o.opType == opTypeDel || offset >= o.content.Len() {
 			panic("inconsistent extended op prefix")
 		}
-		var zero C
-		suffix := elems[offset:]
-		o = op[E, C]{
+		_, suffix := o.content.SplitAt(offset)
+		o = op[C]{
 			opType:  opTypeIns,
-			content: zero.fromElems(suffix).(C),
-			length:  len(suffix),
+			content: suffix,
+			length:  suffix.Len(),
 			pos:     o.pos + offset,
 			id:      id{agent: agent, seq: last_known_seq + 1},
 			parents: []lv{log.opEndLVForSeq(agent, last_known_seq)},
@@ -381,7 +337,7 @@ func pushRemoteOpLV[E any, C content[E]](log *opLog[E, C], o op[E, C], parents [
 // whatever run op covers that exact character in dest. Resolving an interior
 // reference splits the destination run there, so run boundaries converge to the
 // finest boundary any replica has observed.
-func mergeInto[E any, C content[E]](dest *opLog[E, C], src *opLog[E, C]) {
+func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 	for _, o := range src.ops {
 		parents := make([]lv, len(o.parents))
 		for i, p_lv := range o.parents {

@@ -20,8 +20,8 @@ func replayDoc(doc *RuneDocument) *crdtDoc {
 		sortedItems:    []*crdtItem{},
 	}
 
-	for i := 0; i < len(doc.opLog.ops); i++ {
-		do1Operation(cDoc, doc.opLog, doc.opLog.opLV[i], nil)
+	for i := 0; i < len(doc.doc.opLog.ops); i++ {
+		do1Operation(cDoc, doc.doc.opLog, doc.doc.opLog.opLV[i], nil)
 	}
 	return cDoc
 }
@@ -348,16 +348,16 @@ func TestRecursiveMerge_MixedTypes(t *testing.T) {
 }
 
 func TestOpLog_IsAncestor(t *testing.T) {
-	log := newOpLog[rune, runeText]()
+	log := newOpLog[runeText]()
 	// LV 0: agent 1, seq 0, parents []
-	log.pushLocalOp(1, op[rune, runeText]{content: runeText("a")})
+	log.pushLocalOp(1, op[runeText]{content: runeText("a")})
 	// LV 1: agent 1, seq 1, parents [0]
-	log.pushLocalOp(1, op[rune, runeText]{content: runeText("b")})
+	log.pushLocalOp(1, op[runeText]{content: runeText("b")})
 	// To make LV 2 and LV 3 concurrent, both having LV 1 as parent:
 	// LV 2: agent 2, seq 0, parents [1]
-	pushRemoteOp(log, op[rune, runeText]{id: id{agent: 2, seq: 0}, content: runeText("c")}, []id{{agent: 1, seq: 1}})
+	pushRemoteOp(log, op[runeText]{id: id{agent: 2, seq: 0}, content: runeText("c")}, []id{{agent: 1, seq: 1}})
 	// LV 3: agent 3, seq 0, parents [1]
-	pushRemoteOp(log, op[rune, runeText]{id: id{agent: 3, seq: 0}, content: runeText("d")}, []id{{agent: 1, seq: 1}})
+	pushRemoteOp(log, op[runeText]{id: id{agent: 3, seq: 0}, content: runeText("d")}, []id{{agent: 1, seq: 1}})
 
 	if !log.isAncestor(0, 1) {
 		t.Error("0 should be ancestor of 1")
@@ -571,27 +571,25 @@ func TestMapDocument_MissingKey(t *testing.T) {
 }
 
 func TestGenericMergeFromAny(t *testing.T) {
-	a := NewDocument[int, itemRun[int]](1)
-	b := NewDocument[int, itemRun[int]](2)
+	a := NewArrayDocument[int](1)
+	b := NewArrayDocument[int](2)
 	a.Ins(0, []int{1})
-	b.MergeFrom(&a)
+	b.MergeFrom(a)
 	b.Ins(1, []int{2})
 
-	(&a).MergeFromAny(&b)
+	a.MergeFromAny(b)
 	if a.Len() != 2 {
 		t.Fatalf("Len after MergeFromAny = %d, want 2", a.Len())
 	}
-	var got []int
-	a.branch.snapshot.ForEach(func(v int) { got = append(got, v) })
-	if !reflect.DeepEqual(got, []int{1, 2}) {
+	if got := a.GetItems(); !reflect.DeepEqual(got, []int{1, 2}) {
 		t.Errorf("content after MergeFromAny = %v, want [1 2]", got)
 	}
 	a.Check()
 }
 
 func TestIDToLVUnknown(t *testing.T) {
-	log := newOpLog[rune, runeText]()
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
+	log := newOpLog[runeText]()
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
 	defer func() {
 		r := recover()
 		if r != "Could not find id in oplog" {

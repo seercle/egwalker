@@ -24,17 +24,17 @@ func TestSerializationLossless(t *testing.T) {
 	d1.Ins(5, "!") // concurrent to d2's edits; extends d1's run
 	d1.MergeFrom(d2)
 
-	log := d1.opLog
+	log := d1.doc.opLog
 
 	// Save original state for comparison
-	originalOps := make([]op[rune, runeText], len(log.ops))
+	originalOps := make([]op[runeText], len(log.ops))
 	copy(originalOps, log.ops)
 	originalFrontier := make([]lv, len(log.frontier))
 	copy(originalFrontier, log.frontier)
 
 	// Marshal and Unmarshal
 	data := log.Marshal()
-	newLog := Unmarshal[rune, runeText](data)
+	newLog := Unmarshal[runeText](data)
 
 	// 1. Check Ops
 	if len(log.ops) != len(newLog.ops) {
@@ -68,10 +68,12 @@ func TestSerializationLossless(t *testing.T) {
 }
 
 // estimateSize provides a rough byte count for comparison. Rows are run ops: a
-// per-op fixed cost plus the run content bytes each op holds.
-func estimateSize[E any, C content[E]](log *opLog[E, C], data *ColumnarData[E, C]) (int, int) {
-	elemSize := int(unsafe.Sizeof(*new(E)))
-	opSize := int(unsafe.Sizeof(op[E, C]{}))
+// per-op fixed cost plus the run content bytes each op holds. Content is
+// rune-backed in every instantiation used by these tests, so the content byte
+// width is sizeof(rune); only the rune count is visible through content[C].
+func estimateSize[C content[C]](log *opLog[C], data *ColumnarData[C]) (int, int) {
+	runeSize := int(unsafe.Sizeof(*new(rune)))
+	opSize := int(unsafe.Sizeof(op[C]{}))
 	contentHeader := int(unsafe.Sizeof(*new(C)))
 
 	// Row-based: ops slice overhead + each run-op struct + its opLV entry +
@@ -83,7 +85,7 @@ func estimateSize[E any, C content[E]](log *opLog[E, C], data *ColumnarData[E, C
 		rowSize += 24 // parents slice header
 		rowSize += len(o.parents) * 8
 		rowSize += contentHeader
-		rowSize += len(o.content.Elems()) * elemSize
+		rowSize += o.content.Len() * runeSize
 	}
 
 	// Columnar-based: sum of all slices plus the content bytes.
@@ -97,7 +99,7 @@ func estimateSize[E any, C content[E]](log *opLog[E, C], data *ColumnarData[E, C
 	colSize += len(data.Lengths) * 8   // int
 	colSize += len(data.Content) * contentHeader
 	for _, c := range data.Content {
-		colSize += len(c.Elems()) * elemSize
+		colSize += c.Len() * runeSize
 	}
 	for _, p := range data.Parents {
 		colSize += len(p) * 8
@@ -108,12 +110,12 @@ func estimateSize[E any, C content[E]](log *opLog[E, C], data *ColumnarData[E, C
 }
 
 func TestCompressionRatio(t *testing.T) {
-	log := newOpLog[rune, runeText]()
+	log := newOpLog[runeText]()
 
 	// Scenario: One user typing a 10,000 character document collapses into a
 	// single run op, so the columnar form holds one row plus the run content.
 	const N = 10000
-	localInsert(log, 1, 0, []rune(string(make([]rune, N))))
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText(make([]rune, N)), pos: 0})
 
 	if len(log.ops) != 1 {
 		t.Fatalf("10k-char insert made %d ops, want 1 run op", len(log.ops))
@@ -147,13 +149,13 @@ func TestCompressionRatio(t *testing.T) {
 }
 
 func TestMixedCompression(t *testing.T) {
-	log := newOpLog[rune, runeText]()
+	log := newOpLog[runeText]()
 
 	// Scenario: Two users alternating every 10 characters -> 100 agent runs of
 	// one 10-char run op each (positions are non-adjacent, so no collapse).
 	for i := range 100 {
 		agent := (i % 2) + 1
-		localInsert(log, agent, i*10, []rune(string(make([]rune, 10))))
+		log.pushLocalOp(agent, op[runeText]{opType: opTypeIns, content: runeText(make([]rune, 10)), pos: i * 10})
 	}
 
 	data := log.Marshal()
@@ -192,9 +194,9 @@ func TestMixedCompression(t *testing.T) {
 func TestSerialization_RLEStructure(t *testing.T) {
 	// One agent inserting 50 runes => a single run op, so every per-op column
 	// has exactly one entry whose Lengths[0] is the full run length.
-	log := newOpLog[rune, runeText]()
+	log := newOpLog[runeText]()
 	const n = 50
-	localInsert(log, 1, 0, []rune(string(make([]rune, n))))
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText(make([]rune, n)), pos: 0})
 	data := log.Marshal()
 	if len(data.Types) != 1 || data.TypeRuns[0] != 1 {
 		t.Errorf("type RLE: %v (len %d), want one run of 1 op", data.TypeRuns, len(data.TypeRuns))
@@ -224,13 +226,13 @@ func TestSerialization_RoundTripCheckout(t *testing.T) {
 
 	want := d1.GetString()
 
-	round := Unmarshal[rune, runeText](d1.opLog.Marshal())
-	if len(round.ops) != len(d1.opLog.ops) {
-		t.Fatalf("round-trip op count = %d, want %d", len(round.ops), len(d1.opLog.ops))
+	round := Unmarshal[runeText](d1.doc.opLog.Marshal())
+	if len(round.ops) != len(d1.doc.opLog.ops) {
+		t.Fatalf("round-trip op count = %d, want %d", len(round.ops), len(d1.doc.opLog.ops))
 	}
 
 	var sb strings.Builder
-	checkout(round).ForEach(func(r rune) { sb.WriteRune(r) })
+	checkout(round).ForEachContent(func(r runeText) { sb.WriteString(string(r)) })
 	if got := sb.String(); got != want {
 		t.Errorf("checkout after round-trip = %q, want %q", got, want)
 	}

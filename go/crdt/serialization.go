@@ -9,7 +9,7 @@ import (
 // Lengths/Parents/Content each hold one entry per op, and TypeRuns/AgentRuns
 // run-length-encode the op sequence. Content stores each run op's whole run
 // (deletes carry a zero content; their Lengths entry is authoritative).
-type ColumnarData[E any, C content[E]] struct {
+type ColumnarData[C content[C]] struct {
 	Types     []opType
 	TypeRuns  []int
 	Agents    []int
@@ -23,14 +23,14 @@ type ColumnarData[E any, C content[E]] struct {
 }
 
 // Marshal converts the opLog into a ColumnarData structure.
-func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
+func (log *opLog[C]) Marshal() *ColumnarData[C] {
 	if len(log.ops) == 0 {
-		return &ColumnarData[E, C]{
+		return &ColumnarData[C]{
 			Frontier: log.frontier,
 		}
 	}
 
-	res := &ColumnarData[E, C]{
+	res := &ColumnarData[C]{
 		Lengths:  make([]int, 0, len(log.ops)),
 		Content:  make([]C, 0, len(log.ops)),
 		Parents:  make([][]lv, 0, len(log.ops)),
@@ -96,8 +96,8 @@ func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
 }
 
 // Unmarshal rebuilds an opLog from ColumnarData.
-func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
-	log := newOpLog[E, C]()
+func Unmarshal[C content[C]](data *ColumnarData[C]) *opLog[C] {
+	log := newOpLog[C]()
 	log.frontier = data.Frontier
 
 	if len(data.Types) == 0 {
@@ -109,7 +109,7 @@ func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
 		totalOps += r
 	}
 
-	log.ops = make([]op[E, C], totalOps)
+	log.ops = make([]op[C], totalOps)
 
 	// --- 0. Lengths (per-op, needed to reconstruct seqs of run ops) ---
 	for i := range totalOps {
@@ -176,7 +176,7 @@ func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
 }
 
 // Stats prints comparison between row-based and columnar representation.
-func (log *opLog[E, C]) PrintCompressionStats() {
+func (log *opLog[C]) PrintCompressionStats() {
 	fmt.Printf("OpLog Stats:\n")
 	fmt.Printf("  Total Operations: %d\n", len(log.ops))
 

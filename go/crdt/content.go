@@ -1,16 +1,14 @@
 package crdt
 
-// content is the payload of an operation. Text/array logs store a run of
-// E elements (a single-character insert is a run of length 1); map logs store
-// a 1-element run. Len() is the number of characters/elements the run spans,
-// which equals the number of logical versions (lvs) and per-agent sequence
-// numbers the op covers.
-type content[E any] interface {
+// content is a run of document content. Text runs hold characters, array runs
+// hold elements, map runs hold a single map op. The CRDT machinery only needs a
+// run's length and boundaries; the element type is a property of each concrete
+// run type and is handled only at the boundaries where content meets the world.
+type content[C any] interface {
 	Len() int
-	Elems() []E
-	Concat(content[E]) content[E]
-	fromOne(E) content[E]     // returns a length-1 run wrapping e
-	fromElems([]E) content[E] // returns a run wrapping the whole slice
+	SplitAt(k int) (C, C) // split after the k-th character; 0 <= k <= Len
+	Concat(C) C
+	Collapsible() bool // may two adjacent same-agent runs of this type fuse
 }
 
 // runeText is the string-backed run content used by RuneDocument. Len counts
@@ -18,34 +16,50 @@ type content[E any] interface {
 type runeText string
 
 func (t runeText) Len() int { return len([]rune(t)) }
-func (t runeText) Elems() []rune {
-	return []rune(t)
-}
-func (t runeText) Concat(o content[rune]) content[rune] {
-	return runeText(string(t) + string(o.(runeText)))
-}
-func (t runeText) fromOne(e rune) content[rune] {
-	return runeText(string(e))
-}
-func (t runeText) fromElems(e []rune) content[rune] {
-	return runeText(string(e))
+
+// SplitAt splits after the k-th rune. runeText is byte-backed, so the split
+// must land on a rune boundary (scan to the k-th rune, then cut bytes).
+func (t runeText) SplitAt(k int) (runeText, runeText) {
+	if k <= 0 {
+		return "", t
+	}
+	if k >= t.Len() {
+		return t, ""
+	}
+	rs := []rune(t)
+	return runeText(string(rs[:k])), runeText(string(rs[k:]))
 }
 
-// itemRun is the slice-backed run content used by ArrayDocument and MapDocument.
+func (t runeText) Concat(o runeText) runeText { return runeText(string(t) + string(o)) }
+func (t runeText) Collapsible() bool          { return true }
+
+// itemRun is the slice-backed run content used by ArrayDocument.
 type itemRun[E any] []E
 
 func (r itemRun[E]) Len() int { return len(r) }
-func (r itemRun[E]) Elems() []E {
-	return r
+func (r itemRun[E]) SplitAt(k int) (itemRun[E], itemRun[E]) {
+	if k <= 0 {
+		return nil, r
+	}
+	if k >= len(r) {
+		return r, nil
+	}
+	return r[:k:k], r[k:]
 }
-func (r itemRun[E]) Concat(o content[E]) content[E] {
-	return append(append(itemRun[E]{}, r...), o.(itemRun[E])...)
+func (r itemRun[E]) Concat(o itemRun[E]) itemRun[E] {
+	return append(append(itemRun[E]{}, r...), o...)
 }
-func (r itemRun[E]) fromOne(e E) content[E] {
-	return itemRun[E]{e}
-}
-func (r itemRun[E]) fromElems(e []E) content[E] {
-	return itemRun[E](append([]E(nil), e...))
+
+// Collapsible reports whether consecutive same-agent runs of this content may
+// fuse. Content holding Mergeable elements must stay per-element so the
+// recursive-merge path (document.go) can still match ops by id. E is uniform
+// across a run, so inspecting the first element is type-accurate.
+func (r itemRun[E]) Collapsible() bool {
+	if len(r) == 0 {
+		return true
+	}
+	_, mergeable := any(r[0]).(Mergeable)
+	return !mergeable
 }
 
 // mapRun is the run content for MapDocument ops. Map ops are never merged
@@ -53,15 +67,16 @@ func (r itemRun[E]) fromElems(e []E) content[E] {
 type mapRun[K comparable, V any] []MapOp[K, V]
 
 func (r mapRun[K, V]) Len() int { return len(r) }
-func (r mapRun[K, V]) Elems() []MapOp[K, V] {
-	return r
+func (r mapRun[K, V]) SplitAt(k int) (mapRun[K, V], mapRun[K, V]) {
+	if k <= 0 {
+		return nil, r
+	}
+	if k >= len(r) {
+		return r, nil
+	}
+	return r[:k:k], r[k:]
 }
-func (r mapRun[K, V]) Concat(o content[MapOp[K, V]]) content[MapOp[K, V]] {
-	return append(append(mapRun[K, V]{}, r...), o.(mapRun[K, V])...)
+func (r mapRun[K, V]) Concat(o mapRun[K, V]) mapRun[K, V] {
+	return append(append(mapRun[K, V]{}, r...), o...)
 }
-func (r mapRun[K, V]) fromOne(e MapOp[K, V]) content[MapOp[K, V]] {
-	return mapRun[K, V]{e}
-}
-func (r mapRun[K, V]) fromElems(e []MapOp[K, V]) content[MapOp[K, V]] {
-	return mapRun[K, V](append([]MapOp[K, V](nil), e...))
-}
+func (r mapRun[K, V]) Collapsible() bool { return false }

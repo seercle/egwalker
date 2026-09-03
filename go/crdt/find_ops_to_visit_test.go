@@ -7,12 +7,12 @@ import (
 
 // buildForkLog builds a log with lv0 = 'a', and two concurrent children
 // lv1 = 'b' (agent 2) and lv2 = 'c' (agent 1) of lv0.
-func buildForkLog(t *testing.T) *opLog[rune, runeText] {
+func buildForkLog(t *testing.T) *opLog[runeText] {
 	t.Helper()
-	log := newOpLog[rune, runeText]()
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
-	pushRemoteOp(log, op[rune, runeText]{id: id{agent: 2, seq: 0}, opType: opTypeIns, content: runeText("b"), pos: 1}, []id{{agent: 1, seq: 0}})
-	pushRemoteOp(log, op[rune, runeText]{id: id{agent: 1, seq: 1}, opType: opTypeIns, content: runeText("c"), pos: 2}, []id{{agent: 1, seq: 0}})
+	log := newOpLog[runeText]()
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
+	pushRemoteOp(log, op[runeText]{id: id{agent: 2, seq: 0}, opType: opTypeIns, content: runeText("b"), pos: 1}, []id{{agent: 1, seq: 0}})
+	pushRemoteOp(log, op[runeText]{id: id{agent: 1, seq: 1}, opType: opTypeIns, content: runeText("c"), pos: 2}, []id{{agent: 1, seq: 0}})
 	if len(log.ops) != 3 {
 		t.Fatalf("setup: want 3 ops, got %d", len(log.ops))
 	}
@@ -21,7 +21,7 @@ func buildForkLog(t *testing.T) *opLog[rune, runeText] {
 
 // assertTopoOrder verifies each op's parents appear in commonVersion or earlier
 // in the same list (parents precede children).
-func assertTopoOrder(t *testing.T, log *opLog[rune, runeText], common []lv, ops []lv) {
+func assertTopoOrder(t *testing.T, log *opLog[runeText], common []lv, ops []lv) {
 	t.Helper()
 	commonSet := make(map[lv]bool, len(common))
 	for _, c := range common {
@@ -60,10 +60,10 @@ func TestFindOpsToVisit_DivergentSiblings(t *testing.T) {
 func TestFindOpsToVisit_EmptyStartFirstMerge(t *testing.T) {
 	// Linear history 0,1,2. Agents alternate so same-agent adjacency never
 	// collapses the chain into run ops: each op stays a distinct node.
-	log := newOpLog[rune, runeText]()
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
-	log.pushLocalOp(2, op[rune, runeText]{opType: opTypeIns, content: runeText("b"), pos: 0})
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("c"), pos: 0})
+	log := newOpLog[runeText]()
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
+	log.pushLocalOp(2, op[runeText]{opType: opTypeIns, content: runeText("b"), pos: 0})
+	log.pushLocalOp(1, op[runeText]{opType: opTypeIns, content: runeText("c"), pos: 0})
 
 	res := findOpsToVisit(log, []lv{}, []lv{2})
 	if len(res.commonVersion) != 0 {
