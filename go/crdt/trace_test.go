@@ -96,3 +96,36 @@ func TestTrace(t *testing.T) {
 		t.Fatalf("Mismatch, got '%q'", document.GetString())
 	}
 }
+
+func BenchmarkTrace(b *testing.B) {
+	jsonFile, err := os.Open("../../resources/editing-trace.json")
+	if err != nil {
+		b.Fatalf("Failed to open JSON file: %v", err)
+	}
+	defer jsonFile.Close()
+
+	var trace Trace
+	decoder := json.NewDecoder(jsonFile)
+	err = decoder.Decode(&trace)
+	if err != nil {
+		b.Fatalf("Failed to decode JSON file: %v", err)
+	}
+
+	var document *RuneDocument
+	for b.Loop() {
+		b.StopTimer()
+		document = NewRuneDocument(0)
+		b.StartTimer()
+		for _, edit := range trace.Edits {
+			if edit.IsInsert {
+				document.Ins(edit.Position, edit.Char)
+			} else {
+				document.Del(edit.Position, 1)
+			}
+		}
+	}
+
+	if trace.FinalText != document.GetString() {
+		b.Fatalf("Mismatch, got '%q'", document.GetString())
+	}
+}
