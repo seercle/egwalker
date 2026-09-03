@@ -29,7 +29,7 @@ func assertTopoOrder(t *testing.T, log *opLog[rune, runeText], common []lv, ops 
 	}
 	seen := make(map[lv]bool)
 	for _, cur := range ops {
-		for _, p := range log.ops[cur].parents {
+		for _, p := range log.opAt(cur).parents {
 			if commonSet[p] || seen[p] {
 				continue
 			}
@@ -58,11 +58,12 @@ func TestFindOpsToVisit_DivergentSiblings(t *testing.T) {
 }
 
 func TestFindOpsToVisit_EmptyStartFirstMerge(t *testing.T) {
-	// Linear history 0,1,2 from a single agent; merging from an empty branch.
+	// Linear history 0,1,2. Agents alternate so same-agent adjacency never
+	// collapses the chain into run ops: each op stays a distinct node.
 	log := newOpLog[rune, runeText]()
 	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("a"), pos: 0})
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("b"), pos: 1})
-	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("c"), pos: 2})
+	log.pushLocalOp(2, op[rune, runeText]{opType: opTypeIns, content: runeText("b"), pos: 0})
+	log.pushLocalOp(1, op[rune, runeText]{opType: opTypeIns, content: runeText("c"), pos: 0})
 
 	res := findOpsToVisit(log, []lv{}, []lv{2})
 	if len(res.commonVersion) != 0 {

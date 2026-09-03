@@ -56,7 +56,7 @@ func diff[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) diffResult {
 			bOnly = append(bOnly, curLV)
 		}
 
-		o := log.ops[curLV]
+		o := log.opAt(curLV)
 		for _, p := range o.parents {
 			enq(p, flag)
 		}
@@ -150,13 +150,22 @@ func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
 	return findItemAtLV(doc, targetLV)
 }
 
-func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
-	o := log.ops[opLV]
+// toggleRunChar toggles the staged insertion state (delta = -1 retreat, +1
+// advance) of the single character at opLV. For an insert op the character
+// itself is the target; for a delete op the target is the character the delete
+// removed (looked up in delTargets). Items are atomized so each character is
+// toggled independently.
+func toggleRunChar[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, delta int) {
+	o := log.opAt(opLV)
 	var targetLV lv
 	if o.opType == opTypeIns {
 		targetLV = opLV
 	} else {
-		targetLV = doc.delTargets[opLV]
+		var ok bool
+		targetLV, ok = doc.delTargets[opLV]
+		if !ok {
+			return
+		}
 	}
 
 	item := ensureAtomized(doc, targetLV)
@@ -168,7 +177,7 @@ func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
 	if item.curState == stateInserted {
 		oldM0 = 1
 	}
-	item.curState--
+	item.curState += delta
 	newM0 := 0
 	if item.curState == stateInserted {
 		newM0 = 1
@@ -178,31 +187,22 @@ func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
 	}
 }
 
+// retreat un-applies (winds back) the run op containing opLV. A run op is
+// atomic: every character it covers is toggled, one at a time, so per-character
+// item/split state is preserved.
+func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
+	i := log.opIdxAt(opLV)
+	for k := 0; k < log.ops[i].length; k++ {
+		toggleRunChar(doc, log, log.opLV[i]+lv(k), -1)
+	}
+}
+
+// advance re-applies (winds forward) the run op containing opLV, character by
+// character.
 func advance[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
-	o := log.ops[opLV]
-	var targetLV lv
-	if o.opType == opTypeIns {
-		targetLV = opLV
-	} else {
-		targetLV = doc.delTargets[opLV]
-	}
-
-	item := ensureAtomized(doc, targetLV)
-	if item == nil {
-		return
-	}
-
-	oldM0 := 0
-	if item.curState == stateInserted {
-		oldM0 = 1
-	}
-	item.curState++
-	newM0 := 0
-	if item.curState == stateInserted {
-		newM0 = 1
-	}
-	if oldM0 != newM0 {
-		item.node.SummaryAddUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
+	i := log.opIdxAt(opLV)
+	for k := 0; k < log.ops[i].length; k++ {
+		toggleRunChar(doc, log, log.opLV[i]+lv(k), +1)
 	}
 }
 
@@ -237,19 +237,22 @@ func canMerge[E any, C content[E]](log *opLog[E, C], left *crdtItem, right *crdt
 		return false
 	}
 
-	if int(left.lv) >= len(log.ops) || int(right.lv) >= len(log.ops) {
+	// Items whose lv is not a real op coordinate (e.g. the checkoutFancy
+	// placeholder sentinel) never merge.
+	if !log.covers(left.lv) || !log.covers(right.lv) {
 		return false
 	}
 
-	opL := log.ops[left.lv]
-	opR := log.ops[right.lv]
+	opL := log.opAt(left.lv)
+	opR := log.opAt(right.lv)
 
 	if opL.id.agent != opR.id.agent {
 		return false
 	}
 
-	// Contiguous in seq and LV
-	if opL.id.seq+left.length != opR.id.seq {
+	// Contiguous in seq and LV. Items may start at a run-interior lv (after a
+	// split), so the op sequence at the item start lv is derived via seqAt.
+	if log.seqAt(left.lv)+left.length != log.seqAt(right.lv) {
 		return false
 	}
 	if left.lv+lv(left.length) != right.lv {
@@ -348,8 +351,8 @@ func integrate[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], newItem *crd
 				oRightIdx, oRightOffset = getLogicalPos(doc, other.originRight)
 			}
 
-			newItemAgent := log.ops[newItem.lv].id.agent
-			otherAgent := log.ops[other.lv].id.agent
+			newItemAgent := log.opAt(newItem.lv).id.agent
+			otherAgent := log.opAt(other.lv).id.agent
 
 			if oLeftIdx < leftIdx || (oLeftIdx == leftIdx && oLeftOffset < leftOffset) ||
 				(oLeftIdx == leftIdx && oLeftOffset == leftOffset && oRightIdx == rightIdx && oRightOffset == rightOffset && newItemAgent < otherAgent) {
@@ -379,13 +382,13 @@ func integrate[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], newItem *crd
 
 	doc.items.InsertAt(idx, newItem)
 
-	o := log.ops[newItem.lv]
+	o := log.opAt(newItem.lv)
 	if o.opType != opTypeIns {
 		panic("Cannot insert a delete")
 	}
 
 	if snapshot != nil {
-		err := snapshot.InsertAt(endPos, o.content.Elems()[0])
+		err := snapshot.InsertRange(endPos, o.content.Elems())
 		if err != nil {
 			panic("Snapshot insert failed")
 		}
@@ -458,103 +461,120 @@ func split(doc *crdtDoc, idx int, offset int) {
 	addItemLV(doc, second)
 }
 
-func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv) {
-	o := log.ops[opLV]
+// deleteOne deletes the single visible character at doc position pos of the
+// staged state, recording the deletion target for the delete-run character lv
+// opLV so retreat/advance can toggle it back independently.
+func deleteOne[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv, pos int) {
+	idx, endPos := findByCurrentPos(doc, pos)
 
-	if o.opType == opTypeDel {
-		idx, endPos := findByCurrentPos(doc, o.pos)
-
-		node, pos, err := doc.items.GetAtNode(idx)
-		if err == nil {
-			for {
-				item := node.Items()[pos]
-				if item.curState == stateInserted {
-					break
-				}
-				if !item.deleted {
-					endPos++
-				}
-				idx++
-				pos++
-				if pos >= len(node.Items()) {
-					node = node.Next()
-					pos = 0
-					if node == nil {
-						break
-					}
-				}
-			}
-		}
-
-		itemPtr, _ := doc.items.GetAt(idx)
-		item := *itemPtr
-
-		if item.length > 1 {
-			split(doc, idx, 1)
-			itemPtr, _ = doc.items.GetAt(idx)
-			item = *itemPtr
-		}
-
-		if !item.deleted {
-			item.deleted = true
-			if snapshot != nil {
-				err := snapshot.DeleteAt(endPos)
-				if err != nil {
-					panic("Snapshot delete failed")
-				}
-			}
-			item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
-		}
-
-		item.curState = 1 // Deleted(1)
-		item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
-
-		doc.delTargets[opLV] = item.lv
-		tryMergeAt(doc, log, idx)
-
-	} else {
-		idx, endPos := findByCurrentPos(doc, o.pos)
-
-		if idx >= 1 {
-			prevPtr, _ := doc.items.GetAt(idx - 1)
-			if (*prevPtr).curState != stateInserted {
-				panic("Item to the left is not inserted!")
-			}
-		}
-
-		originLeft := lv(-1)
-		if idx > 0 {
-			prevPtr, _ := doc.items.GetAt(idx - 1)
-			originLeft = (*prevPtr).lv + lv((*prevPtr).length-1)
-		}
-
-		originRight := lv(-1)
-		for i := idx; i < doc.items.Size(); i++ {
-			item2Ptr, _ := doc.items.GetAt(i)
-			item2 := *item2Ptr
-			if item2.curState != stateNotYetInserted {
-				originRight = item2.lv
+	node, nodePos, err := doc.items.GetAtNode(idx)
+	if err == nil {
+		for {
+			item := node.Items()[nodePos]
+			if item.curState == stateInserted {
 				break
 			}
+			if !item.deleted {
+				endPos++
+			}
+			idx++
+			nodePos++
+			if nodePos >= len(node.Items()) {
+				node = node.Next()
+				nodePos = 0
+				if node == nil {
+					break
+				}
+			}
 		}
-
-		item := &crdtItem{
-			lv:          opLV,
-			originLeft:  originLeft,
-			originRight: originRight,
-			deleted:     false,
-			curState:    stateInserted,
-			length:      1,
-		}
-		addItemLV(doc, item)
-
-		idx = integrate(doc, log, item, idx, endPos, snapshot)
-		tryMergeAt(doc, log, idx)
 	}
+
+	itemPtr, _ := doc.items.GetAt(idx)
+	item := *itemPtr
+
+	if item.length > 1 {
+		split(doc, idx, 1)
+		itemPtr, _ = doc.items.GetAt(idx)
+		item = *itemPtr
+	}
+
+	if !item.deleted {
+		item.deleted = true
+		if snapshot != nil {
+			err := snapshot.DeleteAt(endPos)
+			if err != nil {
+				panic("Snapshot delete failed")
+			}
+		}
+		item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
+	}
+
+	item.curState = 1 // Deleted(1)
+	item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
+
+	doc.delTargets[opLV] = item.lv
+	tryMergeAt(doc, log, idx)
+}
+
+func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv) {
+	idx := log.opIdxAt(opLV)
+	o := &log.ops[idx]
+	first := log.opLV[idx]
+
+	if o.opType == opTypeDel {
+		// A delete run removes o.length visible characters at positions
+		// pos..pos+o.length-1 of the staged state, one character at a time.
+		for i := 0; i < o.length; i++ {
+			deleteOne(doc, log, snapshot, first+lv(i), o.pos)
+		}
+		return
+	}
+
+	posIdx, endPos := findByCurrentPos(doc, o.pos)
+
+	if posIdx >= 1 {
+		prevPtr, _ := doc.items.GetAt(posIdx - 1)
+		if (*prevPtr).curState != stateInserted {
+			panic("Item to the left is not inserted!")
+		}
+	}
+
+	originLeft := lv(-1)
+	if posIdx > 0 {
+		prevPtr, _ := doc.items.GetAt(posIdx - 1)
+		originLeft = (*prevPtr).lv + lv((*prevPtr).length-1)
+	}
+
+	originRight := lv(-1)
+	for i := posIdx; i < doc.items.Size(); i++ {
+		item2Ptr, _ := doc.items.GetAt(i)
+		item2 := *item2Ptr
+		if item2.curState != stateNotYetInserted {
+			originRight = item2.lv
+			break
+		}
+	}
+
+	item := &crdtItem{
+		lv:          first,
+		originLeft:  originLeft,
+		originRight: originRight,
+		deleted:     false,
+		curState:    stateInserted,
+		length:      o.length,
+	}
+	addItemLV(doc, item)
+
+	posIdx = integrate(doc, log, item, posIdx, endPos, snapshot)
+	tryMergeAt(doc, log, posIdx)
 }
 
 func do1Operation[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, snapshot *bxtree.BxTree[E, struct{}]) {
-	o := log.ops[opLV]
+	idx := log.opIdxAt(opLV)
+	o := &log.ops[idx]
+	first := log.opLV[idx]
+	end := log.endLV(idx)
+
 	diffRes := diff(log, doc.currentVersion, o.parents)
 
 	for _, i := range diffRes.aOnly {
@@ -564,8 +584,8 @@ func do1Operation[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, 
 		advance(doc, log, i)
 	}
 
-	apply(doc, log, snapshot, opLV)
-	doc.currentVersion = []lv{opLV}
+	apply(doc, log, snapshot, first)
+	doc.currentVersion = []lv{end}
 }
 
 func checkout[E any, C content[E]](log *opLog[E, C]) *bxtree.BxTree[E, struct{}] {
@@ -584,7 +604,7 @@ func checkout[E any, C content[E]](log *opLog[E, C]) *bxtree.BxTree[E, struct{}]
 	snapshot := newBxTree[E, struct{}]()
 
 	for i := 0; i < len(log.ops); i++ {
-		do1Operation(doc, log, lv(i), snapshot)
+		do1Operation(doc, log, log.opLV[i], snapshot)
 	}
 	return snapshot
 }
@@ -683,7 +703,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 				bOnlyOpsSet[curLV] = true
 			}
 
-			o := log.ops[curLV]
+			o := log.opAt(curLV)
 			enq(o.parents, isInA)
 		}
 	}
@@ -691,7 +711,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 	// Phase 2: Build Child Mapping for the Delta Subgraph
 	children := make(map[lv][]lv)
 	for curLV := range allDeltaOps {
-		o := log.ops[curLV]
+		o := log.opAt(curLV)
 		for _, p := range o.parents {
 			if allDeltaOps[p] {
 				children[p] = append(children[p], curLV)
@@ -708,7 +728,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 	
 	roots := []lv{}
 	for curLV := range allDeltaOps {
-		o := log.ops[curLV]
+		o := log.opAt(curLV)
 		isRoot := true
 		for _, p := range o.parents {
 			if allDeltaOps[p] {
@@ -731,7 +751,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 	// But to be sure, we'll use a Kahn-like approach but for weights.
 	inDegree := make(map[lv]int)
 	for curLV := range allDeltaOps {
-		o := log.ops[curLV]
+		o := log.opAt(curLV)
 		for _, p := range o.parents {
 			if allDeltaOps[p] {
 				inDegree[p]++
@@ -758,7 +778,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 		weights[cur] = w
 
 		// Move up to parents
-		o := log.ops[cur]
+		o := log.opAt(cur)
 		for _, p := range o.parents {
 			if allDeltaOps[p] {
 				inDegree[p]--
@@ -794,7 +814,7 @@ func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsTo
 
 		// Check if all parents in Delta are visited
 		ready := true
-		o := log.ops[cur]
+		o := log.opAt(cur)
 		for _, p := range o.parents {
 			if allDeltaOps[p] && !visited[p] {
 				ready = false
@@ -886,7 +906,7 @@ func checkoutFancy[E any, C content[E]](log *opLog[E, C], b *branch[E], mergeFro
 
 	for _, curLV := range visit.bOnlyOps {
 		do1Operation(doc, log, curLV, b.snapshot)
-		o := log.ops[curLV]
+		o := log.opAt(curLV)
 		b.frontier = advanceFrontier(b.frontier, curLV, o.parents)
 	}
 }

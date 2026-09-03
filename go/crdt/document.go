@@ -45,13 +45,11 @@ func (doc *Document[E, C]) Check() {
 	}
 }
 
-// Ins inserts the given items at the specified position.
+// Ins inserts the given items at the specified position. The whole slice is
+// pushed as a single run op (consecutive adjacent edits from the same agent
+// collapse into one run).
 func (doc *Document[E, C]) Ins(pos int, items []E) {
-	current_pos := pos
-	for _, item := range items {
-		localInsertOne(doc.opLog, doc.agent, current_pos, item)
-		current_pos++
-	}
+	localInsert(doc.opLog, doc.agent, pos, items)
 
 	err := doc.branch.snapshot.InsertRange(pos, items)
 	if err != nil {
@@ -81,14 +79,23 @@ func (doc *Document[E, C]) MergeFrom(other *Document[E, C]) {
 		return
 	}
 	// 1. Recursive merge for items with the same identity (LV). Content is a
-	// run; recursion applies to the elements it holds (empty runs, e.g. a
-	// delete op's zero content, are never mergeable).
+	// run; recursion applies to the elements it holds. Only single-element ops
+	// whose element is Mergeable participate: runs whose elements are Mergeable
+	// never collapse, so both replicas hold such ops under the same id and a
+	// plain id lookup resolves them (run ops of plain content may live under
+	// different boundaries on each replica and are skipped here).
 	for _, o := range other.opLog.ops {
+		otherElems := o.content.Elems()
+		if len(otherElems) == 0 {
+			continue
+		}
+		if _, ok := any(otherElems[0]).(Mergeable); !ok {
+			continue
+		}
 		if lastSeq, ok := doc.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
 			ourLV := idToLV(doc.opLog, o.id)
-			ourElems := doc.opLog.ops[ourLV].content.Elems()
-			otherElems := o.content.Elems()
+			ourElems := doc.opLog.opAt(ourLV).content.Elems()
 			if len(ourElems) > 0 && len(otherElems) > 0 {
 				if m, ok := any(ourElems[0]).(Mergeable); ok {
 					m.MergeFromAny(otherElems[0])
@@ -219,7 +226,7 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	first := true
 
 	for _, l := range concurrentLVs {
-		o := m.opLog.ops[l]
+		o := m.opLog.opAt(l)
 		if first || o.id.agent > bestID.agent || (o.id.agent == bestID.agent && o.id.seq > bestID.seq) {
 			bestV = o.content.Elems()[0].Value
 			bestID = o.id
@@ -232,7 +239,7 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	if mergeable, ok := any(bestV).(Mergeable); ok {
 		for _, l := range concurrentLVs {
 			if l != bestLV {
-				mergeable.MergeFromAny(m.opLog.ops[l].content.Elems()[0].Value)
+				mergeable.MergeFromAny(m.opLog.opAt(l).content.Elems()[0].Value)
 			}
 		}
 	}
@@ -246,13 +253,20 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 		return
 	}
 	// Recursive merge for items with the same identity (LV). Map run content
-	// always holds exactly one MapOp; recursion applies to its .Value element.
+	// always holds exactly one MapOp; recursion applies to its .Value element
+	// when that value is Mergeable (map ops never collapse, so ids match).
 	for _, o := range other.opLog.ops {
+		otherElems := o.content.Elems()
+		if len(otherElems) == 0 {
+			continue
+		}
+		if _, ok := any(otherElems[0].Value).(Mergeable); !ok {
+			continue
+		}
 		if lastSeq, ok := m.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
 			ourLV := idToLV(m.opLog, o.id)
-			ourElems := m.opLog.ops[ourLV].content.Elems()
-			otherElems := o.content.Elems()
+			ourElems := m.opLog.opAt(ourLV).content.Elems()
 			if len(ourElems) > 0 && len(otherElems) > 0 {
 				if mrg, ok := any(ourElems[0].Value).(Mergeable); ok {
 					mrg.MergeFromAny(otherElems[0].Value)

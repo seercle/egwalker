@@ -21,7 +21,7 @@ func replayDoc(doc *RuneDocument) *crdtDoc {
 	}
 
 	for i := 0; i < len(doc.opLog.ops); i++ {
-		do1Operation(cDoc, doc.opLog, lv(i), nil)
+		do1Operation(cDoc, doc.opLog, doc.opLog.opLV[i], nil)
 	}
 	return cDoc
 }

@@ -4,7 +4,11 @@ import (
 	"fmt"
 )
 
-// ColumnarData represents the opLog in a columnar format for efficient compression.
+// ColumnarData represents the opLog in a columnar format for efficient
+// compression. There is one row per run op: Types/Agents/Seqs/Positions/
+// Lengths/Parents/Content each hold one entry per op, and TypeRuns/AgentRuns
+// run-length-encode the op sequence. Content stores each run op's whole run
+// (deletes carry a zero content; their Lengths entry is authoritative).
 type ColumnarData[E any, C content[E]] struct {
 	Types     []opType
 	TypeRuns  []int
@@ -12,6 +16,7 @@ type ColumnarData[E any, C content[E]] struct {
 	AgentRuns []int
 	Seqs      []int // Start sequence for each agent run
 	Positions []int // Delta-encoded positions
+	Lengths   []int // Run length of each op
 	Content   []C
 	Parents   [][]lv
 	Frontier  []lv
@@ -26,6 +31,7 @@ func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
 	}
 
 	res := &ColumnarData[E, C]{
+		Lengths:  make([]int, 0, len(log.ops)),
 		Content:  make([]C, 0, len(log.ops)),
 		Parents:  make([][]lv, 0, len(log.ops)),
 		Frontier: log.frontier,
@@ -67,7 +73,6 @@ func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
 		}
 
 		// --- 3. Delta-Encode Positions ---
-		// We store the raw first position, then deltas.
 		if i == 0 {
 			res.Positions = append(res.Positions, o.pos)
 		} else {
@@ -75,7 +80,8 @@ func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
 		}
 		lastPos = o.pos
 
-		// --- 4. Content & Parents ---
+		// --- 4. Length, Content & Parents ---
+		res.Lengths = append(res.Lengths, o.length)
 		res.Content = append(res.Content, o.content)
 		res.Parents = append(res.Parents, o.parents)
 	}
@@ -105,6 +111,11 @@ func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
 
 	log.ops = make([]op[E, C], totalOps)
 
+	// --- 0. Lengths (per-op, needed to reconstruct seqs of run ops) ---
+	for i := range totalOps {
+		log.ops[i].length = data.Lengths[i]
+	}
+
 	// --- 1. Expand Types ---
 	opIdx := 0
 	for i, t := range data.Types {
@@ -116,12 +127,15 @@ func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
 	}
 
 	// --- 2. Expand Agents & Seqs ---
+	// Each run op consumes `length` seq numbers, so consecutive ops from the
+	// same agent advance the seq by the previous op's length, not by one.
 	opIdx = 0
 	for i, agent := range data.Agents {
 		run := data.AgentRuns[i]
-		startSeq := data.Seqs[i]
+		seq := data.Seqs[i]
 		for j := range run {
-			log.ops[opIdx+j].id = id{agent: agent, seq: startSeq + j}
+			log.ops[opIdx+j].id = id{agent: agent, seq: seq}
+			seq += log.ops[opIdx+j].length
 		}
 		opIdx += run
 	}
@@ -138,25 +152,21 @@ func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
 		}
 	}
 
-	// --- 4. Content & Parents & Maps ---
+	// --- 4. Content, Parents & derived tables ---
 	for i := 0; i < totalOps; i++ {
 		log.ops[i].content = data.Content[i]
 		log.ops[i].parents = data.Parents[i]
-		if log.ops[i].opType != opTypeDel {
-			log.ops[i].length = log.ops[i].content.Len()
-		}
 
-		// Rebuild opLV/totalLV accounting (op i's first LV is the running
-		// character count before it).
+		// op i's first LV is the running character count before it.
 		log.opLV = append(log.opLV, log.totalLV)
 		log.totalLV += lv(log.ops[i].length)
 
-		// Rebuild idToLV mapping
-		log.idToLV[log.ops[i].id] = lv(i)
+		// idToLV maps an op id to its causal head (end) LV.
+		log.idToLV[log.ops[i].id] = log.opLV[i] + lv(log.ops[i].length) - 1
 
-		// Update version map
+		// Update version map (high-water seq covers the whole run).
 		agent := log.ops[i].id.agent
-		seq := log.ops[i].id.seq
+		seq := log.ops[i].id.seq + log.ops[i].length - 1
 		if currentSeq, ok := log.version[agent]; !ok || seq > currentSeq {
 			log.version[agent] = seq
 		}

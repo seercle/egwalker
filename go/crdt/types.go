@@ -102,8 +102,8 @@ const (
 
 // Document represents a generic CRDT document. E is the element type held in
 // the document's snapshot; C is the run content type used to store inserts in
-// the op log (an op's content is a length-1 run today, collapsed to whole
-// runs by the RLE optimization).
+// the op log (an op's content is a whole run: consecutive same-agent inserts
+// collapse into a single multi-character run op).
 type Document[E any, C content[E]] struct {
 	opLog  *opLog[E, C]
 	agent  int

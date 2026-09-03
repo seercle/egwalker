@@ -111,7 +111,7 @@ func TestTargetBinaryCompression(t *testing.T) {
 	if len(text) < total {
 		text += strings.Repeat("a", total-len(text))
 	}
-	localInsert(log, 1, 0, runeText(text))
+	localInsert(log, 1, 0, []rune(text))
 
 	data := log.Marshal()
 	_, rawSize := estimateSize(log, data)
