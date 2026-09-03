@@ -229,3 +229,14 @@ Remaining trace-test profile: `FindPath` ~24%, one-time JSON decode ~40%.
 The per-char delete-run and fragmentation caveats above are unchanged.
 `TestTrace` was restored alongside the new `BenchmarkTrace` (commit
 `b4456d8`) so the trace stays in the default suite.
+
+Follow-ups (post-addendum): `locateChar` renamed to `locate` (it resolves a
+content position in content units — chars for text, elements for arrays — not
+only characters), and `Delete` reuses the left lookup when `length == 1`
+instead of running an identical second `locate` (the trace's 77k single-char
+deletes each lose one of their two `FindPath` descents, ~23% of all rope
+lookups). Profile after the cached-count fix: `FindPath` ~33%, rune string
+conversions ~25%, GC scan ~9%; the remaining per-edit cost is the
+summary-descent itself — the rope's intrinsic price for run-granular
+positional indexing, which the per-character snapshot never paid because leaf
+index == character position there.
