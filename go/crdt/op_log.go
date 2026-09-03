@@ -295,10 +295,13 @@ func (log *opLog[E, C]) resolveParentLV(agent, seq int) lv {
 }
 
 // pushRemoteOp appends a run op received from another replica, resolving its
-// parents from the given op ids. Ops are pushed whole and never collapse on the
-// receiving side. A re-arrival of an op we already hold (the owner extended the
-// run after a prior sync) grows our tail copy in place when it is the last op,
-// otherwise splits the not-yet-known suffix off as a new op.
+// parent op ids to destination character lvs. Ops are pushed whole and never
+// collapse on the receiving side, and an applied op's lv span is immutable: it
+// is never mutated in place. When the owner extended a run after a prior sync,
+// the op re-arrives carrying a strict prefix we already hold; we validate that
+// prefix against the held copy, derive the unknown suffix, and append it as a
+// NEW op at the log tail with the synthetic id {agent, last_known_seq+1} and a
+// single parent edge to the end lv of the op covering the last known seq.
 func pushRemoteOp[E any, C content[E]](log *opLog[E, C], o op[E, C], parent_ids []id) {
 	parents := make([]lv, len(parent_ids))
 	for i, pid := range parent_ids {

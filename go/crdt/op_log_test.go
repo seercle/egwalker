@@ -48,17 +48,37 @@ func TestRunOpsMergeAcrossInsCalls(t *testing.T) {
 	doc.Check()
 }
 
-// TestRunOpsDoNotMergeAcrossDivergence is the divergence scenario from the
-// plan: b forks on top of a, then a continues linearly on its own tail.
+// TestRunOpsDoNotMergeAcrossDivergence exercises the divergence-blocking
+// invariant for run collapse: a local insert only grows the tail run op in
+// place when that op is still the log's sole causal head at the moment of the
+// insert. Here agent 1 writes "ab", agent 2 forks from that state and writes
+// "X" on top, and agent 1 merges agent 2's divergent op back in. Agent 1's "ab"
+// op is no longer the log tail -- agent 2's "X" now occupies the slot between
+// it and any later agent-1 append -- so agent 1's own subsequent contiguous
+// append ("cd") must NOT collapse into the "ab" run. In a linear (non-diverged)
+// history that append would have extended "ab" in place; the merged divergence
+// is what forces it into a distinct op.
 func TestRunOpsDoNotMergeAcrossDivergence(t *testing.T) {
 	a := NewRuneDocument(1)
 	b := NewRuneDocument(2)
 	a.Ins(0, "ab")
 	b.MergeFrom(a)
-	b.Ins(2, "X")  // b diverges on top of a
-	a.Ins(2, "cd") // a continues linearly: frontier = {lv1}? see notes
-	_ = a
-	_ = b
+	b.Ins(2, "X")  // b diverges on top of a's linear tail
+	a.MergeFrom(b) // a adopts b's divergent op: its tail op is now agent 2's "X"
+	if got := len(a.opLog.ops); got != 2 {
+		t.Fatalf("after the diverging merge a has %d ops, want 2 (its ab run + b's X)", got)
+	}
+	a.Ins(3, "cd") // contiguous agent-1 append; pre-divergence it would collapse into "ab"
+	if got := len(a.opLog.ops); got != 3 {
+		t.Fatalf("contiguous append after divergence made %d ops, want 3 (must not collapse into the ab run)", got)
+	}
+	if got := a.opLog.ops[0].length; got != 2 {
+		t.Fatalf("ab run op length = %d, want 2 (the held run must not be mutated)", got)
+	}
+	if got := a.GetString(); got != "abXcd" {
+		t.Fatalf("content diverged: %q", got)
+	}
+	a.Check()
 }
 
 // TestRunOpsTwoAgentsNoMerge checks that separate agents never collapse.
