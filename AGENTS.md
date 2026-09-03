@@ -17,7 +17,7 @@ Research codebase: Go CRDT framework + positional B+Tree (`bxtree`) and pairing 
 - `go/pheap` — pairing heap; self-contained.
 - `go/crdt` — documents (`RuneDocument`, generic `ArrayDocument`, `MapDocument`), op log, columnar serialization, and the merge/walker logic. `MapDocument` values that implement `Mergeable` recurse.
 - `go/main.go` — demo/example program, not a library entrypoint.
-- `resources/editing-trace.json` — real-world trace consumed by crdt's `TestTrace`.
+- `resources/editing-trace.json` — real-world trace consumed by crdt's `TestTrace`/`BenchmarkTrace`.
 
 ## Gotchas
 
@@ -26,7 +26,7 @@ Research codebase: Go CRDT framework + positional B+Tree (`bxtree`) and pairing 
 - `doc.Check()` is the invariant checker — call it after edits/merges when adding tests.
 - Environment is a **pinned Nix flake** (`github:NixOS/nixpkgs?rev=a3116115…` = nixos-26.05). `.envrc` is gitignored, so in a fresh checkout run `nix develop` (direnv won't exist). If you bump the pin, sync the Go/Python versions listed in CONTEXT to what the new nixpkgs resolves.
 - Nix flakes only evaluate **git-tracked** files: after creating/editing `flake.nix`/`flake.lock`, `git add` them before `nix develop`/`nix flake lock`, or evaluation fails with "Path 'flake.nix' … not tracked by Git".
-- `go test` runs each package with cwd = package dir. The crdt trace test opens `../../resources/editing-trace.json` (repo-relative) and writes `go/crdt/trace-data.csv`. That CSV (and `*.prof`, `*.test`) is gitignored — regenerate it with `go test -C go ./crdt -run TestTrace` before plotting.
+- `go test` runs each package with cwd = package dir. The crdt trace tests open `../../resources/editing-trace.json` (repo-relative). `TestTrace` only checks replay correctness; `BenchmarkTrace` writes `go/crdt/trace-data.csv` (untimed epilogue) and prints wall time + final memory. That CSV (and `*.prof`, `*.test`) is gitignored — regenerate it with `go test -C go ./crdt -run '^$' -bench BenchmarkTrace` before plotting. A `TestMain` preloads the trace when profiling so the JSON decode stays out of `-cpuprofile` output.
 
 ## Workflow notes
 
