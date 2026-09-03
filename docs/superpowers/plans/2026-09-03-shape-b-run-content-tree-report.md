@@ -203,3 +203,29 @@ instructed).
 parked `runIdxForSeq` item untouched; `go/main.go` untouched and compiling.
 The plan's later Task 4 (`crdtSummary` two-field struct) is independent of this
 work.
+
+## Addendum (post-report follow-up): cached rope leaf counts
+
+The original report recorded `TestTrace` at 2113-2726 ms — a ~2.4x regression
+vs the pre-Shape-B ~920 ms. CPU profiling attributed ~46% of the time to
+`runtime.countrunes`: `runeText.Len()` (`len([]rune(t))`) rescanned the whole
+byte string, and the rope's summarizer (`FromItem`) called it for every item
+`bxtree.FindPath` walks and on every node refit, so each positional operation
+paid O(runs-before-target x run length) in rescanning — the old per-character
+snapshot never summarized anything.
+
+Fix (commit `962d43a`): rope leaves are now `ropeLeaf[C]{c C; n int}` — the
+content value plus a cached character count maintained arithmetically at
+split/concat time (SplitAt splits after the k-th character, so half lengths
+are known without rescanning); only the incoming run's `Len()` at Insert time
+ever scans. Summaries and fold checks are O(1) field reads.
+
+Results (same machine, i5-8350U): `BenchmarkTrace` (added to
+`trace_test.go`; JSON decode excluded from timing) **1414 ms → 352 ms/op**
+(~4x); `TestTrace` **~2.0-2.2 s → ~410 ms** — now faster than the pre-Shape-B
+baseline (~920 ms including decode). Final memory unchanged (~23.3 MB);
+allocation count unchanged (the hot path was scanning, not allocating).
+Remaining trace-test profile: `FindPath` ~24%, one-time JSON decode ~40%.
+The per-char delete-run and fragmentation caveats above are unchanged.
+`TestTrace` was restored alongside the new `BenchmarkTrace` (commit
+`b4456d8`) so the trace stays in the default suite.
