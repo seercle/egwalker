@@ -72,22 +72,22 @@ func diff[C content[C]](log *opLog[C], a []lv, b []lv) diffResult {
 type crdtSummarizer struct{}
 
 func (s crdtSummarizer) FromItem(item *crdtItem) crdtSummary {
-	m := crdtSummary{0, 0}
+	m := crdtSummary{}
 	if item.curState == stateInserted {
-		m[0] = item.length
+		m.presentLen = item.length
 	}
 	if !item.deleted {
-		m[1] = item.length
+		m.liveLen = item.length
 	}
 	return m
 }
 
 func (s crdtSummarizer) Add(a, b crdtSummary) crdtSummary {
-	return crdtSummary{a[0] + b[0], a[1] + b[1]}
+	return crdtSummary{presentLen: a.presentLen + b.presentLen, liveLen: a.liveLen + b.liveLen}
 }
 
 func (s crdtSummarizer) Sub(a, b crdtSummary) crdtSummary {
-	return crdtSummary{a[0] - b[0], a[1] - b[1]}
+	return crdtSummary{presentLen: a.presentLen - b.presentLen, liveLen: a.liveLen - b.liveLen}
 }
 
 var crdtSummaryConfig = crdtSummarizer{}
@@ -183,7 +183,7 @@ func toggleRunChar[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, delta int
 		newM0 = 1
 	}
 	if oldM0 != newM0 {
-		item.node.SummaryAddUpward(crdtSummary{newM0 - oldM0, 0}, doc.items)
+		item.node.SummaryAddUpward(crdtSummary{presentLen: newM0 - oldM0}, doc.items)
 	}
 }
 
@@ -399,27 +399,27 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
 	}
 
 	node, posInNode, acc := doc.items.FindPath(func(acc crdtSummary, cur crdtSummary) bool {
-		return acc[0]+cur[0] >= targetPos
+		return acc.presentLen+cur.presentLen >= targetPos
 	})
 
 	if node == nil {
 		if doc.items.Root() == nil {
 			return 0, 0
 		}
-		return doc.items.Size(), doc.items.Root().Summary()[1]
+		return doc.items.Size(), doc.items.Root().Summary().liveLen
 	}
 
 	item := node.Items()[posInNode]
 	m := crdtSummaryConfig.FromItem(item)
 
-	if targetPos > acc[0] && targetPos < acc[0]+m[0] {
+	if targetPos > acc.presentLen && targetPos < acc.presentLen+m.presentLen {
 		idx := node.Index() + posInNode
-		offset := targetPos - acc[0]
+		offset := targetPos - acc.presentLen
 		split(doc, idx, offset)
 		return findByCurrentPos(doc, targetPos)
 	}
 
-	return node.Index() + posInNode + 1, acc[1] + m[1]
+	return node.Index() + posInNode + 1, acc.liveLen + m.liveLen
 }
 
 func split(doc *crdtDoc, idx int, offset int) {
@@ -500,16 +500,16 @@ func deleteOne[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, pos int) int 
 
 	if item.deleted {
 		item.curState = 1 // Deleted(1)
-		item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
+		item.node.SummaryAddUpward(crdtSummary{presentLen: -1}, doc.items)
 		doc.delTargets[opLV] = item.lv
 		tryMergeAt(doc, log, idx)
 		return -1
 	}
 
 	item.deleted = true
-	item.node.SummaryAddUpward(crdtSummary{0, -1}, doc.items)
+	item.node.SummaryAddUpward(crdtSummary{liveLen: -1}, doc.items)
 	item.curState = 1 // Deleted(1)
-	item.node.SummaryAddUpward(crdtSummary{-1, 0}, doc.items)
+	item.node.SummaryAddUpward(crdtSummary{presentLen: -1}, doc.items)
 
 	doc.delTargets[opLV] = item.lv
 	tryMergeAt(doc, log, idx)

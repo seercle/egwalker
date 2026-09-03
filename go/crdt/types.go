@@ -70,7 +70,10 @@ type crdtItem struct {
 	node        *bxtree.Node[*crdtItem, crdtSummary]
 }
 
-type crdtSummary [2]int
+type crdtSummary struct {
+	presentLen int // Characters whose curState == stateInserted: the positional ordering key.
+	liveLen    int // Characters in items that are not deleted.
+}
 
 type crdtDoc struct {
 	items          *bxtree.BxTree[*crdtItem, crdtSummary]
