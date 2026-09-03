@@ -240,3 +240,41 @@ conversions ~25%, GC scan ~9%; the remaining per-edit cost is the
 summary-descent itself — the rope's intrinsic price for run-granular
 positional indexing, which the per-character snapshot never paid because leaf
 index == character position there.
+
+## Addendum 2: delete-seam coalescing
+
+`contentTree.Delete` split leaves but never re-merged anything, so scattered
+single-char deletes fragmented leaves toward single characters (~+1 leaf per
+delete; the merge-heavy per-char delete caveat above). Delete now coalesces
+the seams it creates (`mergeWithLeft`, local policy mirroring `Insert`'s
+boundary folding; commit `5d52700`).
+
+`BenchmarkRopeDeleteStorm` (30k appends → 10k scattered single-char deletes →
+3k interior inserts; deterministic positions) before/after:
+
+| metric | before | after |
+|---|---|---|
+| leaves-after-storm | 6655 (deterministic, all runs) | 117 (all runs) |
+| ns/op | 25.2–58.3M (count=3) | 116.2–125.7M (count=5) |
+| allocs/op | 43113 | 78091 |
+
+Both sides honestly. The bounded leaf count is the primary, deterministic win
+(the plan's before/after claim rests on this metric); storm wall time is a
+real cost — ~3.5× ns/op — because coalescing keeps leaves big (~64–128
+chars), so every interior delete pays `runeText.SplitAt`'s O(leaf-rune-scan),
+while the fragmented baseline tree's tiny (~4.5 char average) leaves made
+that scan nearly free; allocs/op roughly double for the same reason
+(split-then-rejoin is ~3× the structural work per delete).
+
+How the real typing trace trades off: `TestTrace` passes
+(`-run '^TestTrace$' -count=1`, two runs, 1.47 s / 1.56 s harness time — that
+figure includes the one-time JSON decode, ~40% of the trace-test profile per
+the addendum above). The replay-only wall time
+comes from `BenchmarkTrace`'s untimed epilogue (the ms/MB prints moved there
+when `BenchmarkTrace` was added in `b4456d8`): **699–712 ms** with **23.29
+MB** final memory across two runs, vs the pre-coalescing ~410 ms (~1.7× — a
+real regression, below the 2× abort threshold) and unchanged ~23.3 MB final
+memory. Trace wall time lands well under the storm's ~3.5× cost (indicative
+only — noisy laptop, i5-8350U), and final memory is unchanged, consistent
+with leaves staying bounded; the deterministic leaf-count win remains the
+primary metric.
