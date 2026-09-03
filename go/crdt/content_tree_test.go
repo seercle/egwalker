@@ -180,3 +180,50 @@ func TestRuneTextSplitAt(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkRopeDeleteStorm measures the rope under a delete-storm workload:
+// build by appending (cap-sized leaves), then scattered single-char deletes —
+// which fragment leaves toward single characters when seams are not
+// coalesced — then further interior edits whose per-op cost depends on the
+// tree shape the storm left behind. The custom "leaves-after-storm" metric
+// makes fragmentation directly visible; without seam coalescing it grows by
+// roughly one leaf per splitting delete (~6655 leaves observed without
+// coalescing), with coalescing it stays ~buildChars/ropeLeafCap.
+func BenchmarkRopeDeleteStorm(b *testing.B) {
+	const (
+		buildChars   = 30000
+		stormDeletes = 10000
+		postInserts  = 3000
+	)
+
+	b.ReportAllocs()
+	var ct *contentTree[runeText]
+	var leavesAfterStorm int
+	for b.Loop() {
+		b.StopTimer()
+		ct = newContentTree[runeText]()
+		for i := 0; i < buildChars; i++ {
+			ct.Insert(i, runeText("x"))
+		}
+		b.StartTimer()
+
+		for i := 0; i < stormDeletes; i++ {
+			ct.Delete((i*7919)%ct.Len(), 1)
+		}
+		b.StopTimer()
+		leavesAfterStorm = ct.leafCount()
+		b.StartTimer()
+
+		for i := 0; i < postInserts; i++ {
+			ct.Insert((i*104729)%ct.Len(), runeText("y"))
+		}
+		// No trailing b.StopTimer(): on Go 1.24+ StopTimer poisons the loop and
+		// the next b.Loop call would fail with "B.Loop called with timer
+		// stopped". b.Loop stops the timer itself on the final call.
+	}
+	b.ReportMetric(float64(leavesAfterStorm), "leaves-after-storm")
+
+	if ct.Len() != buildChars-stormDeletes+postInserts {
+		b.Fatalf("final rope length %d, want %d", ct.Len(), buildChars-stormDeletes+postInserts)
+	}
+}

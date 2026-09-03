@@ -92,6 +92,34 @@ func (ct *contentTree[C]) replaceLeaf(idx int, parts ...ropeLeaf[C]) {
 	}
 }
 
+// mergeWithLeft merges the leaf at item index idx into its left neighbour
+// (idx-1) when the combined length fits ropeLeafCap. It is a no-op when idx
+// is out of range or the pair does not fit. Used at the seams a Delete
+// creates, mirroring Insert's boundary folding: edit points do not
+// accumulate fragmentation.
+func (ct *contentTree[C]) mergeWithLeft(idx int) {
+	if idx <= 0 || idx >= ct.tree.Size() {
+		return
+	}
+	left, errL := ct.tree.GetAt(idx - 1)
+	cur, errR := ct.tree.GetAt(idx)
+	if errL != nil || errR != nil || left.n+cur.n > ropeLeafCap {
+		return
+	}
+	// GetAt returns pointers into node storage; build merged before the
+	// DeleteAt calls below, which shift items under those pointers.
+	merged := ropeLeaf[C]{c: left.c.Concat(cur.c), n: left.n + cur.n}
+	if err := ct.tree.DeleteAt(idx); err != nil {
+		panic("crdt: rope DeleteAt: " + err.Error())
+	}
+	if err := ct.tree.DeleteAt(idx - 1); err != nil {
+		panic("crdt: rope DeleteAt: " + err.Error())
+	}
+	if err := ct.tree.InsertRange(idx-1, []ropeLeaf[C]{merged}); err != nil {
+		panic("crdt: rope InsertRange: " + err.Error())
+	}
+}
+
 // Insert inserts run (Len > 0) at character position pos.
 //
 // Positions that fall on a leaf boundary fold the run into the left neighbour
@@ -158,7 +186,9 @@ func (ct *contentTree[C]) Insert(pos int, run C) {
 //   - multi-leaf: if the first leaf is only partially in range, split it so the
 //     range starts on a leaf boundary; if the last leaf is only partially in
 //     range, split it so the range ends on a leaf boundary (dropping only the
-//     in-range prefix of that leaf); then DeleteRange the whole interior leaves.
+//     in-range prefix of that leaf); then DeleteRange the whole interior leaves;
+//   - every structural seam is coalesced afterwards (mergeWithLeft), so
+//     repeated edits do not accumulate fragmented leaves.
 func (ct *contentTree[C]) Delete(pos, length int) {
 	if length <= 0 {
 		return
@@ -190,6 +220,7 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 		before, rest := L.c.SplitAt(oL)  // before: oL chars; rest: the remainder
 		_, after := rest.SplitAt(length) // after: chars after the deleted range
 		ct.replaceLeaf(iL, ropeLeaf[C]{c: before, n: oL}, ropeLeaf[C]{c: after, n: L.n - oL - length})
+		ct.mergeWithLeft(iL + 1) // re-join the halves when they fit the cap
 		return
 	}
 
@@ -213,6 +244,7 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 	if err := ct.tree.DeleteRange(delStart, end-delStart); err != nil {
 		panic("crdt: rope DeleteRange: " + err.Error())
 	}
+	ct.mergeWithLeft(delStart) // re-join the neighbours of the excised range
 }
 
 // ForEachContent visits every leaf's content value in document order.

@@ -407,3 +407,39 @@ func TestShapeBInteriorDeleteSplitsOneLeaf(t *testing.T) {
 	}
 	doc.Check()
 }
+
+func TestShapeBCoalesceInteriorDeleteSingleLeaf(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, strings.Repeat("a", 200)) // one rope leaf (<= ropeLeafCap)
+	doc.Del(100, 1)
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 1 {
+		t.Fatalf("interior delete on a cap-sized leaf left %d leaves; want 1 (seam coalesced)", leaves)
+	}
+	if doc.Len() != 199 {
+		t.Fatalf("len=%d, want 199", doc.Len())
+	}
+	if doc.GetString() != strings.Repeat("a", 199) {
+		t.Fatalf("content diverged")
+	}
+	doc.Check()
+}
+
+func TestShapeBDeleteStormKeepsLeavesBounded(t *testing.T) {
+	doc := NewRuneDocument(1)
+	for i := 0; i < 5000; i++ {
+		doc.Ins(doc.Len(), "x")
+	}
+	// Scattered single-char deletes (deterministic positions). Without seam
+	// coalescing each interior delete leaves +1 leaf (~1190 leaves observed
+	// without coalescing); with it the count stays ~buildChars/ropeLeafCap (~20).
+	for i := 0; i < 2000; i++ {
+		doc.Del((i*7919)%doc.Len(), 1)
+	}
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves > 100 {
+		t.Fatalf("delete storm left %d leaves; want bounded (~n/ropeLeafCap)", leaves)
+	}
+	if doc.Len() != 3000 {
+		t.Fatalf("len=%d, want 3000", doc.Len())
+	}
+	doc.Check()
+}
