@@ -58,15 +58,16 @@ func (ct *contentTree[C]) Len() int {
 // leafCount returns the number of leaves (for tests and diagnostics).
 func (ct *contentTree[C]) leafCount() int { return ct.tree.Size() }
 
-// locateChar returns the item index of the leaf containing character pos, that
-// leaf, and the character offset within it. pos must be in [0, Len). Characters
-// are 0-based; a leaf starting at character pos has offset 0.
-func (ct *contentTree[C]) locateChar(pos int) (idx int, leaf ropeLeaf[C], offset int) {
+// locate returns the item index of the leaf containing content position pos,
+// that leaf, and the offset within it. pos must be in [0, Len) and is in
+// content units — characters for runeText, elements for itemRun — matching the
+// Len() unit of the content contract. A leaf starting at pos has offset 0.
+func (ct *contentTree[C]) locate(pos int) (idx int, leaf ropeLeaf[C], offset int) {
 	node, posInNode, acc := ct.tree.FindPath(func(acc, cur int) bool {
 		return acc+cur > pos
 	})
 	if node == nil {
-		panic("crdt: rope locateChar out of range")
+		panic("crdt: rope locate out of range")
 	}
 	leaf = node.Items()[posInNode]
 	return node.Index() + posInNode, leaf, pos - acc
@@ -127,7 +128,7 @@ func (ct *contentTree[C]) Insert(pos int, run C) {
 	}
 
 	// Interior: pos in (0, n). Locate the leaf containing character pos.
-	idx, leaf, offset := ct.locateChar(pos)
+	idx, leaf, offset := ct.locate(pos)
 	if offset == 0 {
 		// Boundary between leaves: fold into the left neighbour if it fits.
 		if left, err := ct.tree.GetAt(idx - 1); err == nil && left.n+rn <= ropeLeafCap {
@@ -175,8 +176,8 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 		return
 	}
 
-	iL, L, oL := ct.locateChar(pos)
-	iR, _, _ := ct.locateChar(posEnd - 1)
+	iL, L, oL := ct.locate(pos)
+	iR, _, _ := ct.locate(posEnd - 1)
 
 	if iL == iR {
 		// Single-leaf deletion: keep [before] and [after]. Half lengths are
@@ -196,7 +197,7 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 	}
 
 	// Re-locate the right boundary leaf (indices shifted by the left split).
-	iR2, R2, oR2 := ct.locateChar(posEnd - 1)
+	iR2, R2, oR2 := ct.locate(posEnd - 1)
 	end := iR2 + 1 // exclusive index: optimistic, R2 fully in range
 	if oR2+1 < R2.n {
 		// R2 extends past the range: keep its suffix after the last in-range char.
