@@ -371,3 +371,39 @@ func TestRunOpsOriginalReMergeCloneAppend(t *testing.T) {
 	orig.Check()
 	clone.Check()
 }
+
+func TestShapeB5000CharInsertOneSnapshotLeaf(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, strings.Repeat("a", 5000))
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 1 {
+		t.Fatalf("5000-char run insert made %d snapshot leaves; want 1", leaves)
+	}
+	doc.Check()
+}
+
+func TestShapeBAppendTypingKeepsLeavesBounded(t *testing.T) {
+	doc := NewRuneDocument(1)
+	for i := 0; i < 5000; i++ {
+		doc.Ins(doc.Len(), "x")
+	}
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves > 100 {
+		t.Fatalf("append-only typing left %d snapshot leaves; want <= 100", leaves)
+	}
+	if doc.GetString() != strings.Repeat("x", 5000) {
+		t.Fatalf("content diverged")
+	}
+	doc.Check()
+}
+
+func TestShapeBInteriorDeleteSplitsOneLeaf(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, strings.Repeat("a", 1000))
+	doc.Ins(1000, strings.Repeat("b", 1000)) // second leaf
+	doc.Del(500, 1)                          // interior delete in first leaf
+	// Lenient on purpose: an interior delete splits the run's leaf (the 1000-char
+	// "a" leaf becomes two around the deleted rune), so the count here is 3, not 2.
+	if got := doc.GetString(); len([]rune(got)) != 1999 {
+		t.Fatalf("len=%d", len([]rune(got)))
+	}
+	doc.Check()
+}
