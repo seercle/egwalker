@@ -260,7 +260,7 @@ boundary folding; commit `5d52700`).
 
 Both sides honestly. The bounded leaf count is the primary, deterministic win
 (the plan's before/after claim rests on this metric); storm wall time is a
-real cost — ~3.5× ns/op — because coalescing keeps leaves big (up to the
+real cost — ~3× ns/op — because coalescing keeps leaves big (up to the
 256-char cap; the storm's 117 leaves cover its 20,000 post-delete chars,
 ~171 chars/leaf at the leaf-count point), so every interior delete pays
 `runeText.SplitAt`'s O(leaf-rune-scan), while the fragmented baseline tree's
@@ -276,7 +276,7 @@ comes from `BenchmarkTrace`'s untimed epilogue (the ms/MB prints moved there
 when `BenchmarkTrace` was added in `b4456d8`): **699–712 ms** with **23.29
 MB** final memory across two runs, vs the pre-coalescing ~410 ms (~1.7× — a
 real regression) and unchanged ~23.3 MB final
-memory. Trace wall time lands well under the storm's ~3.5× cost (indicative
+memory. Trace wall time lands well under the storm's ~3× cost (indicative
 only — noisy laptop, i5-8350U), and final memory is unchanged, consistent
 with leaves staying bounded; the deterministic leaf-count win remains the
 primary metric.
