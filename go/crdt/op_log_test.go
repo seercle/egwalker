@@ -443,3 +443,20 @@ func TestShapeBDeleteStormKeepsLeavesBounded(t *testing.T) {
 	}
 	doc.Check()
 }
+
+func TestShapeBCoalesceMultiLeafDelete(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, strings.Repeat("a", 200))
+	doc.Ins(200, strings.Repeat("b", 200))
+	doc.Del(50, 300) // two cap-sized leaves, delete spans both; kept halves re-join
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 1 {
+		t.Fatalf("multi-leaf delete left %d leaves; want 1 (seam coalesced)", leaves)
+	}
+	if doc.Len() != 100 {
+		t.Fatalf("len=%d, want 100", doc.Len())
+	}
+	if got := doc.GetString(); got != strings.Repeat("a", 50)+strings.Repeat("b", 50) {
+		t.Fatalf("content diverged: %q", got)
+	}
+	doc.Check()
+}

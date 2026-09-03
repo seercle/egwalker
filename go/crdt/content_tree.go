@@ -220,7 +220,11 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 		before, rest := L.c.SplitAt(oL)  // before: oL chars; rest: the remainder
 		_, after := rest.SplitAt(length) // after: chars after the deleted range
 		ct.replaceLeaf(iL, ropeLeaf[C]{c: before, n: oL}, ropeLeaf[C]{c: after, n: L.n - oL - length})
-		ct.mergeWithLeft(iL + 1) // re-join the halves when they fit the cap
+		if oL == 0 {
+			ct.mergeWithLeft(iL) // leaf start: seam is (iL-1, survivor|old-next)
+		} else {
+			ct.mergeWithLeft(iL + 1) // split point: seam is (before, after|old-next)
+		}
 		return
 	}
 
