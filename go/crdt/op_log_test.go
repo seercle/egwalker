@@ -235,8 +235,8 @@ func TestRunOpsSerializationRoundTrip(t *testing.T) {
 // finding: a single Ins of two+ Mergeable child documents must NOT collapse
 // into one multi-element run op, because the recursive-merge path matches ops
 // by id and reconciles one element per op. If the children were fused into one
-// op, only Elems()[0] would be reconciled and the others would silently
-// diverge across replicas.
+// op, only the first child's op would be reconciled and the others would
+// silently diverge across replicas.
 func TestRunOpsMergeableChildrenNoCollapse(t *testing.T) {
 	// Child documents on replica 1 (Mergeable elements: *RuneDocument).
 	childA1 := NewRuneDocument(10)

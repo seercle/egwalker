@@ -10,10 +10,11 @@ Plan: `docs/superpowers/plans/2026-09-03-shape-b-run-content-tree.md`
 Shape B makes the CRDT engine generic over the *content run type only* and
 replaces the per-character visible-content snapshot with a run-based content
 tree ("rope"), so a contiguous run insert costs ~1 snapshot leaf and the visible
-document costs O(#runs) not O(#chars). Two plan-spec deviations were required
-(the delete-run snapshot behavior, and the spec's runeCount / accounting
-details noted below); both are documented as trade-offs and the shipped
-behavior restores exact Shape A semantics. The public API
+document costs O(#runs) not O(#chars). One plan-spec deviation was required —
+the delete-run snapshot behavior — because under merge wind-back a delete run's
+characters are not contiguous at a snapshot coordinate; the shipped behavior
+restores exact Shape A semantics. Additional performance caveats follow in the
+same section. The public API
 (`Ins`/`Del`/`Len`/`GetString`/`GetItems`/`MergeFrom`/`Check`/`Reset`, map
 `Set`/`Get`/`Keys`, and `Mergeable`/`MergeFromAny`) is unchanged.
 
