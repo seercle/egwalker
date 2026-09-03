@@ -116,12 +116,27 @@ func (log *opLog[E, C]) pushLocalOp(agent int, o op[E, C]) lv {
 	return first
 }
 
-// localInsert pushes the whole element slice as a single run op.
+// localInsert pushes the whole element slice as a single run op. Content whose
+// elements are Mergeable is never collapsed: the recursive-merge path
+// (document.go) matches ops by id and reconciles one element per op, so each
+// Mergeable element must keep its own length-1 op (as the pre-RLE code did).
 func localInsert[E any, C content[E]](log *opLog[E, C], agent int, pos int, elems []E) {
 	if len(elems) == 0 {
 		return
 	}
 	var zero C
+	for _, e := range elems {
+		if _, ok := any(e).(Mergeable); ok {
+			for i, e := range elems {
+				log.pushLocalOp(agent, op[E, C]{
+					opType:  opTypeIns,
+					content: zero.fromOne(e).(C),
+					pos:     pos + i,
+				})
+			}
+			return
+		}
+	}
 	log.pushLocalOp(agent, op[E, C]{
 		opType:  opTypeIns,
 		content: zero.fromElems(elems).(C),
@@ -317,36 +332,19 @@ func pushRemoteOpLV[E any, C content[E]](log *opLog[E, C], o op[E, C], parents [
 		panic("Seq numbers out of order")
 	}
 
-	// Re-arrival of an op we hold as a strict prefix: grow the tail copy in
-	// place when it is our last op; otherwise split the unknown suffix into a
-	// new op appended at the log tail (so no later opLV shifts).
+	// Re-arrival of an op we hold as a strict prefix (the owner extended the
+	// run after a prior sync). Op lv spans are immutable once applied, so we
+	// never grow our existing copy in place (that would move its end LV out
+	// from under branch frontiers and op ids that already reference it).
+	// Instead we keep our prefix op untouched and append the not-yet-known
+	// suffix as a NEW op at the log tail, so no later opLV shifts.
 	if seq <= last_known_seq {
-		oldLV, exists := log.idToLV[o.id]
-		if !exists {
+		if _, exists := log.idToLV[o.id]; !exists {
 			panic("overlapping seq range without a matching op id")
 		}
-		idx := log.opIdxAt(oldLV)
-		have := &log.ops[idx]
-		if idx == len(log.ops)-1 {
-			oldEnd := log.endLV(idx)
-			delta := o.length - have.length
-			have.content = o.content
-			have.length = o.length
-			log.totalLV += lv(delta)
-			newEnd := log.endLV(idx)
-			log.idToLV[o.id] = newEnd
-			for i := range log.frontier {
-				if log.frontier[i] == oldEnd {
-					log.frontier[i] = newEnd
-				}
-			}
-			log.version[agent] = seq + o.length - 1
-			return
-		}
-		// Split: keep our prefix op and append the suffix.
 		offset := last_known_seq + 1 - seq
 		elems := o.content.Elems()
-		if o.opType == opTypeDel || offset > len(elems) {
+		if o.opType == opTypeDel || offset >= len(elems) {
 			panic("inconsistent extended op prefix")
 		}
 		var zero C

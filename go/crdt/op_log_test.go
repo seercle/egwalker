@@ -164,3 +164,144 @@ func TestRunOpsSerializationRoundTrip(t *testing.T) {
 	got := d1.GetString() // also verify via checkout equality below
 	_ = got
 }
+
+// TestRunOpsMergeableChildrenNoCollapse is a regression test for the I1
+// finding: a single Ins of two+ Mergeable child documents must NOT collapse
+// into one multi-element run op, because the recursive-merge path matches ops
+// by id and reconciles one element per op. If the children were fused into one
+// op, only Elems()[0] would be reconciled and the others would silently
+// diverge across replicas.
+func TestRunOpsMergeableChildrenNoCollapse(t *testing.T) {
+	// Child documents on replica 1 (Mergeable elements: *RuneDocument).
+	childA1 := NewRuneDocument(10)
+	childA1.Ins(0, "AB")
+	childB1 := NewRuneDocument(11)
+	childB1.Ins(0, "CD")
+
+	p1 := NewArrayDocument[*RuneDocument](1)
+	p1.Ins(0, []*RuneDocument{childA1, childB1})
+
+	// Mergeable content must never collapse: each child keeps its own length-1
+	// op so recursive merge can match it by id.
+	if got := len(p1.opLog.ops); got != 2 {
+		t.Fatalf("one Ins of 2 Mergeable children made %d ops, want 2 (no collapse)", got)
+	}
+	if p1.opLog.ops[0].length != 1 || p1.opLog.ops[1].length != 1 {
+		t.Fatalf("Mergeable children collapsed into runs of length %d and %d, want 1 each",
+			p1.opLog.ops[0].length, p1.opLog.ops[1].length)
+	}
+
+	// Build a distinct replica of the parent whose ops reference independent
+	// child replicas. (Document merge copies element pointers, so replace them
+	// explicitly to make cross-replica reconciliation genuine.)
+	p2 := NewArrayDocument[*RuneDocument](2)
+	p2.MergeFrom(p1)
+	for i := range p2.opLog.ops {
+		o := &p2.opLog.ops[i]
+		src := o.content.Elems()
+		replicas := make([]*RuneDocument, len(src))
+		for j, c := range src {
+			replica := NewRuneDocument(c.agent + 10)
+			replica.MergeFrom(c)
+			replicas[j] = replica
+		}
+		o.content = itemRun[*RuneDocument](replicas)
+	}
+	p2.branch.snapshot = checkout(p2.opLog)
+	p2.branch.frontier = append([]lv{}, p2.opLog.frontier...)
+	p2.Check()
+
+	items2 := p2.GetItems()
+	if len(items2) != 2 {
+		t.Fatalf("parent2 has %d items, want 2", len(items2))
+	}
+	childA2, childB2 := items2[0], items2[1]
+
+	// Divergent edits to both children on both replicas.
+	childA1.Ins(1, "X")
+	childB1.Ins(1, "P")
+	childA2.Ins(1, "Y")
+	childB2.Ins(1, "Q")
+
+	// Merging the parents must recursively reconcile BOTH children.
+	p1.MergeFrom(p2)
+	p2.MergeFrom(p1)
+
+	items1 := p1.GetItems()
+	if len(items1) != 2 {
+		t.Fatalf("parent1 has %d items, want 2", len(items1))
+	}
+	for _, c := range []struct {
+		name string
+		got  string
+		want []string
+	}{
+		{"childA1", items1[0].GetString(), []string{"X", "Y"}},
+		{"childB1", items1[1].GetString(), []string{"P", "Q"}},
+		{"childA2", items2[0].GetString(), []string{"X", "Y"}},
+		{"childB2", items2[1].GetString(), []string{"P", "Q"}},
+	} {
+		for _, s := range c.want {
+			if !strings.Contains(c.got, s) {
+				t.Errorf("%s content %q missing %q after recursive merge", c.name, c.got, s)
+			}
+		}
+	}
+	if items1[0].GetString() != items2[0].GetString() || items1[1].GetString() != items2[1].GetString() {
+		t.Errorf("children diverged across replicas after recursive merge")
+	}
+
+	p1.Check()
+	p2.Check()
+	items1[0].Check()
+	items1[1].Check()
+	items2[0].Check()
+	items2[1].Check()
+}
+
+// TestRunOpsIdleReplicaReMergeExtendedRun is a regression test for the
+// tail-grow-in-place bug: an idle replica that synced a run op and never
+// diverged re-merges an owner that has since extended its trailing run. The
+// extended run re-arrives while our copy is the sole tail op; the op's lv span
+// must not be mutated in place (that desyncs the branch frontier and panics).
+func TestRunOpsIdleReplicaReMergeExtendedRun(t *testing.T) {
+	owner := NewRuneDocument(1)
+	owner.Ins(0, strings.Repeat("a", 50))
+	idle := NewRuneDocument(2)
+	idle.MergeFrom(owner)
+	owner.Ins(owner.Len(), strings.Repeat("b", 20)) // owner extends its trailing run
+	idle.MergeFrom(owner)                           // extended run re-arrives
+	if idle.Len() != owner.Len() || idle.GetString() != owner.GetString() {
+		t.Fatalf("idle replica diverged after re-merge:\nowner=%q (%d)\nidle =%q (%d)",
+			owner.GetString(), owner.Len(), idle.GetString(), idle.Len())
+	}
+	idle.Check()
+	owner.Check()
+}
+
+// TestRunOpsOriginalReMergeCloneAppend is a regression test for the
+// tail-grow-in-place bug in the opposite direction: a serialization round-trip
+// clone of a single-run document extends the run, then the original re-merges
+// the clone. The original's copy of the run is its sole tail op when the
+// extended run re-arrives.
+func TestRunOpsOriginalReMergeCloneAppend(t *testing.T) {
+	orig := NewRuneDocument(1)
+	orig.Ins(0, strings.Repeat("a", 50))
+
+	cloneLog := Unmarshal[rune, runeText](orig.opLog.Marshal())
+	clone := &RuneDocument{Document: Document[rune, runeText]{
+		opLog:  cloneLog,
+		agent:  1,
+		branch: &branch[rune]{snapshot: checkout(cloneLog), frontier: append([]lv{}, cloneLog.frontier...)},
+	}}
+	clone.Check()
+	clone.Ins(clone.Len(), strings.Repeat("b", 20)) // clone extends the run
+
+	orig.MergeFrom(clone) // extended run re-arrives while orig's copy is the tail
+	if orig.Len() != clone.Len() || orig.GetString() != clone.GetString() {
+		t.Fatalf("original diverged after re-merging extended clone:\norig =%q (%d)\nclone=%q (%d)",
+			orig.GetString(), orig.Len(), clone.GetString(), clone.Len())
+	}
+	orig.Check()
+	clone.Check()
+}
