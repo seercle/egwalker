@@ -177,7 +177,12 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 	}
 
 	iL, L, oL := ct.locate(pos)
-	iR, _, _ := ct.locate(posEnd - 1)
+	// For length == 1 the right edge is pos itself, so a second locate would
+	// return exactly what we already hold — reuse it.
+	iR := iL
+	if length > 1 {
+		iR, _, _ = ct.locate(posEnd - 1)
+	}
 
 	if iL == iR {
 		// Single-leaf deletion: keep [before] and [after]. Half lengths are
