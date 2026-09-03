@@ -22,6 +22,21 @@ func TestRunOpsLocalInsertCollapses(t *testing.T) {
 	doc.Check()
 }
 
+// TestRunOpsLargeContiguousInsertCollapses is the relocated RLE acceptance
+// test (formerly TestTargetOpLogRLE in the gated file): a single contiguous
+// 5000-char insert must collapse into exactly one run op.
+func TestRunOpsLargeContiguousInsertCollapses(t *testing.T) {
+	doc := NewRuneDocument(1)
+	doc.Ins(0, strings.Repeat("a", 5000))
+	if got := len(doc.opLog.ops); got != 1 {
+		t.Fatalf("contiguous 5000-char insert produced %d ops; want a single run op", got)
+	}
+	if got := doc.GetString(); got != strings.Repeat("a", 5000) {
+		t.Fatalf("content diverged after 5000-char run insert")
+	}
+	doc.Check()
+}
+
 // TestRunOpsMergeAcrossInsCalls checks the merge rule across adjacent Ins calls.
 func TestRunOpsMergeAcrossInsCalls(t *testing.T) {
 	doc := NewRuneDocument(1)
@@ -109,6 +124,37 @@ func TestRunOpsInteriorDelete(t *testing.T) {
 		t.Fatalf("content diverged: %q", doc.GetString())
 	}
 	doc.Check()
+}
+
+// TestRunOpsSplitThenDeleteAcrossBoundary is a regression test for a delete
+// run whose range crosses an insert run that was split when a concurrent
+// interior edit from another replica arrived (the splitRunOp path in
+// resolveParentLV). The delete must apply across the boundary and both replicas
+// must converge.
+func TestRunOpsSplitThenDeleteAcrossBoundary(t *testing.T) {
+	a := NewRuneDocument(1)
+	b := NewRuneDocument(2)
+	a.Ins(0, strings.Repeat("a", 50))
+	b.MergeFrom(a)
+	b.Ins(10, strings.Repeat("b", 10))      // concurrent, interior to a's run
+	a.Ins(a.Len(), strings.Repeat("c", 10)) // a extends its run on its own tail
+	a.MergeFrom(b)                          // b's parent edge points into a's extended run -> split
+	b.MergeFrom(a)
+	if a.GetString() != b.GetString() {
+		t.Fatalf("replicas diverged before delete:\na=%q\nb=%q", a.GetString(), b.GetString())
+	}
+	pre := a.Len()
+	b.Del(20, 30) // crosses the split boundary in the now-converged doc
+	a.MergeFrom(b)
+	b.MergeFrom(a)
+	if a.GetString() != b.GetString() {
+		t.Fatalf("replicas diverged after delete across split:\na=%q\nb=%q", a.GetString(), b.GetString())
+	}
+	if a.Len() != pre-30 {
+		t.Fatalf("delete across split removed wrong count: len=%d, want %d", a.Len(), pre-30)
+	}
+	a.Check()
+	b.Check()
 }
 
 // TestRunOpsConcurrentSplitMerge checks convergence when one replica inserts

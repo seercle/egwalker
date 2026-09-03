@@ -10,19 +10,6 @@ import (
 	"testing"
 )
 
-// TestTargetOpLogRLE expects the partial "RLE operations" optimization
-// (CONTEXT.md, Partially Implemented): consecutive edits from the same agent
-// should collapse into a single "run" op inside the opLog, instead of one op
-// per character. op content is currently a single T and localInsert pushes one
-// op per edit (op_log.go), so a 5000-char insert yields 5000 ops.
-func TestTargetOpLogRLE(t *testing.T) {
-	doc := NewRuneDocument(1)
-	doc.Ins(0, strings.Repeat("a", 5000))
-	if got := len(doc.opLog.ops); got != 1 {
-		t.Errorf("RLE op runs not implemented: one contiguous 5000-char insert produced %d ops; want a single run op", got)
-	}
-}
-
 // targetRetentionSet computes the ops a critical-version compaction would keep:
 // every live frontier op plus every op with >= 2 children (a branch point).
 func targetRetentionSet(log *opLog[rune, runeText]) map[lv]bool {

@@ -64,16 +64,13 @@ This implementation is based on the research paper **"Collaborative Text Editing
 - **Positional B+Tree (Section 3.4):** The core of the document state is a B+Tree that uses custom **Summaries** to track character counts across the tree. This allows for $O(\log N)$ translation between document indexes and internal records.
 - **Secondary Range-based Index (Section 3.4):** Replaced the standard $O(N)$ hash map with a sorted index (`sortedItems`) that maps Logical Versions to `crdtItem` segments in $O(\log S)$ time and $O(S)$ space.
 - **Columnar Oplog Serialization (Section 3.8):** The `opLog` is marshaled using a columnar format that applies **Run-Length Encoding (RLE)** to agent IDs and operation types, and **Delta-encoding** to document positions.
+- **Run-Length-Encoded Ops:** consecutive same-agent edits collapse into single run ops in the `opLog` (insert content stored as a run; delete runs carry a length), reducing log size and merge work.
 - **Advanced "Fancy" Checkout (Section 3.2):** The `checkoutFancy` function implements the core walker logic. It identifies the common ancestor between the current state and the target version, avoiding a full replay of the history.
 - **Placeholders (Section 3.6):** History prior to the common ancestor is represented as a single `crdtItem` with a `length` property, rather than individual nodes, drastically reducing merge overhead for large histories.
 - **Merged Items (Section 3.3):** Consecutive operations from the same agent are automatically merged into a single `crdtItem` in the `BxTree`, significantly reducing the number of nodes for typical editing patterns.
 - **Recursive Merging:** An extension beyond the paper, `MapDocument` supports recursive merging for values that implement the `Mergeable` interface, enabling nested CRDT structures.
 - **Topological Sort Heuristic (Section 3.2):** The `findOpsToVisit` function uses a DFS traversal that prioritizes branches with **fewer events** to minimize the number of `retreat` and `advance` calls during a merge.
 - **Batch Merging:** `MergeFrom` performs a batch merge into the `opLog` before executing a single `checkoutFancy`, significantly reducing state switching distance.
-
-### Partially Implemented Optimizations
-
-- **RLE Operations:** While `crdtItem` now supports merging, the `op` structure in the `opLog` still stores single items. Optimizing this to store "runs" of consecutive edits in a single operation would reduce the log size and improve merge performance.
 
 ### Missing Optimizations (Future Work)
 
