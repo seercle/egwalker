@@ -10,7 +10,7 @@ import (
 // Diff Algorithm (Internal)
 // ==========================================
 
-func diff[T any](log *opLog[T], a []lv, b []lv) diffResult {
+func diff[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) diffResult {
 	flags := make(map[lv]diffFlag)
 	numShared := 0
 
@@ -150,7 +150,7 @@ func ensureAtomized(doc *crdtDoc, targetLV lv) *crdtItem {
 	return findItemAtLV(doc, targetLV)
 }
 
-func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
+func retreat[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
 	o := log.ops[opLV]
 	var targetLV lv
 	if o.opType == opTypeIns {
@@ -178,7 +178,7 @@ func retreat[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
 	}
 }
 
-func advance[T any](doc *crdtDoc, log *opLog[T], opLV lv) {
+func advance[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv) {
 	o := log.ops[opLV]
 	var targetLV lv
 	if o.opType == opTypeIns {
@@ -229,7 +229,7 @@ func findItemIdxAtLVInternal(doc *crdtDoc, targetLV lv) int {
 	return nodeIdx + posInNode
 }
 
-func canMerge[T any](log *opLog[T], left *crdtItem, right *crdtItem) bool {
+func canMerge[E any, C content[E]](log *opLog[E, C], left *crdtItem, right *crdtItem) bool {
 	if left == nil || right == nil {
 		return false
 	}
@@ -288,7 +288,7 @@ func mergeLeft(doc *crdtDoc, idx int) {
 	left.node.UpdateSummaryUpward(doc.items)
 }
 
-func tryMergeAt[T any](doc *crdtDoc, log *opLog[T], idx int) {
+func tryMergeAt[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], idx int) {
 	if idx > 0 {
 		leftPtr, _ := doc.items.GetAt(idx - 1)
 		rightPtr, _ := doc.items.GetAt(idx)
@@ -317,7 +317,7 @@ func getLogicalPos(doc *crdtDoc, targetLV lv) (int, int) {
 	return findItemIdxAtLVInternal(doc, item.lv), int(targetLV - item.lv)
 }
 
-func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[T, struct{}]) int {
+func integrate[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], newItem *crdtItem, idx int, endPos int, snapshot *bxtree.BxTree[E, struct{}]) int {
 	scanIdx := idx
 	scanEndPos := endPos
 
@@ -385,7 +385,7 @@ func integrate[T any](doc *crdtDoc, log *opLog[T], newItem *crdtItem, idx int, e
 	}
 
 	if snapshot != nil {
-		err := snapshot.InsertAt(endPos, o.content)
+		err := snapshot.InsertAt(endPos, o.content.Elems()[0])
 		if err != nil {
 			panic("Snapshot insert failed")
 		}
@@ -458,7 +458,7 @@ func split(doc *crdtDoc, idx int, offset int) {
 	addItemLV(doc, second)
 }
 
-func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct{}], opLV lv) {
+func apply[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], snapshot *bxtree.BxTree[E, struct{}], opLV lv) {
 	o := log.ops[opLV]
 
 	if o.opType == opTypeDel {
@@ -553,7 +553,7 @@ func apply[T any](doc *crdtDoc, log *opLog[T], snapshot *bxtree.BxTree[T, struct
 	}
 }
 
-func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.BxTree[T, struct{}]) {
+func do1Operation[E any, C content[E]](doc *crdtDoc, log *opLog[E, C], opLV lv, snapshot *bxtree.BxTree[E, struct{}]) {
 	o := log.ops[opLV]
 	diffRes := diff(log, doc.currentVersion, o.parents)
 
@@ -568,7 +568,7 @@ func do1Operation[T any](doc *crdtDoc, log *opLog[T], opLV lv, snapshot *bxtree.
 	doc.currentVersion = []lv{opLV}
 }
 
-func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
+func checkout[E any, C content[E]](log *opLog[E, C]) *bxtree.BxTree[E, struct{}] {
 	doc := &crdtDoc{
 		items: newBxTree(
 			bxtree.WithSummarizer(crdtSummaryConfig),
@@ -581,7 +581,7 @@ func checkout[T any](log *opLog[T]) *bxtree.BxTree[T, struct{}] {
 		sortedItems:    []*crdtItem{},
 	}
 
-	snapshot := newBxTree[T, struct{}]()
+	snapshot := newBxTree[E, struct{}]()
 
 	for i := 0; i < len(log.ops); i++ {
 		do1Operation(doc, log, lv(i), snapshot)
@@ -609,7 +609,7 @@ func compareArrays(a, b []lv) int {
 	return 0
 }
 
-func findOpsToVisit[T any](log *opLog[T], a []lv, b []lv) opsToVisit {
+func findOpsToVisit[E any, C content[E]](log *opLog[E, C], a []lv, b []lv) opsToVisit {
 	// Phase 1: Find Common Ancestor (CCA) using the original Priority Queue approach
 	pq := pheap.NewAny(pheap.WithLess(func(a, b mergePoint) bool {
 		return compareArrays(a.v, b.v) < 0
@@ -840,7 +840,7 @@ func newBranch[T any]() *branch[T] {
 	}
 }
 
-func checkoutFancy[T any](log *opLog[T], b *branch[T], mergeFrontier []lv) {
+func checkoutFancy[E any, C content[E]](log *opLog[E, C], b *branch[E], mergeFrontier []lv) {
 	if mergeFrontier == nil {
 		mergeFrontier = log.frontier
 	}

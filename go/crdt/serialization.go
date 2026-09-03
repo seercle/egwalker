@@ -5,28 +5,28 @@ import (
 )
 
 // ColumnarData represents the opLog in a columnar format for efficient compression.
-type ColumnarData[T any] struct {
+type ColumnarData[E any, C content[E]] struct {
 	Types     []opType
 	TypeRuns  []int
 	Agents    []int
 	AgentRuns []int
 	Seqs      []int // Start sequence for each agent run
 	Positions []int // Delta-encoded positions
-	Content   []T
+	Content   []C
 	Parents   [][]lv
 	Frontier  []lv
 }
 
 // Marshal converts the opLog into a ColumnarData structure.
-func (log *opLog[T]) Marshal() *ColumnarData[T] {
+func (log *opLog[E, C]) Marshal() *ColumnarData[E, C] {
 	if len(log.ops) == 0 {
-		return &ColumnarData[T]{
+		return &ColumnarData[E, C]{
 			Frontier: log.frontier,
 		}
 	}
 
-	res := &ColumnarData[T]{
-		Content:  make([]T, 0, len(log.ops)),
+	res := &ColumnarData[E, C]{
+		Content:  make([]C, 0, len(log.ops)),
 		Parents:  make([][]lv, 0, len(log.ops)),
 		Frontier: log.frontier,
 	}
@@ -90,8 +90,8 @@ func (log *opLog[T]) Marshal() *ColumnarData[T] {
 }
 
 // Unmarshal rebuilds an opLog from ColumnarData.
-func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
-	log := newOpLog[T]()
+func Unmarshal[E any, C content[E]](data *ColumnarData[E, C]) *opLog[E, C] {
+	log := newOpLog[E, C]()
 	log.frontier = data.Frontier
 
 	if len(data.Types) == 0 {
@@ -103,7 +103,7 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 		totalOps += r
 	}
 
-	log.ops = make([]op[T], totalOps)
+	log.ops = make([]op[E, C], totalOps)
 
 	// --- 1. Expand Types ---
 	opIdx := 0
@@ -142,6 +142,14 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 	for i := 0; i < totalOps; i++ {
 		log.ops[i].content = data.Content[i]
 		log.ops[i].parents = data.Parents[i]
+		if log.ops[i].opType != opTypeDel {
+			log.ops[i].length = log.ops[i].content.Len()
+		}
+
+		// Rebuild opLV/totalLV accounting (op i's first LV is the running
+		// character count before it).
+		log.opLV = append(log.opLV, log.totalLV)
+		log.totalLV += lv(log.ops[i].length)
 
 		// Rebuild idToLV mapping
 		log.idToLV[log.ops[i].id] = lv(i)
@@ -158,7 +166,7 @@ func Unmarshal[T any](data *ColumnarData[T]) *opLog[T] {
 }
 
 // Stats prints comparison between row-based and columnar representation.
-func (log *opLog[T]) PrintCompressionStats() {
+func (log *opLog[E, C]) PrintCompressionStats() {
 	fmt.Printf("OpLog Stats:\n")
 	fmt.Printf("  Total Operations: %d\n", len(log.ops))
 

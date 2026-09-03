@@ -8,23 +8,23 @@ import (
 )
 
 func TestSerializationLossless(t *testing.T) {
-	log := newOpLog[rune]()
+	log := newOpLog[rune, runeText]()
 
 	// Create a complex history
 	// User 1 types "Hello"
-	localInsert(log, 1, 0, []rune("Hello"))
+	localInsert(log, 1, 0, runeText("Hello"))
 
 	// User 2 deletes "lo" and types "p"
 	localDelete(log, 2, 3, 2)
-	localInsert(log, 2, 3, []rune("p"))
+	localInsert(log, 2, 3, runeText("p"))
 
 	// User 1 types "!" at the end (concurrent to User 2's edits)
 	// We manually simulate a branch by resetting the frontier
 	log.frontier = []lv{4} // Pointing to the 'o' in Hello
-	localInsert(log, 1, 5, []rune("!"))
+	localInsert(log, 1, 5, runeText("!"))
 
 	// Save original state for comparison
-	originalOps := make([]op[rune], len(log.ops))
+	originalOps := make([]op[rune, runeText], len(log.ops))
 	copy(originalOps, log.ops)
 	originalFrontier := make([]lv, len(log.frontier))
 	copy(originalFrontier, log.frontier)
@@ -60,9 +60,9 @@ func TestSerializationLossless(t *testing.T) {
 }
 
 // estimateSize provides a rough byte count for comparison.
-func estimateSize[T any](log *opLog[T], data *ColumnarData[T]) (int, int) {
+func estimateSize[E any, C content[E]](log *opLog[E, C], data *ColumnarData[E, C]) (int, int) {
 	// Row-based: ops slice overhead + each op struct
-	opSize := int(unsafe.Sizeof(op[T]{}))
+	opSize := int(unsafe.Sizeof(op[E, C]{}))
 	rowSize := len(log.ops) * opSize
 	// Add overhead for parents slices (rough estimate)
 	for _, o := range log.ops {
@@ -77,7 +77,7 @@ func estimateSize[T any](log *opLog[T], data *ColumnarData[T]) (int, int) {
 	colSize += len(data.AgentRuns) * 8 // int
 	colSize += len(data.Seqs) * 8      // int
 	colSize += len(data.Positions) * 8 // int
-	colSize += len(data.Content) * int(unsafe.Sizeof(*new(T)))
+	colSize += len(data.Content) * int(unsafe.Sizeof(*new(C)))
 	for _, p := range data.Parents {
 		colSize += len(p) * 8
 	}
@@ -87,11 +87,11 @@ func estimateSize[T any](log *opLog[T], data *ColumnarData[T]) (int, int) {
 }
 
 func TestCompressionRatio(t *testing.T) {
-	log := newOpLog[rune]()
+	log := newOpLog[rune, runeText]()
 
 	// Scenario: One user typing a 10,000 character document
 	const N = 10000
-	localInsert(log, 1, 0, make([]rune, N))
+	localInsert(log, 1, 0, runeText(string(make([]rune, N))))
 
 	data := log.Marshal()
 
@@ -117,12 +117,12 @@ func TestCompressionRatio(t *testing.T) {
 }
 
 func TestMixedCompression(t *testing.T) {
-	log := newOpLog[rune]()
+	log := newOpLog[rune, runeText]()
 
 	// Scenario: Two users alternating every 10 characters -> 100 agent runs.
 	for i := range 100 {
 		agent := (i % 2) + 1
-		localInsert(log, agent, i*10, make([]rune, 10))
+		localInsert(log, agent, i*10, runeText(string(make([]rune, 10))))
 	}
 
 	data := log.Marshal()
@@ -155,9 +155,9 @@ func TestMixedCompression(t *testing.T) {
 
 func TestSerialization_RLEStructure(t *testing.T) {
 	// One agent inserting 50 runes => single type run and single agent run.
-	log := newOpLog[rune]()
+	log := newOpLog[rune, runeText]()
 	const n = 50
-	localInsert(log, 1, 0, make([]rune, n))
+	localInsert(log, 1, 0, runeText(string(make([]rune, n))))
 	data := log.Marshal()
 	if len(data.Types) != 1 || data.TypeRuns[0] != n {
 		t.Errorf("type RLE: %v (len %d), want one run of %d", data.TypeRuns, len(data.TypeRuns), n)

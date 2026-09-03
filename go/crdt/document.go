@@ -10,33 +10,33 @@ import (
 // ==========================================
 
 // NewDocument creates a new generic CRDT document.
-func NewDocument[T any](agent int) Document[T] {
-	return Document[T]{
-		opLog:  newOpLog[T](),
+func NewDocument[E any, C content[E]](agent int) Document[E, C] {
+	return Document[E, C]{
+		opLog:  newOpLog[E, C](),
 		agent:  agent,
-		branch: newBranch[T](),
+		branch: newBranch[E](),
 	}
 }
 
 // Len returns the number of items in the document.
-func (doc *Document[T]) Len() int {
+func (doc *Document[E, C]) Len() int {
 	return doc.branch.snapshot.Size()
 }
 
 // Check verifies that the document's local branch matches a full checkout.
-func (doc *Document[T]) Check() {
+func (doc *Document[E, C]) Check() {
 	actualTree := checkout(doc.opLog)
 	if actualTree.Size() != doc.branch.snapshot.Size() {
 		panic("Document size out of sync")
 	}
 
-	actualItems := make([]T, 0, actualTree.Size())
-	actualTree.ForEach(func(item T) {
+	actualItems := make([]E, 0, actualTree.Size())
+	actualTree.ForEach(func(item E) {
 		actualItems = append(actualItems, item)
 	})
 
-	docItems := make([]T, 0, doc.branch.snapshot.Size())
-	doc.branch.snapshot.ForEach(func(item T) {
+	docItems := make([]E, 0, doc.branch.snapshot.Size())
+	doc.branch.snapshot.ForEach(func(item E) {
 		docItems = append(docItems, item)
 	})
 
@@ -46,8 +46,12 @@ func (doc *Document[T]) Check() {
 }
 
 // Ins inserts the given items at the specified position.
-func (doc *Document[T]) Ins(pos int, items []T) {
-	localInsert(doc.opLog, doc.agent, pos, items)
+func (doc *Document[E, C]) Ins(pos int, items []E) {
+	current_pos := pos
+	for _, item := range items {
+		localInsertOne(doc.opLog, doc.agent, current_pos, item)
+		current_pos++
+	}
 
 	err := doc.branch.snapshot.InsertRange(pos, items)
 	if err != nil {
@@ -59,7 +63,7 @@ func (doc *Document[T]) Ins(pos int, items []T) {
 }
 
 // Del deletes delLen items starting from the specified position.
-func (doc *Document[T]) Del(pos int, delLen int) {
+func (doc *Document[E, C]) Del(pos int, delLen int) {
 	localDelete(doc.opLog, doc.agent, pos, delLen)
 
 	err := doc.branch.snapshot.DeleteRange(pos, delLen)
@@ -72,17 +76,23 @@ func (doc *Document[T]) Del(pos int, delLen int) {
 }
 
 // MergeFrom merges changes from another document.
-func (doc *Document[T]) MergeFrom(other *Document[T]) {
+func (doc *Document[E, C]) MergeFrom(other *Document[E, C]) {
 	if doc == other {
 		return
 	}
-	// 1. Recursive merge for items with the same identity (LV)
+	// 1. Recursive merge for items with the same identity (LV). Content is a
+	// run; recursion applies to the elements it holds (empty runs, e.g. a
+	// delete op's zero content, are never mergeable).
 	for _, o := range other.opLog.ops {
 		if lastSeq, ok := doc.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
 			ourLV := idToLV(doc.opLog, o.id)
-			if m, ok := any(doc.opLog.ops[ourLV].content).(Mergeable); ok {
-				m.MergeFromAny(o.content)
+			ourElems := doc.opLog.ops[ourLV].content.Elems()
+			otherElems := o.content.Elems()
+			if len(ourElems) > 0 && len(otherElems) > 0 {
+				if m, ok := any(ourElems[0]).(Mergeable); ok {
+					m.MergeFromAny(otherElems[0])
+				}
 			}
 		}
 	}
@@ -95,9 +105,9 @@ func (doc *Document[T]) MergeFrom(other *Document[T]) {
 }
 
 // Reset clears the document state.
-func (doc *Document[T]) Reset() {
-	doc.opLog = newOpLog[T]()
-	doc.branch = newBranch[T]()
+func (doc *Document[E, C]) Reset() {
+	doc.opLog = newOpLog[E, C]()
+	doc.branch = newBranch[E]()
 }
 
 // ==========================================
@@ -107,7 +117,7 @@ func (doc *Document[T]) Reset() {
 // NewRuneDocument creates a new CRDT document for runes with the given agent ID.
 func NewRuneDocument(agent int) *RuneDocument {
 	return &RuneDocument{
-		Document: NewDocument[rune](agent),
+		Document: NewDocument[rune, runeText](agent),
 	}
 }
 
@@ -141,7 +151,7 @@ func (doc *RuneDocument) GetString() string {
 // NewArrayDocument creates a new generic CRDT array document.
 func NewArrayDocument[T any](agent int) *ArrayDocument[T] {
 	return &ArrayDocument[T]{
-		Document: NewDocument[T](agent),
+		Document: NewDocument[T, itemRun[T]](agent),
 	}
 }
 
@@ -170,16 +180,15 @@ func (doc *ArrayDocument[T]) GetItems() []T {
 func NewMapDocument[K comparable, V any](agent int) *MapDocument[K, V] {
 	return &MapDocument[K, V]{
 		agent:    agent,
-		opLog:    newOpLog[MapOp[K, V]](),
+		opLog:    newOpLog[MapOp[K, V], mapRun[K, V]](),
 		keyIndex: make(map[K][]lv),
 	}
 }
 
 // Set sets the value for the given key.
 func (m *MapDocument[K, V]) Set(key K, value V) {
-	curLV := lv(len(m.opLog.ops))
-	m.opLog.pushLocalOp(m.agent, op[MapOp[K, V]]{
-		content: MapOp[K, V]{Key: key, Value: value},
+	curLV := m.opLog.pushLocalOp(m.agent, op[MapOp[K, V], mapRun[K, V]]{
+		content: mapRun[K, V]{{Key: key, Value: value}},
 	})
 	m.keyIndex[key] = append(m.keyIndex[key], curLV)
 }
@@ -212,7 +221,7 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	for _, l := range concurrentLVs {
 		o := m.opLog.ops[l]
 		if first || o.id.agent > bestID.agent || (o.id.agent == bestID.agent && o.id.seq > bestID.seq) {
-			bestV = o.content.Value
+			bestV = o.content.Elems()[0].Value
 			bestID = o.id
 			bestLV = l
 			first = false
@@ -223,7 +232,7 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	if mergeable, ok := any(bestV).(Mergeable); ok {
 		for _, l := range concurrentLVs {
 			if l != bestLV {
-				mergeable.MergeFromAny(m.opLog.ops[l].content.Value)
+				mergeable.MergeFromAny(m.opLog.ops[l].content.Elems()[0].Value)
 			}
 		}
 	}
@@ -236,13 +245,18 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 	if m == other {
 		return
 	}
-	// Recursive merge for items with the same identity (LV)
+	// Recursive merge for items with the same identity (LV). Map run content
+	// always holds exactly one MapOp; recursion applies to its .Value element.
 	for _, o := range other.opLog.ops {
 		if lastSeq, ok := m.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
 			ourLV := idToLV(m.opLog, o.id)
-			if mrg, ok := any(m.opLog.ops[ourLV].content.Value).(Mergeable); ok {
-				mrg.MergeFromAny(o.content.Value)
+			ourElems := m.opLog.ops[ourLV].content.Elems()
+			otherElems := o.content.Elems()
+			if len(ourElems) > 0 && len(otherElems) > 0 {
+				if mrg, ok := any(ourElems[0].Value).(Mergeable); ok {
+					mrg.MergeFromAny(otherElems[0].Value)
+				}
 			}
 		}
 	}
@@ -250,7 +264,7 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 	mergeInto(m.opLog, other.opLog)
 	for i := oldLen; i < len(m.opLog.ops); i++ {
 		o := m.opLog.ops[i]
-		m.keyIndex[o.content.Key] = append(m.keyIndex[o.content.Key], lv(i))
+		m.keyIndex[o.content.Elems()[0].Key] = append(m.keyIndex[o.content.Elems()[0].Key], m.opLog.opLV[i])
 	}
 }
 
@@ -258,7 +272,7 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 func (m *MapDocument[K, V]) Keys() []K {
 	keysMap := make(map[K]bool)
 	for _, o := range m.opLog.ops {
-		keysMap[o.content.Key] = true
+		keysMap[o.content.Elems()[0].Key] = true
 	}
 	keys := make([]K, 0, len(keysMap))
 	for k := range keysMap {

@@ -25,7 +25,7 @@ func TestTargetOpLogRLE(t *testing.T) {
 
 // targetRetentionSet computes the ops a critical-version compaction would keep:
 // every live frontier op plus every op with >= 2 children (a branch point).
-func targetRetentionSet(log *opLog[rune]) map[lv]bool {
+func targetRetentionSet(log *opLog[rune, runeText]) map[lv]bool {
 	keep := make(map[lv]bool)
 	for _, f := range log.frontier {
 		keep[f] = true
@@ -69,7 +69,7 @@ func TestTargetCriticalVersionCompaction(t *testing.T) {
 // estimateCompressedSize approximates what a varint + LZ4/Zstd binary codec
 // (CONTEXT.md, Missing / Section 3.8) would produce for this log: varints for
 // type/agent/seq and delta positions, and flate-compressed content bytes.
-func estimateCompressedSize(log *opLog[rune]) int {
+func estimateCompressedSize(log *opLog[rune, runeText]) int {
 	var total int
 	var lastType opType
 	var lastAgent int
@@ -91,7 +91,7 @@ func estimateCompressedSize(log *opLog[rune]) int {
 			total += 1 // varint delta (1 when consecutive)
 		}
 		if o.opType == opTypeIns {
-			fw.Write([]byte(fmt.Sprintf("%c", o.content)))
+			fw.Write([]byte(fmt.Sprintf("%c", o.content.Elems()[0])))
 		}
 	}
 	fw.Close()
@@ -105,13 +105,13 @@ func estimateCompressedSize(log *opLog[rune]) int {
 // columnar representation. No such codec exists yet, so the current in-memory
 // columnar size dwarfs the compressed target.
 func TestTargetBinaryCompression(t *testing.T) {
-	log := newOpLog[rune]()
+	log := newOpLog[rune, runeText]()
 	const total = 200000
 	text := strings.Repeat("the quick brown fox jumps over the lazy dog ", (total+44)/45)
 	if len(text) < total {
 		text += strings.Repeat("a", total-len(text))
 	}
-	localInsert(log, 1, 0, []rune(text))
+	localInsert(log, 1, 0, runeText(text))
 
 	data := log.Marshal()
 	_, rawSize := estimateSize(log, data)

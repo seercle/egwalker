@@ -8,16 +8,18 @@ import (
 // OpLog Functions (Internal)
 // ==========================================
 
-func newOpLog[T any]() *opLog[T] {
-	return &opLog[T]{
-		ops:      []op[T]{},
+func newOpLog[E any, C content[E]]() *opLog[E, C] {
+	return &opLog[E, C]{
+		ops:      []op[E, C]{},
+		opLV:     []lv{},
+		totalLV:  0,
 		frontier: []lv{},
 		version:  make(remoteVersion),
 		idToLV:   make(map[id]lv),
 	}
 }
 
-func (log *opLog[T]) pushLocalOp(agent int, o op[T]) {
+func (log *opLog[E, C]) pushLocalOp(agent int, o op[E, C]) lv {
 	last_seq, ok := log.version[agent]
 	if !ok {
 		last_seq = -1
@@ -27,35 +29,49 @@ func (log *opLog[T]) pushLocalOp(agent int, o op[T]) {
 	cur_lv := lv(len(log.ops))
 	o.id = id{agent: agent, seq: seq}
 
+	// An op's length is derived from its run content. Delete ops carry no
+	// content in this model, so their length stays as set by the caller
+	// (zero today; a later task sets delete-run lengths explicitly).
+	if o.opType != opTypeDel {
+		o.length = o.content.Len()
+	}
+
 	parents_copy := make([]lv, len(log.frontier))
 	copy(parents_copy, log.frontier)
 	o.parents = parents_copy
 
+	firstLV := log.totalLV
 	log.ops = append(log.ops, o)
+	log.opLV = append(log.opLV, firstLV)
+	log.totalLV += lv(o.length)
 	log.idToLV[o.id] = cur_lv
 	log.frontier = []lv{cur_lv}
 	log.version[agent] = seq
+	return firstLV
 }
 
-func localInsert[T any](log *opLog[T], agent int, pos int, content []T) {
+// localInsert fans a run of content out into per-element single ops: each
+// element becomes one length-1 op, preserving the per-character model. When
+// the RLE optimization lands, whole runs collapse here instead.
+func localInsert[E any, C content[E]](log *opLog[E, C], agent int, pos int, content C) {
 	current_pos := pos
-	for _, c := range content {
+	for _, c := range content.Elems() {
 		localInsertOne(log, agent, current_pos, c)
 		current_pos++
 	}
 }
 
-func localInsertOne[T any](log *opLog[T], agent int, pos int, content T) {
-	log.pushLocalOp(agent, op[T]{
+func localInsertOne[E any, C content[E]](log *opLog[E, C], agent int, pos int, content E) {
+	log.pushLocalOp(agent, op[E, C]{
 		opType:  opTypeIns,
-		content: content,
+		content: oneRun[E, C](content),
 		pos:     pos,
 	})
 }
 
-func localDelete[T any](log *opLog[T], agent int, pos int, del_len int) {
+func localDelete[E any, C content[E]](log *opLog[E, C], agent int, pos int, del_len int) {
 	for del_len > 0 {
-		log.pushLocalOp(agent, op[T]{
+		log.pushLocalOp(agent, op[E, C]{
 			opType: opTypeDel,
 			pos:    pos,
 		})
@@ -63,14 +79,14 @@ func localDelete[T any](log *opLog[T], agent int, pos int, del_len int) {
 	}
 }
 
-func idToLV[T any](log *opLog[T], target_id id) lv {
+func idToLV[E any, C content[E]](log *opLog[E, C], target_id id) lv {
 	if lv, ok := log.idToLV[target_id]; ok {
 		return lv
 	}
 	panic("Could not find id in oplog")
 }
 
-func (log *opLog[T]) isAncestor(ancestorLV, descendantLV lv) bool {
+func (log *opLog[E, C]) isAncestor(ancestorLV, descendantLV lv) bool {
 	if ancestorLV == descendantLV {
 		return true
 	}
@@ -124,7 +140,7 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 	return sortLVs(f)
 }
 
-func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
+func pushRemoteOp[E any, C content[E]](log *opLog[E, C], o op[E, C], parent_ids []id) {
 	agent := o.id.agent
 	seq := o.id.seq
 
@@ -139,6 +155,10 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
 
 	cur_lv := lv(len(log.ops))
 
+	if o.opType != opTypeDel {
+		o.length = o.content.Len()
+	}
+
 	// Resolve parents
 	parents := make([]lv, len(parent_ids))
 	for i, pid := range parent_ids {
@@ -146,7 +166,10 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
 	}
 	o.parents = sortLVs(parents)
 
+	firstLV := log.totalLV
 	log.ops = append(log.ops, o)
+	log.opLV = append(log.opLV, firstLV)
+	log.totalLV += lv(o.length)
 	log.idToLV[o.id] = cur_lv
 	log.frontier = advanceFrontier(log.frontier, cur_lv, o.parents)
 
@@ -156,7 +179,7 @@ func pushRemoteOp[T any](log *opLog[T], o op[T], parent_ids []id) {
 	log.version[agent] = seq
 }
 
-func mergeInto[T any](dest *opLog[T], src *opLog[T]) {
+func mergeInto[E any, C content[E]](dest *opLog[E, C], src *opLog[E, C]) {
 	for _, o := range src.ops {
 		parent_ids := make([]id, len(o.parents))
 		for i, p_lv := range o.parents {
