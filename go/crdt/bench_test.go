@@ -126,10 +126,7 @@ func BenchmarkColumnarRoundTrip(b *testing.B) {
 	}
 	log := doc.doc.opLog
 
-	contentBytes := 0
-	for _, o := range log.ops {
-		contentBytes += len([]byte(o.content))
-	}
+	contentBytes := contentBytesOf(b, log)
 	data := log.Marshal()
 	structBytes := contentBytes + 8*(len(data.Types)+len(data.TypeRuns)+len(data.Agents)+
 		len(data.AgentRuns)+len(data.Seqs)+len(data.Positions)+len(data.Lengths)+

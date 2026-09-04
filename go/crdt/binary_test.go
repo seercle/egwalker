@@ -2,7 +2,9 @@ package crdt
 
 import (
 	"bytes"
+	"encoding/binary"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +27,8 @@ func buildBinaryTestLogT() *opLog[runeText] {
 	d1.Ins(d1.Len(), "!")
 	d1.MergeFrom(d2)
 	d1.Del(0, 1)
+	d1.Check() // branch must match a full checkout after the edits and merges
+	d2.Check()
 	return d1.doc.opLog
 }
 
@@ -69,25 +73,98 @@ func TestBinaryRoundTripEmpty(t *testing.T) {
 	}
 }
 
+// frameHeader starts a hand-crafted frame: magic + uvarint version.
+func frameHeader(version uint64) []byte {
+	return binary.AppendUvarint(append([]byte{}, binaryMagic...), version)
+}
+
+// emptyColumns appends ten zero-count columns — the exact encoding of an
+// empty log — completing a valid frame after frameHeader.
+func emptyColumns(frame []byte) []byte {
+	zero := binary.AppendUvarint(nil, 0)
+	for range 10 {
+		frame = appendBinaryColumn(frame, zero)
+	}
+	return frame
+}
+
+// TestBinaryRejectsGarbage feeds hostile blobs to UnmarshalBinary. The frame
+// cases are hand-crafted and compressed with the same encoder MarshalBinary
+// uses, so decompression succeeds and each case's intended rejection fires
+// inside the frame parser itself, pinned to its specific error. The raw
+// non-zstd case pins the decompress wrapper; empty input decodes to an empty
+// frame and dies at the magic check.
 func TestBinaryRejectsGarbage(t *testing.T) {
-	good, err := MarshalBinary(newOpLog[runeText](), RuneTextCodec{})
-	if err != nil {
-		t.Fatalf("MarshalBinary empty log: %v", err)
+	compress := func(frame []byte) []byte {
+		return binaryZstdEncoder.EncodeAll(frame, nil)
 	}
-	cases := [][]byte{
-		{},                                      // empty
-		[]byte("NOPE"),                          // bad magic
-		[]byte("EGW1\xff"),                      // truncated after magic
-		[]byte("EGW1\x01"),                      // version only, no columns
-		append([]byte("EGW1"), 0x02),            // version 2 -> unsupported
-		[]byte("EGW1\x01\x01\x00"),              // empty Types column, then truncated
-		[]byte("EGW1\x01\x02\x02\x00"),          // Types count 2 exceeds remaining body
-		append(append([]byte{}, good...), 0x00), // trailing bytes after Frontier
+
+	cases := []struct {
+		name string
+		in   []byte
+		want string // error substring naming the intended failure path
+	}{
+		{
+			name: "empty input",
+			in:   nil,
+			want: "bad magic", // zstd decodes empty input to an empty frame; the magic check rejects it
+		},
+		{
+			name: "raw non-zstd bytes",
+			in:   []byte("NOPE"),
+			want: "binary: decompress:", // not a zstd frame; parser never reached
+		},
+		{
+			name: "bad magic",
+			in:   compress(append([]byte("NOPE"), emptyColumns(frameHeader(binaryVersion))...)),
+			want: "bad magic",
+		},
+		{
+			name: "version varint truncated",
+			in:   compress(append(append([]byte{}, binaryMagic...), 0x80)), // continuation bit, then end of frame
+			want: "truncated varint in version",
+		},
+		{
+			name: "version varint overflow",
+			in:   compress(append(append(append([]byte{}, binaryMagic...), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff), 0x02)),
+			want: "varint overflow in version",
+		},
+		{
+			name: "unsupported version",
+			in:   compress(emptyColumns(frameHeader(binaryVersion + 1))),
+			want: "unsupported version 2",
+		},
+		{
+			name: "column bodyLen exceeds frame",
+			in:   compress(append(frameHeader(binaryVersion), 0x0f)), // Types bodyLen 15, zero bytes follow
+			want: "Types column truncated",
+		},
+		{
+			name: "column count exceeds body",
+			in:   compress(appendBinaryColumn(frameHeader(binaryVersion), binary.AppendUvarint(nil, 200))), // count 200, no entries in body
+			want: "Types count 200 exceeds",
+		},
+		{
+			name: "frame ends before Types bodyLen",
+			in:   compress(frameHeader(binaryVersion)),
+			want: "truncated varint in Types",
+		},
+		{
+			name: "trailing bytes after Frontier",
+			in:   compress(append(append([]byte{}, emptyColumns(frameHeader(binaryVersion))...), 0x00)),
+			want: "trailing bytes after Frontier",
+		},
 	}
-	for i, in := range cases {
-		if _, err := UnmarshalBinary[runeText](in, RuneTextCodec{}); err == nil {
-			t.Errorf("case %d (%q): expected error, got none", i, in)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := UnmarshalBinary[runeText](tc.in, RuneTextCodec{})
+			if err == nil {
+				t.Fatalf("expected error containing %q, got none", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -113,8 +190,8 @@ func TestBinaryCompressionShrinks(t *testing.T) {
 	}
 }
 
-func contentBytesOf(t *testing.T, log *opLog[runeText]) int {
-	t.Helper()
+func contentBytesOf(tb testing.TB, log *opLog[runeText]) int {
+	tb.Helper()
 	n := 0
 	for _, o := range log.ops {
 		n += len([]byte(o.content))
