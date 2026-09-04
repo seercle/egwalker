@@ -359,3 +359,24 @@ every run; `BenchmarkTrace` → replay 641 ms, final memory 23.36 MB, 556.4M
 ns/op; `TestTrace` harness 1.679 s / 1.708 s (two runs, includes the one-time
 JSON decode). Full suite green after all changes: `go test -C go ./...
 -count=1` → bxtree/crdt/pheap ok.
+
+**Power-state correction (supersedes the wall-time bottom line above).** The
+Tasks 2–3 recordings above were taken while the machine ran on battery
+(CPU-throttled). Re-measured on AC power, no code changes in between:
+
+- refined (HEAD `10f27b3`), plugged in: `BenchmarkTrace` count=3 → replay
+  381/355/338 ms, 290.7–302.0M ns/op, 23.36 MB — a clean same-code A/C
+  against the recorded 641 ms / 556.4M ns/op (both metrics ~1.85× faster),
+  so those recordings were environment artifacts, not code behavior.
+- pre-refinement (`e835ded`, coalescing only), plugged in, temp worktree:
+  `BenchmarkTrace` count=2 → replay 473–475 ms, 437.6–437.8M ns/op,
+  23.31 MB.
+
+Same-machine, same-power A/B: the refined code is ~33% faster than the
+coalescing-only state (and storm allocs/op 13119 vs the coalescing state's
+~78k, leaves bounded at 118 either way). The "~410 ms pre-coalescing" figure
+remains a cross-session `TestTrace`-with-decode number and stays
+non-comparable; but with the throttling removed, nothing in the wall-time
+record supports reverting — the honest bottom line's tripwire is retracted:
+the coalescing + refinement trade is a clear win on every measured axis
+(wall time, allocs, leaf bound).

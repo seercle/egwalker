@@ -4,9 +4,10 @@
 
 - [x] **Rope coalescing trade-off — resolved: kept + refined** — leaves stay
   bounded (storm leaves-after-storm 6655→117/118) at allocs/op 78091→13119
-  (−83%) and same-session trace replay 801→569ms (−29%); absolute wall time
-  remains above the ~410ms pre-coalescing figure. See Addendum 3 of the Shape
-  B report.
+  (−83%); plugged-in re-measurement (see Addendum 3's power-state correction)
+  shows replay 338–381 ms vs 473–475 ms for the coalescing-only state on the
+  same machine — ~33% faster, no regression. The earlier "wall time remains
+  above ~410 ms" reading was a battery-throttling artifact and is retracted.
 - [ ] **bxtree: closure-free summary descent** — `FindPath` is ~33% of the
   trace profile; the per-item predicate closure (up to 128 calls/leaf) and the
   generic indirection could be replaced by a summary-targeted descent with
