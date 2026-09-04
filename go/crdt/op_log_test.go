@@ -490,3 +490,61 @@ func TestShapeBInteriorDeleteNeverFragments(t *testing.T) {
 		})
 	}
 }
+
+// TestShapeBWholeLeafDeleteCoalesces pins the whole-leaf-removal flow: a
+// delete that empties a leaf drops it and coalesces the removal seam
+// (mergeWithLeft joins the neighbours when they fit the cap).
+func TestShapeBWholeLeafDeleteCoalesces(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		build     func(*RuneDocument)
+		delPos    int
+		wantBuild int
+		wantLen   int
+		wantText  string
+	}{
+		{
+			name: "middle leaf removed joins its neighbours",
+			build: func(doc *RuneDocument) {
+				doc.Ins(0, strings.Repeat("a", 254))   // leaf 1
+				doc.Ins(254, strings.Repeat("b", 3))   // 254+3 > cap: leaf 2
+				doc.Ins(257, strings.Repeat("c", 300)) // 3+300 > cap: leaf 3
+				doc.Del(259, 298)                      // trim leaf 3 to its first 2 chars
+			},
+			delPos:    254,
+			wantBuild: 3,
+			wantLen:   256,
+			wantText:  strings.Repeat("a", 254) + "cc",
+		},
+		{
+			name: "last leaf removed leaves the prefix alone",
+			build: func(doc *RuneDocument) {
+				doc.Ins(0, strings.Repeat("a", 254)) // leaf 1
+				doc.Ins(254, strings.Repeat("b", 3)) // 254+3 > cap: leaf 2
+			},
+			delPos:    254,
+			wantBuild: 2,
+			wantLen:   254,
+			wantText:  strings.Repeat("a", 254),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := NewRuneDocument(1)
+			tc.build(doc)
+			if before := doc.doc.branch.snapshot.leafCount(); before != tc.wantBuild {
+				t.Fatalf("build left %d leaves; want %d", before, tc.wantBuild)
+			}
+			doc.Del(tc.delPos, 3) // delete the entire 3-char leaf
+			if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 1 {
+				t.Fatalf("%s left %d leaves; want 1 (removal seam coalesced)", tc.name, leaves)
+			}
+			if doc.Len() != tc.wantLen {
+				t.Fatalf("len=%d, want %d", doc.Len(), tc.wantLen)
+			}
+			if got := doc.GetString(); got != tc.wantText {
+				t.Fatalf("content diverged")
+			}
+			doc.Check()
+		})
+	}
+}

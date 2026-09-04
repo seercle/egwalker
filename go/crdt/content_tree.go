@@ -188,8 +188,9 @@ func (ct *contentTree[C]) Insert(pos int, run C) {
 //     range starts on a leaf boundary; if the last leaf is only partially in
 //     range, split it so the range ends on a leaf boundary (dropping only the
 //     in-range prefix of that leaf); then DeleteRange the whole interior leaves;
-//   - structural seams that a case creates are coalesced afterwards
-//     (mergeWithLeft): a delete that empties a leaf or spans leaves.
+//   - structural seams a delete creates or exposes — an emptied leaf, a
+//     leaf-boundary start, or a spanned range — are coalesced afterwards
+//     (mergeWithLeft).
 func (ct *contentTree[C]) Delete(pos, length int) {
 	if length <= 0 {
 		return
@@ -216,20 +217,18 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 	}
 
 	if iL == iR {
-		// Single-leaf deletion: build the surviving content directly instead
-		// of splitting into two leaves and re-joining. Deleting from one leaf
-		// always leaves < ropeLeafCap characters (leaves hold at most the
-		// cap, length >= 1), so one part suffices; the split fallback only
-		// guards against the invariant being violated.
+		// Single-leaf deletion: build the survivor directly — one contiguous
+		// run, so one part suffices (always < ropeLeafCap for cap-respecting
+		// leaves; over-cap snapshot leaves were equally over-cap either way).
 		before, rest := L.c.SplitAt(oL)  // before: oL chars; rest: the remainder
 		_, after := rest.SplitAt(length) // after: chars after the deleted range
 		afterN := L.n - oL - length
 		switch {
+		case oL == 0: // delete starts at the leaf's start: keep the suffix (may be empty)
+			ct.replaceLeaf(iL, ropeLeaf[C]{c: after, n: afterN})
+			ct.mergeWithLeft(iL) // seam with the previous leaf; removal seam if the leaf emptied
 		case afterN == 0: // delete reaches the leaf's end: keep the prefix, no copy
 			ct.replaceLeaf(iL, ropeLeaf[C]{c: before, n: oL})
-		case oL == 0: // delete starts at the leaf's start: keep the suffix
-			ct.replaceLeaf(iL, ropeLeaf[C]{c: after, n: afterN})
-			ct.mergeWithLeft(iL) // created seam (iL-1, suffix), as before
 		default: // interior: one merged leaf, no seam created
 			ct.replaceLeaf(iL, ropeLeaf[C]{c: before.Concat(after), n: oL + afterN})
 		}
