@@ -460,3 +460,33 @@ func TestShapeBCoalesceMultiLeafDelete(t *testing.T) {
 	}
 	doc.Check()
 }
+
+// TestShapeBInteriorDeleteNeverFragments pins the single-leaf delete property:
+// deleting from a leaf never increases the leaf count, whichever position the
+// delete starts at (start / middle / end of the leaf).
+func TestShapeBInteriorDeleteNeverFragments(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		del  int
+	}{
+		{"leaf-start", 0},
+		{"leaf-middle", 100},
+		{"leaf-end", 199},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := NewRuneDocument(1)
+			doc.Ins(0, strings.Repeat("a", 200)) // one rope leaf (<= ropeLeafCap)
+			doc.Del(tc.del, 1)
+			if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 1 {
+				t.Fatalf("%s delete left %d leaves; want 1", tc.name, leaves)
+			}
+			if doc.Len() != 199 {
+				t.Fatalf("len=%d, want 199", doc.Len())
+			}
+			if doc.GetString() != strings.Repeat("a", 199) {
+				t.Fatalf("content diverged")
+			}
+			doc.Check()
+		})
+	}
+}

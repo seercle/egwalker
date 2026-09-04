@@ -181,14 +181,15 @@ func (ct *contentTree[C]) Insert(pos int, run C) {
 //
 // Cases:
 //   - whole document: delete every leaf;
-//   - range inside one leaf: SplitAt the leaf into [before][range][after] and
-//     replace it with the before/after halves;
+//   - range inside one leaf: build the surviving content directly (prefix,
+//     suffix, or prefix.Concat(suffix)) and replace the leaf with it — no
+//     split, no re-join;
 //   - multi-leaf: if the first leaf is only partially in range, split it so the
 //     range starts on a leaf boundary; if the last leaf is only partially in
 //     range, split it so the range ends on a leaf boundary (dropping only the
 //     in-range prefix of that leaf); then DeleteRange the whole interior leaves;
-//   - every structural seam is coalesced afterwards (mergeWithLeft), so
-//     repeated edits do not accumulate fragmented leaves.
+//   - structural seams that a case creates are coalesced afterwards
+//     (mergeWithLeft): a delete that empties a leaf or spans leaves.
 func (ct *contentTree[C]) Delete(pos, length int) {
 	if length <= 0 {
 		return
@@ -215,15 +216,22 @@ func (ct *contentTree[C]) Delete(pos, length int) {
 	}
 
 	if iL == iR {
-		// Single-leaf deletion: keep [before] and [after]. Half lengths are
-		// derived from the offset and the leaf's cached count.
+		// Single-leaf deletion: build the surviving content directly instead
+		// of splitting into two leaves and re-joining. Deleting from one leaf
+		// always leaves < ropeLeafCap characters (leaves hold at most the
+		// cap, length >= 1), so one part suffices; the split fallback only
+		// guards against the invariant being violated.
 		before, rest := L.c.SplitAt(oL)  // before: oL chars; rest: the remainder
 		_, after := rest.SplitAt(length) // after: chars after the deleted range
-		ct.replaceLeaf(iL, ropeLeaf[C]{c: before, n: oL}, ropeLeaf[C]{c: after, n: L.n - oL - length})
-		if oL == 0 {
-			ct.mergeWithLeft(iL) // leaf start: seam is (iL-1, survivor|old-next)
-		} else {
-			ct.mergeWithLeft(iL + 1) // split point: seam is (before, after|old-next)
+		afterN := L.n - oL - length
+		switch {
+		case afterN == 0: // delete reaches the leaf's end: keep the prefix, no copy
+			ct.replaceLeaf(iL, ropeLeaf[C]{c: before, n: oL})
+		case oL == 0: // delete starts at the leaf's start: keep the suffix
+			ct.replaceLeaf(iL, ropeLeaf[C]{c: after, n: afterN})
+			ct.mergeWithLeft(iL) // created seam (iL-1, suffix), as before
+		default: // interior: one merged leaf, no seam created
+			ct.replaceLeaf(iL, ropeLeaf[C]{c: before.Concat(after), n: oL + afterN})
 		}
 		return
 	}
