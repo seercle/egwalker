@@ -24,7 +24,8 @@
   Needs the correctness argument the Shape B report deferred; zero effect on
   the single-replica trace (its deletes take the local run-granular path).
 - [ ] **(parked, RLE era) runIdxForSeq backward scan** — O(#ops) per lookup;
-  benchmark before optimizing.
+  measured 2026-09-04: t(50k)/t(10k) ≈ 7.75 (127.4 ms → 987.6 ms for 5× op
+  growth) — below the ≥10 quadratic trigger, still parked.
 
 ## Tests / hygiene
 

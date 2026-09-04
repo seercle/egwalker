@@ -151,3 +151,40 @@ func BenchmarkColumnarRoundTrip(b *testing.B) {
 	b.ReportMetric(float64(structBytes), "struct-estimate-bytes")
 	b.ReportMetric(float64(len(log.ops)), "log-ops")
 }
+
+// BenchmarkBinaryRoundTrip measures binary encode+decode at trace scale —
+// the direct comparator to BenchmarkColumnarRoundTrip (same corpus, same
+// untimed setup). Reports achieved bytes as metrics: compressed blob size
+// vs the Task 1 struct estimate.
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkBinaryRoundTrip' -count=1
+func BenchmarkBinaryRoundTrip(b *testing.B) {
+	raw, err := os.ReadFile("../../resources/editing-trace.json")
+	if err != nil {
+		b.Fatalf("read trace: %v", err)
+	}
+	doc := NewRuneDocument(0)
+	if err := replayTrace(doc, raw); err != nil {
+		b.Fatalf("replay trace: %v", err)
+	}
+	log := doc.doc.opLog
+	blob, err := MarshalBinary(log, RuneTextCodec{})
+	if err != nil {
+		b.Fatalf("MarshalBinary: %v", err)
+	}
+	b.SetBytes(int64(len(blob)))
+
+	for b.Loop() {
+		round, err := UnmarshalBinary[runeText](blob, RuneTextCodec{})
+		if err != nil {
+			b.Fatalf("UnmarshalBinary: %v", err)
+		}
+		if _, err := MarshalBinary(round, RuneTextCodec{}); err != nil {
+			b.Fatalf("re-encode: %v", err)
+		}
+	}
+
+	// Report after the loop: b.Loop's first call resets the timer, which
+	// clears any metrics reported before it.
+	b.ReportMetric(float64(len(blob)), "blob-bytes")
+}
