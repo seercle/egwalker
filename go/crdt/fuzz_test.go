@@ -117,6 +117,11 @@ func textDocSeeds() [][]byte {
 // model after every insert/delete.
 func FuzzDocumentOps(f *testing.F) {
 	addSeeds(f, textDocSeeds())
+	// Multibyte and invalid-UTF-8 byte streams pin the runeText rewrite:
+	// multibyte op sequences and raw \xff bytes must never diverge from the
+	// []rune mirror below.
+	f.Add([]byte("héllo 你好 \U0001F600"))
+	f.Add([]byte("\xff\xfe\xffx\xfd"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) == 0 {

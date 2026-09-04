@@ -1,5 +1,7 @@
 package crdt
 
+import "unicode/utf8"
+
 // content is a run of document content. Text runs hold characters, array runs
 // hold elements, map runs hold a single map op. The CRDT machinery only needs a
 // run's length and boundaries; the element type is a property of each concrete
@@ -15,19 +17,35 @@ type content[C any] interface {
 // runes, not bytes, so lv/seq arithmetic matches the per-character model.
 type runeText string
 
-func (t runeText) Len() int { return len([]rune(t)) }
+func (t runeText) Len() int { return utf8.RuneCountInString(string(t)) }
 
 // SplitAt splits after the k-th rune. runeText is byte-backed, so the split
-// must land on a rune boundary (scan to the k-th rune, then cut bytes).
+// must land on a rune boundary: one pass finds the k-th rune's byte offset
+// (ASCII bytes count one rune each; anything else decodes), then the halves
+// are cut by zero-copy byte slicing — substrings share the parent string's
+// backing, which is safe because strings are immutable. Invalid UTF-8 bytes
+// each count as one rune and are preserved as raw bytes on the slice side of
+// the boundary (identical rune sequence to the old []rune round-trip, which
+// re-encoded them as U+FFFD).
 func (t runeText) SplitAt(k int) (runeText, runeText) {
 	if k <= 0 {
 		return "", t
 	}
-	if k >= t.Len() {
+	off, i := 0, 0
+	for i < k && off < len(t) {
+		if t[off] < utf8.RuneSelf {
+			off++
+			i++
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(string(t[off:]))
+		off += size
+		i++
+	}
+	if i < k { // fewer than k runes: k >= Len
 		return t, ""
 	}
-	rs := []rune(t)
-	return runeText(string(rs[:k])), runeText(string(rs[k:]))
+	return t[:off], t[off:]
 }
 
 func (t runeText) Concat(o runeText) runeText { return runeText(string(t) + string(o)) }

@@ -3,6 +3,7 @@ package crdt
 import (
 	"slices"
 	"testing"
+	"unicode/utf8"
 )
 
 // runeOpsToString renders the model string from runes so multibyte content and
@@ -156,6 +157,64 @@ func TestRopeLeafCountSmallAfterAppends(t *testing.T) {
 	}
 	if ct.Len() != 5000 {
 		t.Fatalf("Len = %d, want 5000", ct.Len())
+	}
+}
+
+// TestRopeMultibyteDeleteStorm deletes single characters from a rope of mixed
+// ASCII and multibyte content (2-, 3-, and 4-byte runes) at deterministic
+// positions, including positions computed to land on multibyte runes, until
+// leaf boundaries fall inside or adjacent to multibyte runes. Final content
+// must match a naive []rune model exactly and the leaf count must stay
+// bounded (coalescing intact).
+func TestRopeMultibyteDeleteStorm(t *testing.T) {
+	const (
+		insRuns = 30 // 15 runes per copy -> 450 runes, ~2 leaves at ropeLeafCap
+		dels    = 200
+	)
+	text := "héllo wörld 你好 \U0001F600"
+	ct := newContentTree[runeText]()
+	var want []rune
+	for i := 0; i < insRuns; i++ {
+		ct.Insert(ct.Len(), runeText(text))
+		want = append(want, []rune(text)...)
+	}
+	if ct.Len() != len(want) {
+		t.Fatalf("build: Len=%d want %d", ct.Len(), len(want))
+	}
+
+	delAt := func(pos int, phase string, i int) {
+		ct.Delete(pos, 1)
+		want = append(want[:pos], want[pos+1:]...)
+		if ct.Len() != len(want) {
+			t.Fatalf("%s del %d @%d: Len=%d want %d", phase, i, pos, ct.Len(), len(want))
+		}
+	}
+
+	// Scatter: pseudorandom positions across the whole document.
+	for i := 0; i < dels; i++ {
+		delAt((i*7919)%ct.Len(), "scatter", i)
+	}
+	// Targeted: always the first surviving multibyte rune, so deletes land
+	// inside multibyte runs next to the leaf boundaries the scatter created.
+	for i := 0; len(want) > 0 && i < 40; i++ {
+		pos := -1
+		for j, r := range want {
+			if r >= utf8.RuneSelf {
+				pos = j
+				break
+			}
+		}
+		if pos < 0 {
+			break
+		}
+		delAt(pos, "multibyte", i)
+	}
+
+	if leaves := ct.leafCount(); leaves > insRuns {
+		t.Fatalf("storm left %d leaves; want bounded (coalescing) count <= %d", leaves, insRuns)
+	}
+	if got := runeOpsToString(ct); got != string(want) {
+		t.Fatalf("content %q != model %q", got, string(want))
 	}
 }
 
