@@ -2,11 +2,11 @@
 
 ## Perf
 
-- [ ] **Rope coalescing trade-off — decide keep / refine / revert** — seam
-  coalescing (this branch) bounds leaf fragmentation (storm benchmark
-  leaves-after-storm 6655→117) but costs wall time (TestTrace replay
-  ~410ms→~700ms, ~1.7×; storm ns/op ~3×). Refine option: merge only
-  empty-side or small pairs. See Addendum 2 of the Shape B report.
+- [x] **Rope coalescing trade-off — resolved: kept + refined** — leaves stay
+  bounded (storm leaves-after-storm 6655→117/118) at allocs/op 78091→13119
+  (−83%) and same-session trace replay 801→569ms (−29%); absolute wall time
+  remains above the ~410ms pre-coalescing figure. See Addendum 3 of the Shape
+  B report.
 - [ ] **bxtree: closure-free summary descent** — `FindPath` is ~33% of the
   trace profile; the per-item predicate closure (up to 128 calls/leaf) and the
   generic indirection could be replaced by a summary-targeted descent with
@@ -27,9 +27,10 @@
 
 ## Tests / hygiene
 
-- [ ] **Rope test: delete across a multibyte rune leaf boundary** (multibyte
-  insert is covered; delete is not — risk low, rune-accurate SplitAt makes a
-  straddling rune impossible, but the case deserves a test).
+- [ ] **Extend FuzzDocumentOps's textChar alphabet** so fuzz inputs can
+  become multibyte / invalid-UTF-8 document content — op-stream bytes
+  currently map to ASCII only, so the raw-byte path is pinned by unit tests
+  alone (parked review finding).
 - [ ] **Pin an upper leaf bound in TestShapeBInteriorDeleteSplitsOneLeaf** —
   still lenient; its 1000-char leaves legitimately stay split (> cap after
   coalescing), so a bound must account for that (e.g. <= 4).

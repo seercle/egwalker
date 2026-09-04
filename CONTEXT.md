@@ -71,7 +71,7 @@ This implementation is based on the research paper **"Collaborative Text Editing
 - **Recursive Merging:** An extension beyond the paper, `MapDocument` supports recursive merging for values that implement the `Mergeable` interface, enabling nested CRDT structures.
 - **Topological Sort Heuristic (Section 3.2):** The `findOpsToVisit` function uses a DFS traversal that prioritizes branches with **fewer events** to minimize the number of `retreat` and `advance` calls during a merge.
 - **Batch Merging:** `MergeFrom` performs a batch merge into the `opLog` before executing a single `checkoutFancy`, significantly reducing state switching distance.
-- **Run-Based Content Tree (Shape B):** The visible-content snapshot is a tree of content runs (a rope) indexed by character count, instead of one node per character. Contiguous inserts cost ~1 leaf and append-heavy editing stays bounded by the leaf-folding cap, and delete seams are re-coalesced so scattered edits do not fragment leaves, so memory and per-edit cost scale with edit runs rather than characters.
+- **Run-Based Content Tree (Shape B):** The visible-content snapshot is a tree of content runs (a rope) indexed by character count, instead of one node per character. Contiguous inserts cost ~1 leaf and append-heavy editing stays bounded by the leaf-folding cap, and delete seams are re-coalesced so scattered edits do not fragment leaves, so memory and per-edit cost scale with edit runs rather than characters; allocation-free `runeText` splits (zero-copy byte-offset `SplitAt`) and a direct-build single-leaf delete keep per-edit cost near pre-rope levels while leaves stay bounded.
 
 ### Missing Optimizations (Future Work)
 

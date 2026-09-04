@@ -280,3 +280,82 @@ memory. Trace wall time lands well under the storm's ~3× cost (indicative
 only — noisy laptop, i5-8350U), and final memory is unchanged, consistent
 with leaves staying bounded; the deterministic leaf-count win remains the
 primary metric.
+
+## Addendum 3: allocation-free `runeText` + direct-build single-leaf delete (final numbers)
+
+Two refinements landed on top of Addendum 2's delete-seam coalescing, as two
+commits:
+
+1. `c2b60da` — allocation-free `runeText`: `Len` uses
+   `utf8.RuneCountInString` and `SplitAt` is a single-pass byte-offset scan
+   returning zero-copy byte-slice halves — no `[]rune` round-trip anywhere on
+   the rope hot path. Invalid UTF-8 bytes are preserved instead of re-encoded
+   as U+FFFD (pinned by `TestRuneTextSplitAtInvalidUTF8` plus two new
+   `FuzzDocumentOps` seeds), and `TestRopeMultibyteDeleteStorm` pins delete
+   behavior around 2–4-byte runes.
+2. `c554dbe` — direct-build single-leaf delete: the single-leaf branch of
+   `contentTree.Delete` no longer splits the leaf into `[before][after]`
+   leaves and re-joins them; it builds the surviving content directly
+   (end-of-leaf → prefix only; leaf-start → suffix; interior →
+   `before.Concat(after)`), pinned by `TestShapeBInteriorDeleteNeverFragments`
+   (`leafCount() == 1` for deletes at positions 0/100/199 of one 200-rune
+   leaf).
+
+**Seam policy (unchanged per controller decision — no right-fold).** A
+single-leaf delete makes a `mergeWithLeft` attempt only when its case creates
+a seam: the leaf-start case (`oL == 0`, suffix kept) keeps
+`mergeWithLeft(iL)`; the interior and end-of-leaf (`afterN == 0`) cases make
+no attempt — the old code's end-of-leaf fold of the surviving prefix into the
+next leaf is intentionally gone. Deletes therefore map 1 leaf → 1 or 0 leaves
+(no accumulation risk), and the multi-leaf branch is unchanged.
+
+**Three-way comparison** (every cell traceable to its recorded run):
+
+| metric | pre-coalescing (Addendum 2 "before" col; trace from Addendum 1) | coalesced-as-reviewed (Addendum 2 "after" col) | refined — this plan |
+|---|---|---|---|
+| storm leaves-after-storm | 6655 | 117 (as recorded; current runs print 118 — see note) | 118.0 (all 5 fresh runs) |
+| storm ns/op | 25.2–58.3M (count=3) | 116.2–125.7M (count=5) | 33.3–42.4M (count=5, fresh) |
+| storm allocs/op | 43113 | 78091–78092 | 13119 (all 5 fresh runs; Task 1: 78081→13119, −83%) |
+| trace wall time | ~410 ms | 699–712 ms | 641 ms fresh; Task 2 same-session A/B 801→569 ms (−29%) |
+| final trace memory | ~23.3 MB | 23.29 MB | 23.36 MB |
+
+Session/machine caveat: absolute wall times and ns/op are NOT comparable
+across sessions — machine speed varies ~2× (the same coalesced code measured
+116.2–125.7M ns/op in Addendum 2's session, 53.3M as Task 1's before-run, and
+45.0–50.3M vs 24.7–28.0M as Task 2's same-session A/B pair; this session's
+fresh runs sit at 33.3–42.4M). The deterministic metrics are the
+claim-bearers: allocs/op 78091–78092 → 13119 (−83%, identical in every run)
+and leaves-after-storm holding the coalesced bound (118) where the
+pre-coalescing code fragmented to 6655.
+
+Leaves 117 vs 118: Addendum 2's recorded runs printed 117; every run since
+the code state moved to `e835ded` ("align storm cost multiplier") prints 118
+— consistently across Task 1, Task 2, and this task's fresh count=5. The
+difference is the recorded code state, not these rewrites; the coalescing
+shape is intact either way.
+
+Honest bottom line on wall time: the refinement recovers a substantial part
+of the coalescing cost — the only clean comparison is Task 2's same-session
+A/B, 801 ms → 569 ms (−29%) — but the absolute figures do **not** demonstrably
+return to the recorded ~410 ms pre-coalescing number: that figure is from a
+different session (and is Addendum 1's `TestTrace` figure including the
+one-time JSON decode, whereas 699–712 / 569 / 641 ms are `BenchmarkTrace`'s
+replay-only epilogue prints, decode excluded). The revert option therefore
+returns to the table: the current trade is bounded leaves (118 after the
+storm, 13119 allocs/op) at a mechanistically-explained per-delete cost, vs
+reverting to unbounded fragmentation (6655 leaves, 43113 allocs/op).
+
+Mechanism notes: the conversion cost is eliminated — each interior
+single-leaf delete previously paid up to three allocations per `SplitAt`
+(`[]rune` conversion + two re-encodes) × 2 `SplitAt` calls, plus a `[]rune`
+allocation in every `Len()` guard, all gone (Task 1); split-then-rejoin is
+replaced by the direct build — per delete, ~6 bxtree ops + 2 content copies
+→ 1 `replaceLeaf` + 1 `Concat` (Task 2 same-session storm ns/op 45.0–50.3M →
+24.7–28.0M). Intermediate-state storm numbers for completeness: Task 1 state
+13.2–13.9M ns/op (its session), Task 2 state 24.7–28.0M ns/op (its session),
+allocs/op 13119 in both. This task's fresh runs: `BenchmarkRopeDeleteStorm`
+count=5 → 33.3–42.4M ns/op, 118.0 leaves-after-storm, 13119 allocs/op in
+every run; `BenchmarkTrace` → replay 641 ms, final memory 23.36 MB, 556.4M
+ns/op; `TestTrace` harness 1.679 s / 1.708 s (two runs, includes the one-time
+JSON decode). Full suite green after all changes: `go test -C go ./...
+-count=1` → bxtree/crdt/pheap ok.
