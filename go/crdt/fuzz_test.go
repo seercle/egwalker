@@ -294,6 +294,32 @@ func FuzzMapDocument(f *testing.F) {
 	})
 }
 
+// FuzzBinaryFrame checks that any input either cleanly rejects in
+// UnmarshalBinary or decodes into an opLog that re-encodes without error.
+// Byte-identity of the re-encode is not required.
+func FuzzBinaryFrame(f *testing.F) {
+	// Seeds: valid frames from real logs (round-trip must hold), plus junk.
+	if blob, err := MarshalBinary(buildBinaryTestLogT(), RuneTextCodec{}); err == nil {
+		f.Add(blob)
+	}
+	if blob, err := MarshalBinary(newOpLog[runeText](), RuneTextCodec{}); err == nil {
+		f.Add(blob)
+	}
+	f.Add([]byte("EGW1\x01"))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		out, err := UnmarshalBinary[runeText](data, RuneTextCodec{})
+		if err != nil {
+			return // clean rejection is always acceptable
+		}
+		// Successful decode must re-encode without error.
+		if _, err := MarshalBinary(out, RuneTextCodec{}); err != nil {
+			t.Fatalf("re-encode of decoded frame: %v", err)
+		}
+	})
+}
+
 // FuzzArrayDocument checks convergence of replicated ArrayDocuments under
 // random element inserts/deletes and pairwise merges.
 func FuzzArrayDocument(f *testing.F) {

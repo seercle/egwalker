@@ -1,6 +1,7 @@
 package crdt
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 )
@@ -10,6 +11,12 @@ import (
 // branches (parents), and a non-trivial frontier.
 func buildBinaryTestLog(t *testing.T) *opLog[runeText] {
 	t.Helper()
+	return buildBinaryTestLogT()
+}
+
+// buildBinaryTestLogT is buildBinaryTestLog without a testing.T, for callers
+// outside tests proper (fuzz targets).
+func buildBinaryTestLogT() *opLog[runeText] {
 	d1, d2 := NewRuneDocument(1), NewRuneDocument(2)
 	d1.Ins(0, "Hello")
 	d2.MergeFrom(d1)
@@ -82,4 +89,35 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 			t.Errorf("case %d (%q): expected error, got none", i, in)
 		}
 	}
+}
+
+func TestBinaryCompressionShrinks(t *testing.T) {
+	// A repetitive corpus is required here: zstd's fixed frame overhead
+	// exceeds the content bytes of a tiny log like buildBinaryTestLog's, so
+	// the "smaller than content" pin needs a body worth compressing.
+	d := NewRuneDocument(1)
+	for range 100 {
+		d.Ins(d.Len(), "Hello world ")
+	}
+	log := d.doc.opLog
+
+	blob, err := MarshalBinary(log, RuneTextCodec{})
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	if bytes.HasPrefix(blob, []byte(binaryMagic)) {
+		t.Fatalf("blob is a bare EGW1 frame, not compressed")
+	}
+	if len(blob) >= contentBytesOf(t, log) {
+		t.Fatalf("compressed blob %d bytes not smaller than content %d", len(blob), contentBytesOf(t, log))
+	}
+}
+
+func contentBytesOf(t *testing.T, log *opLog[runeText]) int {
+	t.Helper()
+	n := 0
+	for _, o := range log.ops {
+		n += len([]byte(o.content))
+	}
+	return n
 }

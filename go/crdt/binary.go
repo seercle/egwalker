@@ -4,10 +4,28 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // binaryMagic frames every encoded opLog: magic + version, then columns.
 const binaryMagic = "EGW1"
+
+// maxBinaryDecoded bounds the decompressed frame size accepted from any
+// single blob. Real logs sit far below this; hostile input declaring a huge
+// frame would otherwise make the decoder pre-allocate gigabytes before
+// failing (fuzz-found: a 26-byte blob triggered a 4 GB transient
+// allocation).
+const maxBinaryDecoded = 1 << 26 // 64 MiB
+
+// Shared stateless zstd codec instances. EncodeAll runs each call on a
+// single goroutine and DecodeAll is safe for concurrent use, so one shared
+// pair amortizes the codec setup across all calls. A nil reader/writer is
+// the documented stateless pattern and only fails on invalid options.
+var (
+	binaryZstdEncoder, _ = zstd.NewWriter(nil)
+	binaryZstdDecoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxBinaryDecoded))
+)
 
 // binaryVersion is the frame version written by MarshalBinary; decode rejects
 // any other value.
@@ -36,7 +54,8 @@ func opTypeFromCode(b byte) (opType, bool) {
 }
 
 // MarshalBinary encodes the opLog's columnar form into a byte frame: a magic
-// and version header followed by ten length-prefixed column bodies. Integers
+// and version header followed by ten length-prefixed column bodies, then
+// compresses the whole frame with zstd at the default speed level. Integers
 // use varints (zigzag where values may be negative); content values go
 // through the codec and travel as opaque length-prefixed blobs. The frame
 // knows nothing about content semantics.
@@ -132,7 +151,7 @@ func MarshalBinary[C content[C]](log *opLog[C], codec ContentCodec[C]) ([]byte, 
 	}
 	frame = appendBinaryColumn(frame, body)
 
-	return frame, nil
+	return binaryZstdEncoder.EncodeAll(frame, nil), nil
 }
 
 // appendBinaryColumn appends one column to the frame: uvarint bodyLen || body.
@@ -246,15 +265,20 @@ func readRunLens(br *binaryReader, n uint64, maxOps uint64, name string) ([]int,
 	return runs, sum, nil
 }
 
-// UnmarshalBinary decodes a frame produced by MarshalBinary back into an
-// opLog: parse magic and version, then each length-prefixed column with
-// bounds-checked reads, validating the count invariants the columnar form
-// relies on, and rebuild the log through Unmarshal.
+// UnmarshalBinary decodes a compressed frame produced by MarshalBinary back
+// into an opLog: decompress with zstd, parse magic and version, then each
+// length-prefixed column with bounds-checked reads, validating the count
+// invariants the columnar form relies on, and rebuild the log through
+// Unmarshal.
 func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C], error) {
-	if len(data) < len(binaryMagic) || string(data[:len(binaryMagic)]) != binaryMagic {
+	frame, err := binaryZstdDecoder.DecodeAll(data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("binary: decompress: %w", err)
+	}
+	if len(frame) < len(binaryMagic) || string(frame[:len(binaryMagic)]) != binaryMagic {
 		return nil, fmt.Errorf("binary: bad magic")
 	}
-	r := &binaryReader{buf: data, off: len(binaryMagic)}
+	r := &binaryReader{buf: frame, off: len(binaryMagic)}
 
 	version, err := r.uvarint("version")
 	if err != nil {
@@ -266,7 +290,7 @@ func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C
 
 	// Op counts can never exceed the frame's own byte count: every op costs
 	// at least one byte in each per-op column.
-	maxOps := uint64(len(data))
+	maxOps := uint64(len(frame))
 
 	// Column 1: Types.
 	body, err := r.column("Types")
