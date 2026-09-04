@@ -3,6 +3,7 @@ package crdt
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -297,6 +298,70 @@ func BenchmarkRopeDeleteStorm(b *testing.B) {
 
 	if ct.Len() != buildChars-stormDeletes+postInserts {
 		b.Fatalf("final rope length %d, want %d", ct.Len(), buildChars-stormDeletes+postInserts)
+	}
+}
+
+// ropePasteBase builds a ~buildChars-char rope whose shape matches a
+// coalesced storm-built rope (~buildChars/ropeLeafCap cap-respecting leaves):
+// it prepends ropeLeafCap-1-char runs, whose fold checks always fail, so each
+// run stays its own leaf. Rebuilding costs ~118 cheap inserts (vs ~30000
+// single-char inserts), which keeps the untimed per-iteration setup of
+// ropePasteOnce small.
+func ropePasteBase() *contentTree[runeText] {
+	ct := newContentTree[runeText]()
+	run := runeText(strings.Repeat("x", ropeLeafCap-1))
+	for i := 0; i < buildChars/(ropeLeafCap-1); i++ {
+		ct.Insert(0, run)
+	}
+	return ct
+}
+
+// ropePasteBaseChars is the exact length of ropePasteBase's rope: 117 runs of
+// ropeLeafCap-1 chars.
+var ropePasteBaseChars = buildChars / (ropeLeafCap - 1) * (ropeLeafCap - 1)
+
+// ropePasteOnce runs one paste iteration: rebuild the base rope (untimed),
+// then insert one pre-built paste run at its middle (timed).
+func ropePasteOnce(b *testing.B, paste runeText) (*contentTree[runeText], int) {
+	b.StopTimer()
+	ct := ropePasteBase()
+	b.StartTimer()
+
+	ct.Insert(ct.Len()/2, paste)
+	return ct, ct.leafCount()
+}
+
+// BenchmarkRopePaste measures the cost of a single large paste — one insert
+// operation carrying many characters — into the middle of a coalesced
+// buildChars-char rope. A run larger than ropeLeafCap is inserted as a single
+// rope leaf (never split; interior positions split only the surrounding
+// leaf), so the expected cost is one O(size) rune-count scan plus one O(size)
+// allocation, independent of rope size. SetBytes makes Go report MB/s per
+// sub-benchmark.
+//
+// Because the per-iteration timed work is tiny next to the untimed base
+// rebuild, the default 1s benchtime would loop for minutes; run it with an
+// explicit iteration count, e.g.
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkRopePaste$' -benchtime=200x
+func BenchmarkRopePaste(b *testing.B) {
+	for _, size := range []int{1_000, 10_000, 100_000, 1_000_000} {
+		b.Run("chars="+strconv.Itoa(size), func(b *testing.B) {
+			paste := runeText(strings.Repeat("x", size))
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+
+			var ct *contentTree[runeText]
+			var leavesAfterPaste int
+			for b.Loop() {
+				ct, leavesAfterPaste = ropePasteOnce(b, paste)
+			}
+			b.ReportMetric(float64(leavesAfterPaste), "leaves-after-paste")
+
+			if ct.Len() != ropePasteBaseChars+size {
+				b.Fatalf("final rope length %d, want %d", ct.Len(), ropePasteBaseChars+size)
+			}
+		})
 	}
 }
 
