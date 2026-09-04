@@ -39,15 +39,18 @@ type contentTree[C content[C]] struct {
 	tree *bxtree.BxTree[ropeLeaf[C], int]
 }
 
+// ropeLeafNodeSize is the [min, max] item count for the rope's bxtree leaf
+// nodes. Small nodes shorten FindPath's linear leaf scan far more than the
+// extra split/borrow bookkeeping costs, because coalescing keeps the rope's
+// item count low (~Len/ropeLeafCap); the sweep benchmark pins the knee
+// (measured 2026-09-04: trace -32%, storm -33% vs the 64..128 default, with
+// the knee at 8-12 items per node).
+var ropeLeafNodeSize = [2]int{4, 8}
+
 func newContentTree[C content[C]]() *contentTree[C] {
-	// Leaf nodes hold 4-8 rope leaves: coalescing keeps the item count low
-	// (~Len/ropeLeafCap), so small nodes shorten FindPath's linear leaf scan
-	// far more than the extra split/borrow bookkeeping costs (measured:
-	// trace -32%, storm -33% vs the default 64-128; the sweep knee sits at
-	// 8-12 items per node).
 	tree, err := bxtree.New[ropeLeaf[C], int](
 		bxtree.WithSummarizer[ropeLeaf[C], int](ropeSummarizer[C]{}),
-		bxtree.WithLeafNodeSize[ropeLeaf[C], int](4, 8),
+		bxtree.WithLeafNodeSize[ropeLeaf[C], int](ropeLeafNodeSize[0], ropeLeafNodeSize[1]),
 	)
 	if err != nil {
 		panic("crdt: bxtree.New: " + err.Error())

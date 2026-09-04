@@ -2,6 +2,7 @@ package crdt
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 	"unicode/utf8"
 )
@@ -240,6 +241,43 @@ func TestRuneTextSplitAt(t *testing.T) {
 	}
 }
 
+// Storm workload sizes, shared by BenchmarkRopeDeleteStorm and
+// BenchmarkRopeLeafSizeSweep.
+const (
+	buildChars   = 30000
+	stormDeletes = 10000
+	postInserts  = 3000
+)
+
+// ropeDeleteStormOnce runs one storm iteration: build a rope of buildChars
+// single-character inserts, delete stormDeletes characters at a strided
+// pseudo-random positions (forcing seam coalescing), then insert postInserts
+// more. Timer discipline matches BenchmarkRopeDeleteStorm: the build is
+// untimed, the timed region ends after the post-inserts, and there is no
+// trailing b.StopTimer() (on Go 1.24+ StopTimer poisons the loop and the
+// next b.Loop call would fail with "B.Loop called with timer stopped";
+// b.Loop stops the timer itself on the final call).
+func ropeDeleteStormOnce(b *testing.B) (*contentTree[runeText], int) {
+	b.StopTimer()
+	ct := newContentTree[runeText]()
+	for i := 0; i < buildChars; i++ {
+		ct.Insert(i, runeText("x"))
+	}
+	b.StartTimer()
+
+	for i := 0; i < stormDeletes; i++ {
+		ct.Delete((i*7919)%ct.Len(), 1)
+	}
+	b.StopTimer()
+	leavesAfterStorm := ct.leafCount()
+	b.StartTimer()
+
+	for i := 0; i < postInserts; i++ {
+		ct.Insert((i*104729)%ct.Len(), runeText("y"))
+	}
+	return ct, leavesAfterStorm
+}
+
 // BenchmarkRopeDeleteStorm measures the rope under a delete-storm workload:
 // build by appending (cap-sized leaves), then scattered single-char deletes —
 // which fragment leaves toward single characters when seams are not
@@ -249,40 +287,43 @@ func TestRuneTextSplitAt(t *testing.T) {
 // roughly one leaf per splitting delete (~6655 leaves observed without
 // coalescing), with coalescing it stays ~buildChars/ropeLeafCap.
 func BenchmarkRopeDeleteStorm(b *testing.B) {
-	const (
-		buildChars   = 30000
-		stormDeletes = 10000
-		postInserts  = 3000
-	)
-
 	b.ReportAllocs()
 	var ct *contentTree[runeText]
 	var leavesAfterStorm int
 	for b.Loop() {
-		b.StopTimer()
-		ct = newContentTree[runeText]()
-		for i := 0; i < buildChars; i++ {
-			ct.Insert(i, runeText("x"))
-		}
-		b.StartTimer()
-
-		for i := 0; i < stormDeletes; i++ {
-			ct.Delete((i*7919)%ct.Len(), 1)
-		}
-		b.StopTimer()
-		leavesAfterStorm = ct.leafCount()
-		b.StartTimer()
-
-		for i := 0; i < postInserts; i++ {
-			ct.Insert((i*104729)%ct.Len(), runeText("y"))
-		}
-		// No trailing b.StopTimer(): on Go 1.24+ StopTimer poisons the loop and
-		// the next b.Loop call would fail with "B.Loop called with timer
-		// stopped". b.Loop stops the timer itself on the final call.
+		ct, leavesAfterStorm = ropeDeleteStormOnce(b)
 	}
 	b.ReportMetric(float64(leavesAfterStorm), "leaves-after-storm")
 
 	if ct.Len() != buildChars-stormDeletes+postInserts {
 		b.Fatalf("final rope length %d, want %d", ct.Len(), buildChars-stormDeletes+postInserts)
+	}
+}
+
+// BenchmarkRopeLeafSizeSweep sweeps the rope's bxtree leaf-node size over the
+// storm workload — the sweep that selected the shipped ropeLeafNodeSize
+// (knee at 8-12 items per node; smaller nodes shorten FindPath's linear leaf
+// scan, coalescing keeps the rope's total item count unaffected). Sub-tests
+// mutate the package-level ropeLeafNodeSize, so they must not run in
+// parallel; each restores it on return.
+func BenchmarkRopeLeafSizeSweep(b *testing.B) {
+	for _, max := range []int{128, 64, 32, 16, 12, 8, 4} {
+		b.Run("leafmax="+strconv.Itoa(max), func(b *testing.B) {
+			old := ropeLeafNodeSize
+			ropeLeafNodeSize = [2]int{max / 2, max}
+			defer func() { ropeLeafNodeSize = old }()
+
+			b.ReportAllocs()
+			var ct *contentTree[runeText]
+			var leavesAfterStorm int
+			for b.Loop() {
+				ct, leavesAfterStorm = ropeDeleteStormOnce(b)
+			}
+			b.ReportMetric(float64(leavesAfterStorm), "leaves-after-storm")
+
+			if ct.Len() != buildChars-stormDeletes+postInserts {
+				b.Fatalf("final rope length %d, want %d", ct.Len(), buildChars-stormDeletes+postInserts)
+			}
+		})
 	}
 }
