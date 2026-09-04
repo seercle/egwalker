@@ -40,7 +40,15 @@ type contentTree[C content[C]] struct {
 }
 
 func newContentTree[C content[C]]() *contentTree[C] {
-	tree, err := bxtree.New[ropeLeaf[C], int](bxtree.WithSummarizer[ropeLeaf[C], int](ropeSummarizer[C]{}))
+	// Leaf nodes hold 4-8 rope leaves: coalescing keeps the item count low
+	// (~Len/ropeLeafCap), so small nodes shorten FindPath's linear leaf scan
+	// far more than the extra split/borrow bookkeeping costs (measured:
+	// trace -32%, storm -33% vs the default 64-128; the sweep knee sits at
+	// 8-12 items per node).
+	tree, err := bxtree.New[ropeLeaf[C], int](
+		bxtree.WithSummarizer[ropeLeaf[C], int](ropeSummarizer[C]{}),
+		bxtree.WithLeafNodeSize[ropeLeaf[C], int](4, 8),
+	)
 	if err != nil {
 		panic("crdt: bxtree.New: " + err.Error())
 	}
