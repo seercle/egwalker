@@ -315,7 +315,7 @@ next leaf is intentionally gone. Deletes therefore map 1 leaf → 1 or 0 leaves
 |---|---|---|---|
 | storm leaves-after-storm | 6655 | 117 (as recorded; current runs print 118 — see note) | 118.0 (all 5 fresh runs) |
 | storm ns/op | 25.2–58.3M (count=3) | 116.2–125.7M (count=5) | 33.3–42.4M (count=5, fresh) |
-| storm allocs/op | 43113 | 78091–78092 | 13119 (all 5 fresh runs; Task 1: 78081→13119, −83%) |
+| storm allocs/op | 43113 | 78091–78092 (Addendum 2 baseline) | 13119 (all 5 fresh runs; Task 1 run: 78081→13119, −83%) |
 | trace wall time | ~410 ms | 699–712 ms | 641 ms fresh; Task 2 same-session A/B 801→569 ms (−29%) |
 | final trace memory | ~23.3 MB | 23.29 MB | 23.36 MB |
 
@@ -329,7 +329,7 @@ and leaves-after-storm holding the coalesced bound (118) where the
 pre-coalescing code fragmented to 6655.
 
 Leaves 117 vs 118: Addendum 2's recorded runs printed 117; every run since
-the code state moved to `e835ded` ("align storm cost multiplier") prints 118
+the code state moved to `a5d4fa6` (uniform seam rule) prints 118
 — consistently across Task 1, Task 2, and this task's fresh count=5. The
 difference is the recorded code state, not these rewrites; the coalescing
 shape is intact either way.

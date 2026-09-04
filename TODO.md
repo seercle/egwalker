@@ -12,10 +12,10 @@
   generic indirection could be replaced by a summary-targeted descent with
   plain integer compares. Requires touching bxtree (currently off-limits by
   plan convention) — needs explicit go-ahead.
-- [ ] **runeText SplitAt/Concat rune round-trips** — ~25% of the trace
-  profile; every interior rope edit converts the leaf to []rune and back.
-  Options: byte-offset fast path for ASCII boundaries, or a counted-string
-  run type (carries the rune count alongside the bytes).
+- [x] **runeText SplitAt/Concat rune round-trips — resolved: `c2b60da`** —
+  allocation-free `runeText` (`Len` via `utf8.RuneCountInString`, zero-copy
+  byte-offset `SplitAt`) removed the `[]rune` conversions; storm allocs/op
+  78081→13119 (−83%). See Addendum 3 of the Shape B report.
 - [ ] **Batched remote merge-path deletes** — `apply`'s per-character
   `snapshot.Delete(endPos, 1)` loop could collapse into range deletes by
   recording each char's endPos and reconstructing contiguous ranges (equal

@@ -168,7 +168,7 @@ func TestRopeLeafCountSmallAfterAppends(t *testing.T) {
 // bounded (coalescing intact).
 func TestRopeMultibyteDeleteStorm(t *testing.T) {
 	const (
-		insRuns = 30 // 15 runes per copy -> 450 runes, ~2 leaves at ropeLeafCap
+		insRuns = 30 // 16 runes per copy -> 480 runes, ~2 leaves at ropeLeafCap
 		dels    = 200
 	)
 	text := "héllo wörld 你好 \U0001F600"
