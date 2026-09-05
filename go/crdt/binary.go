@@ -207,6 +207,18 @@ func (r *binaryReader) varint(what string) (int64, error) {
 	return v, nil
 }
 
+// byte reads exactly one byte. Callers must have budgeted the read via
+// count() or an explicit remaining-bytes check first; the Types column loop
+// relies on count()'s ≥1-byte-per-entry bound.
+func (r *binaryReader) byte(what string) (byte, error) {
+	if r.off >= len(r.buf) {
+		return 0, fmt.Errorf("binary: truncated %s", what)
+	}
+	b := r.buf[r.off]
+	r.off++
+	return b, nil
+}
+
 // column reads one length-prefixed column body: uvarint bodyLen || body.
 func (r *binaryReader) column(name string) ([]byte, error) {
 	n, err := r.uvarint(name + " bodyLen")
@@ -275,6 +287,9 @@ func readRunLens(br *binaryReader, n uint64, maxOps uint64, name string) ([]int,
 		if err != nil {
 			return nil, 0, err
 		}
+		if run == 0 {
+			return nil, 0, fmt.Errorf("binary: %s run length 0 (encoder never emits empty runs)", name)
+		}
 		if uint64(run) > maxOps-sum {
 			return nil, 0, fmt.Errorf("binary: %s op count %d exceeds frame bound %d", name, sum+uint64(run), maxOps)
 		}
@@ -323,12 +338,14 @@ func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C
 	}
 	types := make([]opType, n)
 	for i := range types {
-		code := br.buf[br.off]
+		code, err := br.byte("Types")
+		if err != nil {
+			return nil, err
+		}
 		ot, ok := opTypeFromCode(code)
 		if !ok {
 			return nil, fmt.Errorf("binary: unknown op type code %d", code)
 		}
-		br.off++
 		types[i] = ot
 	}
 	if err := br.exact("Types"); err != nil {

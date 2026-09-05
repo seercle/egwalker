@@ -154,6 +154,25 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 			in:   compress(append(append([]byte{}, emptyColumns(frameHeader(binaryVersion))...), 0x00)),
 			want: "trailing bytes after Frontier",
 		},
+		{
+			name: "TypeRuns run length 0",
+			// Valid header, a Types column with one ins entry, then a
+			// TypeRuns column declaring one run of length 0 — a shape
+			// MarshalBinary never emits (a run exists only when at least
+			// one op of that kind exists). All later columns are empty so
+			// parsing reaches TypeRuns before any other invariant fires.
+			in: compress(func() []byte {
+				f := frameHeader(binaryVersion)
+				f = appendBinaryColumn(f, binary.AppendUvarint(binary.AppendUvarint(nil, 1), 0)) // Types: count 1, one opTypeIns code
+				f = appendBinaryColumn(f, binary.AppendUvarint(binary.AppendUvarint(nil, 1), 0)) // TypeRuns: count 1, run 0
+				zero := binary.AppendUvarint(nil, 0)
+				for range 8 {
+					f = appendBinaryColumn(f, zero)
+				}
+				return f
+			}()),
+			want: "run length 0",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
