@@ -334,17 +334,27 @@ func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 // (agent, character-seq) rather than by op id: replicas may hold the same run
 // content under different op boundaries (an extended run that arrived via the
 // split path), so the character a parent edge points at must resolve to
-// whatever run op covers that exact character in dest. Resolving an interior
-// reference splits the destination run there, so run boundaries converge to the
-// finest boundary any replica has observed.
+// whatever run op covers that exact character in dest. Ops dest fully holds
+// are skipped before any resolution, so parent resolution happens only for ops
+// that will actually append; run-boundary convergence driven by already-held
+// ops' references becomes lazy — a future merge that references those seqs
+// splits then.
 func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 	for _, o := range src.ops {
+		// Ops dest fully holds are discarded by pushRemoteOpLV; resolving
+		// their parents first is pure wasted scan (profiled 2026-09-05:
+		// 91% of map-merge CPU at 50k ops, 48% of rune's). Skip them.
+		// src ops always carry a set length (pushLocalOp/pushRemoteOpLV
+		// normalize before append), so this matches the effective range
+		// pushRemoteOpLV's skip check uses.
+		if last, ok := dest.version[o.id.agent]; ok && last >= o.id.seq+o.length-1 {
+			continue
+		}
 		parents := make([]lv, len(o.parents))
 		for i, p_lv := range o.parents {
 			pa := src.opAt(p_lv)
 			parents[i] = dest.resolveParentLV(pa.id.agent, src.seqAt(p_lv))
 		}
-		new_op := o
-		pushRemoteOpLV(dest, new_op, parents)
+		pushRemoteOpLV(dest, o, parents)
 	}
 }
