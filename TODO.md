@@ -35,6 +35,20 @@
   rebuild). Post-fix same-session A/B: 26.36× → 4.33×, ~linear again
   (rune: 4.41× → 4.72×); map 50k 57.1 ms (was 3334.0 ms — 58.4× faster),
   10k 13.2 ms (was 126.5 ms — 9.6× faster).
+- [x] **Critical-version compaction (Section 3.5) — resolved 2026-09-05** —
+  snapshot-anchor `Compact()` API on all three document types (explicit
+  call, single-tip-frontier precondition; the automatic watermark/ack
+  wrapper is deliberately deferred), anchor op + per-agent coverage table
+  (`version` never rewritten), merge rules for compacted peers, and the
+  binary frame v2 coverage column. Trace scale (`TestCompactTraceScale`,
+  83,751-op editing trace): `before: ops=83751 heap=14MB (14928544
+  bytes)` → `after: ops=1 heap=0MB (543336 bytes)`, content
+  byte-identical, `Check()` green. Parked extensions: automatic
+  watermark/ack-tracking wrapper; DAG-skeleton anchor variant (one anchor
+  per converged subtree instead of one global snapshot); merging from
+  compacted into partially-converged state (panics today — unsupported in
+  v1); late-compaction divergence is silently absorbed (documented v1
+  boundary).
 
 ## Tests / hygiene
 

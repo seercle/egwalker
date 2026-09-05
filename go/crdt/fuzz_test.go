@@ -159,6 +159,14 @@ func FuzzDocumentOps(f *testing.F) {
 // after interleaved edits and pairwise merges.
 func FuzzMergeConvergence(f *testing.F) {
 	addSeeds(f, textDocSeeds())
+	// Compacted pattern: delta/sync/gate bytes aligned to the body's
+	// consumption so every round reaches the compaction checkpoint (gated
+	// block below): insert on 0, compact; insert on 1 delivered across the
+	// compacted pair, re-Compact; delete-everything on 2 delivered across
+	// compacted peers, tombstone-only re-Compact (zero-op anchors);
+	// insert on the edited empty-anchor log, re-Compact back to anchor-op
+	// form. Closes with the final convergence pass.
+	f.Add([]byte{97, 0, 0, 1, 98, 0, 0, 0, 3, 0, 1, 0, 0, 99, 0, 0})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) == 0 {
@@ -192,6 +200,38 @@ func FuzzMergeConvergence(f *testing.F) {
 			if ga, gb := docs[a].GetString(), docs[b].GetString(); ga != gb {
 				t.Fatalf("replicas %d and %d diverged: %q vs %q", a, b, ga, gb)
 			}
+
+			// Compaction checkpoint, gated so most executions still test
+			// the non-compacted paths. Compact requires a quiescent
+			// document (single-tip frontier), and anchors must only exist
+			// at a shared compaction point — a non-compacted replica has no
+			// way to resolve a parent reference to another replica's anchor
+			// — so converge all three first, then compact them together or
+			// not at all. Every later merge therefore stays inside the
+			// supported topology (compacted <-> compacted peers).
+			g, ok := r.next()
+			if !ok || g%4 != 0 {
+				continue
+			}
+			for i := 1; i < len(docs); i++ {
+				docs[0].MergeFrom(docs[i])
+			}
+			for i := 1; i < len(docs); i++ {
+				docs[i].MergeFrom(docs[0])
+				if gi, g0 := docs[i].GetString(), docs[0].GetString(); gi != g0 {
+					t.Fatalf("replicas %d and 0 diverged before compaction: %q vs %q", i, gi, g0)
+				}
+			}
+			// Fully synced logs share one frontier; a single tip is
+			// Compact's precondition. Concurrent edits leave >1 tip: skip.
+			if len(docs[0].doc.opLog.frontier) != 1 {
+				continue
+			}
+			before := len(docs[0].doc.opLog.ops)
+			for i := range docs {
+				docs[i].Compact()
+			}
+			t.Logf("compaction checkpoint: ops %d -> %d", before, len(docs[0].doc.opLog.ops))
 		}
 
 		// Final full sync: all replicas must agree.
@@ -234,6 +274,11 @@ func FuzzMapDocument(f *testing.F) {
 		randBytes(12, 256),
 		randBytes(13, 512),
 	})
+	// Compacted pattern: Set, then sync+gate bytes aligned to the body's
+	// consumption so both rounds reach the compaction checkpoint (gated
+	// block below) — a one-entry anchor, then a post-compaction Set
+	// delivered across the compacted peers and a two-entry re-Compact.
+	f.Add([]byte{1, 5, 7, 0, 0, 0, 0, 2, 5, 9, 3, 0, 0, 0})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) == 0 {
@@ -279,6 +324,33 @@ func FuzzMapDocument(f *testing.F) {
 			if !mapDocEqual(docs[a], docs[b]) {
 				t.Fatalf("map replicas %d and %d diverged", a, b)
 			}
+
+			// Compaction checkpoint, gated; same discipline as
+			// FuzzMergeConvergence: converge all three first, then compact
+			// together or not at all (anchors only exist at a shared
+			// compaction point, and Compact requires a single-tip
+			// frontier).
+			g, ok := r.next()
+			if !ok || g%4 != 0 {
+				continue
+			}
+			for i := 1; i < len(docs); i++ {
+				docs[0].MergeFrom(docs[i])
+			}
+			for i := 1; i < len(docs); i++ {
+				docs[i].MergeFrom(docs[0])
+				if !mapDocEqual(docs[i], docs[0]) {
+					t.Fatalf("map replicas %d and 0 diverged before compaction", i)
+				}
+			}
+			if len(docs[0].opLog.frontier) != 1 {
+				continue
+			}
+			before := len(docs[0].opLog.ops)
+			for i := range docs {
+				docs[i].Compact()
+			}
+			t.Logf("map compaction checkpoint: ops %d -> %d", before, len(docs[0].opLog.ops))
 		}
 
 		// Final full sync.

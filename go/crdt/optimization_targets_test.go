@@ -27,17 +27,23 @@ func targetRetentionSet(log *opLog[runeText]) map[lv]bool {
 	return keep
 }
 
-// TestTargetCriticalVersionCompaction expects the missing critical-version
-// truncation optimization (CONTEXT.md, Missing / Section 3.5). Once two
-// replicas have fully synchronized (both hold the entire history and share a
-// frontier), history below the frontier is acked and a compaction can discard
-// every non-critical op. Today the opLog grows without bound and keeps all ops.
+// TestTargetCriticalVersionCompaction pins the retention target of
+// critical-version compaction (CONTEXT.md, Section 3.5 — implemented
+// 2026-09-05 as snapshot-anchor compaction). Once two replicas have fully
+// synchronized (both hold the entire history and share a frontier), history
+// below the frontier is acked and compaction may discard every non-critical
+// op: what must remain is the retention set computed below (every live
+// frontier op plus every op with >= 2 children — for this linear history,
+// the single anchor op).
+//
+// Compaction is an explicit API (design decision 2026-09-05): this test
+// invokes it and asserts the retention target is met. Automatic
+// watermark-driven compaction remains a future wrapper (see TODO).
 //
 // The original end-append workload was vacated by run-length coalescing: it
-// collapsed to a single run op that already matched the retention target, so
-// the test passed without any compaction existing. The strided workload below
-// produces ~total non-collapsing ops, so the test fails again until
-// critical-version truncation (Section 3.5) lands.
+// collapsed to a single run op that already matched the retention target. The
+// strided workload below produces ~total non-collapsing ops, so the assertion
+// is meaningful: without compaction the log retains ~total ops.
 func TestTargetCriticalVersionCompaction(t *testing.T) {
 	a := NewRuneDocument(1)
 	b := NewRuneDocument(2)
@@ -48,6 +54,8 @@ func TestTargetCriticalVersionCompaction(t *testing.T) {
 	}
 	b.MergeFrom(a)
 	a.MergeFrom(b) // full sync: identical logs, identical frontier
+
+	a.Compact() // explicit API (design decision 2026-09-05): discard the acked history
 
 	keep := targetRetentionSet(a.doc.opLog)
 	if got, want := len(a.doc.opLog.ops), len(keep); got != want {

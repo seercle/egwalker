@@ -1,7 +1,9 @@
 package crdt
 
 import (
+	"os"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -486,6 +488,44 @@ func TestCompactZeroOpIdempotent(t *testing.T) {
 	}
 	if got := a.GetString(); got != "" {
 		t.Errorf("GetString() = %q, want empty", got)
+	}
+	a.Check()
+}
+
+// TestCompactTraceScale measures compaction at real editing-trace scale: the
+// full trace is replayed into a single replica, then Compact() must collapse
+// the log to the anchor while the visible content stays byte-identical and
+// Check() stays green. Heap numbers come from runtime.ReadMemStats around an
+// explicit GC on both sides, so the dead pre-compaction log is not counted
+// in the "after" reading; the printed lines are quoted verbatim in
+// CONTEXT.md.
+func TestCompactTraceScale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("trace replay is slow")
+	}
+	raw, err := os.ReadFile("../../resources/editing-trace.json")
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	a := NewRuneDocument(1)
+	if err := replayTrace(a, raw); err != nil {
+		t.Fatalf("replay trace: %v", err)
+	}
+	before := a.GetString()
+
+	ms := runtime.MemStats{}
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	t.Logf("before: ops=%d heap=%dMB (%d bytes)", len(a.doc.opLog.ops), ms.HeapAlloc>>20, ms.HeapAlloc)
+
+	a.Compact()
+
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	t.Logf("after: ops=%d heap=%dMB (%d bytes)", len(a.doc.opLog.ops), ms.HeapAlloc>>20, ms.HeapAlloc)
+
+	if a.GetString() != before {
+		t.Fatal("content changed across compaction")
 	}
 	a.Check()
 }
