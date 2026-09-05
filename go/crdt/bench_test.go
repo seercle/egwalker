@@ -65,6 +65,70 @@ func BenchmarkMergeAtScale(b *testing.B) {
 	}
 }
 
+// buildMapReplicaPair builds two map replicas sharing a common prefix of
+// n/2 keys, then diverging with disjoint key ranges. The prefix is shared
+// via an untimed b.MergeFrom(a): independently-set keys would share no
+// ancestor ops (the rune benchmark's convergence lesson). Map ops never
+// collapse (document.go:329-331), so each replica ends with exactly n ops
+// and the timed merge pulls n/2 remote ops into an n-op log.
+func buildMapReplicaPair(n int) (a, b *MapDocument[string, int]) {
+	a = NewMapDocument[string, int](0)
+	b = NewMapDocument[string, int](1)
+	common := n / 2
+	for i := 0; i < common; i++ {
+		a.Set("k0-"+strconv.Itoa(i), i)
+	}
+	b.MergeFrom(a)
+	for i := 0; i < n-common; i++ {
+		a.Set("k0-"+strconv.Itoa(common+i), i)
+		b.Set("k1-"+strconv.Itoa(common+i), i)
+	}
+	return a, b
+}
+
+// BenchmarkMapMergeAtScale measures a first sync between two diverged map
+// replicas, the direct comparator to BenchmarkMergeAtScale (rune text).
+// Linear merging predicts ~5x from 10k to 50k; the rune merge measured 7.75.
+// A materially larger ratio here would indicate the map merge path
+// (mergeInto + keyIndex rebuild) scales worse — a finding to record, not
+// fix, in this plan. Fixtures rebuild untimed per iteration; run with:
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkMapMergeAtScale' -benchmem -benchtime=3x
+func BenchmarkMapMergeAtScale(b *testing.B) {
+	for _, n := range []int{1_000, 10_000, 50_000} {
+		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				a, bb := buildMapReplicaPair(n)
+				b.StartTimer()
+
+				a.MergeFrom(bb)
+
+				b.StopTimer()
+				// Untimed convergence verification: reverse sync must bring
+				// both logs to 3n/2 ops (n shared + n/2 per divergent side;
+				// every map op has length 1).
+				bb.MergeFrom(a)
+				want := 3 * n / 2
+				if a.opLog.totalLV != lv(want) || bb.opLog.totalLV != lv(want) {
+					b.Fatalf("converged op counts: a=%d b=%d, want %d",
+						a.opLog.totalLV, bb.opLog.totalLV, want)
+				}
+				if v, ok := a.Get("k1-" + strconv.Itoa(n-1)); !ok || v != n-n/2-1 {
+					b.Fatalf("merged key k1-%d missing or wrong: %v %v", n-1, v, ok)
+				}
+				if v, ok := bb.Get("k0-" + strconv.Itoa(n-1)); !ok || v != n-n/2-1 {
+					b.Fatalf("reverse-synced key k0-%d missing or wrong: %v %v", n-1, v, ok)
+				}
+				// b.Loop fatals if called with the timer stopped, so re-arm it
+				// here; the untimed-to-timed gap is a few loop-machinery ns.
+				b.StartTimer()
+			}
+		})
+	}
+}
+
 // BenchmarkCheckoutScale measures full-history replay cost via checkout(log)
 // (crdt.go:598) at three log sizes. The log is built once per size (untimed);
 // checkout is pure and re-runnable.
