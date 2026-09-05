@@ -81,6 +81,24 @@ func (d *doc[C]) check(equal func(a, b *contentTree[C]) bool) {
 	}
 }
 
+// Compact collapses the op log into a single anchor op holding the current
+// content. Requires a fully synchronized document (single-tip frontier).
+// content must be the document's current visible snapshot rendered by the
+// family (GetString/GetItems) — the core cannot render family content itself.
+// The tree layer is rebuilt from the compacted log through checkout, the same
+// from-log construction path a full replay uses, and the branch frontier is
+// re-synced from the log exactly as syncRun does.
+func (d *doc[C]) Compact(content C) {
+	if err := d.opLog.Compact(content); err != nil {
+		panic("crdt: Compact: " + err.Error())
+	}
+	b := newBranch[C]()
+	b.snapshot = checkout(d.opLog)
+	b.frontier = make([]lv, len(d.opLog.frontier))
+	copy(b.frontier, d.opLog.frontier)
+	d.branch = b
+}
+
 // ==========================================
 // RuneDocument
 // ==========================================
@@ -125,8 +143,18 @@ func (doc *RuneDocument) MergeFrom(other *RuneDocument) {
 // Reset clears the document state.
 func (doc *RuneDocument) Reset() { doc.doc.Reset() }
 
+// Compact collapses the op log into a single anchor op holding the current
+// content. Requires a fully synchronized document (single-tip frontier).
+func (doc *RuneDocument) Compact() {
+	doc.doc.Compact(runeText(doc.GetString()))
+	doc.Check()
+}
+
 // Check verifies that the document's local branch matches a full checkout.
 func (doc *RuneDocument) Check() {
+	if doc.doc.opLog.anchorCoverage != nil {
+		checkCompacted(doc.doc.opLog)
+	}
 	doc.doc.check(func(a, b *contentTree[runeText]) bool {
 		var sa, sb strings.Builder
 		a.ForEachContent(func(r runeText) { sa.WriteString(string(r)) })
@@ -204,8 +232,18 @@ func (doc *ArrayDocument[T]) Del(pos, n int) {
 // Reset clears the document state.
 func (doc *ArrayDocument[T]) Reset() { doc.doc.Reset() }
 
+// Compact collapses the op log into a single anchor op holding the current
+// content. Requires a fully synchronized document (single-tip frontier).
+func (doc *ArrayDocument[T]) Compact() {
+	doc.doc.Compact(itemRun[T](doc.GetItems()))
+	doc.Check()
+}
+
 // Check verifies that the document's local branch matches a full checkout.
 func (doc *ArrayDocument[T]) Check() {
+	if doc.doc.opLog.anchorCoverage != nil {
+		checkCompacted(doc.doc.opLog)
+	}
 	doc.doc.check(func(a, b *contentTree[itemRun[T]]) bool {
 		var fa, fb []T
 		a.ForEachContent(func(r itemRun[T]) { fa = append(fa, []T(r)...) })
@@ -302,7 +340,7 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	for _, l := range concurrentLVs {
 		o := m.opLog.opAt(l)
 		if first || o.id.agent > bestID.agent || (o.id.agent == bestID.agent && o.id.seq > bestID.seq) {
-			bestV = o.content[0].Value
+			bestV = m.mapEntryAt(l).Value
 			bestID = o.id
 			bestLV = l
 			first = false
@@ -313,12 +351,21 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	if mergeable, ok := any(bestV).(Mergeable); ok {
 		for _, l := range concurrentLVs {
 			if l != bestLV {
-				mergeable.MergeFromAny(m.opLog.opAt(l).content[0].Value)
+				mergeable.MergeFromAny(m.mapEntryAt(l).Value)
 			}
 		}
 	}
 
 	return bestV, true
+}
+
+// mapEntryAt resolves the MapOp stored at character lv l. Map runs hold one
+// op per binding, except the compaction anchor which spans one lv per live
+// binding — so the entry index is the lv's offset within its run op (always 0
+// for ordinary length-1 map ops).
+func (m *MapDocument[K, V]) mapEntryAt(l lv) MapOp[K, V] {
+	i := m.opLog.opIdxAt(l)
+	return m.opLog.ops[i].content[int(l-m.opLog.opLV[i])]
 }
 
 // MergeFrom merges changes from another map document.
@@ -327,8 +374,9 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 		return
 	}
 	// Recursive merge for items with the same identity (LV). Map run content
-	// always holds exactly one MapOp; recursion applies to its .Value element
-	// when that value is Mergeable (map ops never collapse, so ids match).
+	// holds one MapOp per op (one per lv of the compaction anchor when the
+	// log is compacted); recursion applies to a .Value element when that
+	// value is Mergeable (map ops never collapse, so ids match).
 	for _, o := range other.opLog.ops {
 		otherElems := o.content
 		if len(otherElems) == 0 {
@@ -336,6 +384,14 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 		}
 		if _, ok := any(otherElems[0].Value).(Mergeable); !ok {
 			continue
+		}
+		if m.opLog.anchorCoverage != nil {
+			if covered, ok := m.opLog.anchorCoverage[o.id.agent]; ok && o.id.seq <= covered {
+				// Pre-critical op: its contribution is already folded into
+				// the anchor's converged snapshot, and its id no longer
+				// exists in our log to merge into.
+				continue
+			}
 		}
 		if lastSeq, ok := m.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.
@@ -356,6 +412,29 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 	}
 }
 
+// Compact collapses the op log into a single anchor op holding the current
+// content. Requires a fully synchronized document (single-tip frontier). The
+// snapshot is the LWW winner per key from the existing accessors (Keys/Get);
+// values are carried by reference exactly as the merge paths treat them, and
+// the discarded old log leaves the anchor their single owner.
+func (m *MapDocument[K, V]) Compact() {
+	entries := make(mapRun[K, V], 0, len(m.keyIndex))
+	for _, k := range m.Keys() {
+		if v, ok := m.Get(k); ok {
+			entries = append(entries, MapOp[K, V]{Key: k, Value: v})
+		}
+	}
+	if err := m.opLog.Compact(entries); err != nil {
+		panic("crdt: Compact: " + err.Error())
+	}
+	// The anchor op spans one lv per live binding (entry i sits at lv i), so
+	// each key indexes directly into the anchor's span.
+	m.keyIndex = make(map[K][]lv, len(entries))
+	for i, e := range entries {
+		m.keyIndex[e.Key] = append(m.keyIndex[e.Key], lv(i))
+	}
+}
+
 func (m *MapDocument[K, V]) MergeFromAny(other any) {
 	if o, ok := other.(*MapDocument[K, V]); ok {
 		m.MergeFrom(o)
@@ -366,7 +445,9 @@ func (m *MapDocument[K, V]) MergeFromAny(other any) {
 func (m *MapDocument[K, V]) Keys() []K {
 	keysMap := make(map[K]bool)
 	for _, o := range m.opLog.ops {
-		keysMap[o.content[0].Key] = true
+		for _, e := range o.content {
+			keysMap[e.Key] = true
+		}
 	}
 	keys := make([]K, 0, len(keysMap))
 	for k := range keysMap {

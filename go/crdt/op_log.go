@@ -358,3 +358,89 @@ func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 		pushRemoteOpLV(dest, o, parents)
 	}
 }
+
+// ==========================================
+// Snapshot-Anchor Compaction
+// ==========================================
+
+// isCompacted reports whether the log has been collapsed to a snapshot anchor.
+func (log *opLog[C]) isCompacted() bool { return log.anchorCoverage != nil }
+
+// cloneRemoteVersion shallow-copies a version vector (small: one entry per
+// agent).
+func cloneRemoteVersion(m remoteVersion) remoteVersion {
+	if m == nil {
+		return nil
+	}
+	out := make(remoteVersion, len(m))
+	for agent, seq := range m {
+		out[agent] = seq
+	}
+	return out
+}
+
+// Compact collapses the entire log into a single anchor op holding the current
+// content, discarding all history including tombstones. Precondition (v1): the
+// document is fully synchronized — no unconverged concurrency — validated by
+// requiring a single-tip frontier. version is preserved; a coverage table
+// (clone of version) lets future (agent, seq) parent references below the
+// compaction point resolve to the anchor. The content snapshot is supplied by
+// the document layer (the log must not duplicate checkout logic); an empty
+// snapshot compacts to a zero-op log that still carries the coverage table, so
+// tombstone-only documents compact too.
+func (log *opLog[C]) Compact(content C) error {
+	if len(log.frontier) != 1 {
+		return fmt.Errorf("oplog: Compact requires a fully synchronized document (frontier has %d tips)", len(log.frontier))
+	}
+	for i := range log.ops {
+		if log.ops[i].id.agent != anchorAgent {
+			continue
+		}
+		if log.anchorCoverage != nil && i == 0 {
+			continue // our own anchor from a previous Compact
+		}
+		return fmt.Errorf("oplog: Compact: agent %d is reserved for the compaction anchor", anchorAgent)
+	}
+	fresh := newOpLog[C]()
+	if content.Len() > 0 {
+		// Anchor ops must not fold into later ops and must survive idToLV
+		// rebuilds; pushLocalOp already recorded idToLV[{anchorAgent, 0}].
+		fresh.pushLocalOp(anchorAgent, op[C]{opType: opTypeIns, pos: 0, content: content})
+		fresh.ops[0].coverage = cloneRemoteVersion(log.version)
+	}
+	fresh.anchorCoverage = cloneRemoteVersion(log.version)
+	log.replaceWith(fresh)
+	return nil
+}
+
+// replaceWith swaps in the fresh log's structural state after a rebuild.
+// version is deliberately NOT copied: compaction never rewrites the version
+// vector (skip-delivery depends on it), and the fresh log's own vector only
+// holds the anchor sentinel that pushLocalOp recorded.
+func (log *opLog[C]) replaceWith(fresh *opLog[C]) {
+	log.ops = fresh.ops
+	log.opLV = fresh.opLV
+	log.totalLV = fresh.totalLV
+	log.frontier = fresh.frontier
+	log.idToLV = fresh.idToLV
+	log.anchorCoverage = fresh.anchorCoverage
+}
+
+// checkCompacted validates the compacted-log invariants: the log starts with
+// the anchor op carrying coverage (or, for an empty-content anchor, holds no
+// ops at all), and coverage never exceeds version. Called from the document
+// Check() implementations when the log is compacted.
+func checkCompacted[C content[C]](log *opLog[C]) {
+	if log.totalLV > 0 {
+		if len(log.ops) == 0 || log.ops[0].id.agent != anchorAgent || log.ops[0].coverage == nil {
+			panic("Check: compacted log must start with an anchor op carrying coverage")
+		}
+	} else if len(log.ops) != 0 {
+		panic("Check: compacted log with zero lvs must hold no ops")
+	}
+	for agent, seq := range log.anchorCoverage {
+		if log.version[agent] < seq {
+			panic("Check: anchorCoverage exceeds version")
+		}
+	}
+}

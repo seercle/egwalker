@@ -27,13 +27,19 @@ const (
 	opTypeDel opType = "del"
 )
 
+// anchorAgent is the sentinel agent id reserved for compaction anchor ops.
+// User documents must never use it; Compact refuses a log that holds real ops
+// from this agent.
+const anchorAgent = -1
+
 type op[C content[C]] struct {
-	opType  opType
-	content C
-	length  int // Number of characters/elements this op spans (set at push)
-	pos     int // Original position for local ops
-	id      id
-	parents []lv
+	opType   opType
+	content  C
+	length   int // Number of characters/elements this op spans (set at push)
+	pos      int // Original position for local ops
+	id       id
+	parents  []lv
+	coverage remoteVersion // set only on anchor ops: agent -> max seq covered
 }
 
 type remoteVersion map[int]int
@@ -45,6 +51,10 @@ type opLog[C content[C]] struct {
 	frontier []lv
 	version  remoteVersion
 	idToLV   map[id]lv
+
+	// anchorCoverage is set only on compacted logs: a snapshot of version at
+	// compaction time (agent -> max seq covered by the anchor). nil otherwise.
+	anchorCoverage remoteVersion
 }
 
 type diffResult struct {
