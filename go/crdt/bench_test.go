@@ -2,6 +2,7 @@ package crdt
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"strconv"
 	"testing"
@@ -249,4 +250,86 @@ func BenchmarkBinaryRoundTrip(b *testing.B) {
 	// Report after the loop: b.Loop's first call resets the timer, which
 	// clears any metrics reported before it.
 	b.ReportMetric(float64(len(blob)), "blob-bytes")
+}
+
+// buildDeltaFixtureB builds a sender with n single-char ops and a receiver
+// synced after the first n-k of them (a real incremental receiver: a genuine
+// common-ancestor prefix, then the sender gains the last k ops it is
+// missing). Strided positions keep every insert its own op, so op count
+// tracks edit count. Also returns the three measured frames.
+func buildDeltaFixtureB(b *testing.B, n int) (sender, receiver *RuneDocument, fullBlob, fullDeltaBlob, incrBlob []byte) {
+	sender = NewRuneDocument(0)
+	k := n / 10
+	for i := 0; i < n-k; i++ {
+		sender.Ins((i*7919)%(sender.Len()+1), "x")
+	}
+	receiver = NewRuneDocument(1)
+	receiver.MergeFrom(sender)
+	for i := 0; i < k; i++ {
+		sender.Ins((i*104729)%(sender.Len()+1), "y")
+	}
+	var err error
+	fullBlob, err = MarshalBinary(sender.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		b.Fatalf("MarshalBinary: %v", err)
+	}
+	fullDeltaBlob, err = sender.Delta(map[int]int{})
+	if err != nil {
+		b.Fatalf("Delta(empty): %v", err)
+	}
+	incrBlob, err = sender.Delta(receiver.Version())
+	if err != nil {
+		b.Fatalf("Delta(since): %v", err)
+	}
+	return
+}
+
+// BenchmarkDeltaAtScale measures delta-frame size and apply cost against
+// whole-log frames at trace scale: build a document with n ops, then report
+// (a) full MarshalBinary size, (b) Delta(since=empty) size, (c) Delta vs a
+// receiver missing only the last k = n/10 ops — the incremental case delta
+// frames exist for — and (d) apply time for case (c). Fixtures rebuild
+// untimed per iteration; run with:
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkDeltaAtScale' -benchmem -benchtime=3x
+func BenchmarkDeltaAtScale(b *testing.B) {
+	for _, n := range []int{10_000, 50_000} {
+		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				b.StopTimer()
+				sender, recv, fullBlob, _, incrBlob := buildDeltaFixtureB(b, n)
+				b.SetBytes(int64(len(incrBlob)))
+				b.StartTimer()
+
+				recv.ApplyDelta(incrBlob)
+
+				b.StopTimer()
+				b.ReportMetric(float64(len(fullBlob)), "full-frame-bytes")
+				b.ReportMetric(float64(len(incrBlob)), "delta-incr-bytes")
+				b.ReportMetric(float64(len(sender.doc.opLog.ops)), "log-ops")
+				b.StartTimer()
+			}
+
+			// Untimed convergence verification on a fresh (deterministic)
+			// fixture: one check covers all iterations.
+			sender, recv2, fullBlob, fullDeltaBlob, incrBlob := buildDeltaFixtureB(b, n)
+			recv2.ApplyDelta(incrBlob)
+			if recv2.GetString() != sender.GetString() {
+				b.Fatalf("content diverged after incremental delta: %d vs %d bytes", len(recv2.GetString()), len(sender.GetString()))
+			}
+			if !maps.Equal(recv2.Version(), sender.Version()) {
+				b.Fatal("version diverged after incremental delta")
+			}
+			recv2.Check()
+
+			// b.Loop resets the timer (and metrics) on its first call, so
+			// report the size figures here, after the loop.
+			b.ReportMetric(float64(len(fullBlob)), "full-frame-bytes")
+			b.ReportMetric(float64(len(fullDeltaBlob)), "delta-empty-since-bytes")
+			b.ReportMetric(float64(len(incrBlob)), "delta-incr-bytes")
+			b.ReportMetric(float64(len(sender.doc.opLog.ops)), "log-ops")
+		})
+	}
 }

@@ -2,6 +2,7 @@ package crdt
 
 import (
 	"fmt"
+	"maps"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -390,6 +391,263 @@ func FuzzBinaryFrame(f *testing.F) {
 			t.Fatalf("re-encode of decoded frame: %v", err)
 		}
 	})
+}
+
+// FuzzDeltaConvergence is the binding convergence oracle for delta transport:
+// three replicas sync through an interleaving of DELTA exchanges
+// (ApplyDelta(Delta(since))) and MergeFrom, with optional all-or-nothing
+// Compact at shared all-converged quiescent checkpoints — the compaction
+// oracle's discipline (FuzzMergeConvergence's gated checkpoint region), which
+// structurally avoids the documented v1 boundary panics (compacted src with
+// post-compaction edits -> full dest, non-aligned compaction points,
+// partial-state anchor arrival, zero-op/edited-empty-anchor dest parentage).
+// A panic from a documented-boundary topology would be a body-structure bug;
+// a panic from anything else is a crasher. The map variant exercises the map
+// reconciliation path (anchor-by-key) through the same topology.
+func FuzzDeltaConvergence(f *testing.F) {
+	// Rune pattern exercising straddle + delta-then-merge mixing: an insert,
+	// a delta/delta pair sync, a checkpoint compaction, a second insert
+	// synced via delta across compacted peers, another checkpoint, and an
+	// unsynced round with a merge-only pair sync.
+	f.Add([]byte{0, 97, 0, 1, 1, 0, 0, 98, 0, 0, 0, 0, 1, 99, 2, 1, 0, 99, 0, 0, 98, 0, 0})
+	// Compacted rune pattern: compaction checkpoint first, then
+	// post-compaction delta exchange between compacted peers.
+	f.Add([]byte{0, 97, 0, 0, 0, 0, 0, 1, 98, 0, 0, 0})
+	// Map pattern: Set, delta/merge syncs, and a checkpoint.
+	f.Add([]byte{1, 0, 5, 7, 9, 0, 0, 0, 2, 5, 3, 0, 0, 0})
+	addSeeds(f, [][]byte{
+		randBytes(31, 128),
+		randBytes(32, 256),
+		randBytes(33, 512),
+	})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) == 0 {
+			return
+		}
+		r := &byteReader{data: data}
+		mode, _ := r.next()
+		if mode%2 == 0 {
+			fuzzDeltaRune(t, r)
+		} else {
+			fuzzDeltaMap(t, r)
+		}
+	})
+}
+
+// fuzzDeltaRune runs the three-replica hub loop on RuneDocuments.
+func fuzzDeltaRune(t *testing.T, r *byteReader) {
+	t.Helper()
+	docs := []*RuneDocument{
+		NewRuneDocument(0),
+		NewRuneDocument(1),
+		NewRuneDocument(2),
+	}
+	target := 0
+
+	for {
+		d, ok := nextTextDelta(docs[target].Len(), r)
+		if !ok {
+			break
+		}
+		applyTextDelta(docs[target], d)
+		target = (target + 1) % len(docs)
+
+		// Occasionally sync a pair; each direction independently chooses
+		// delta or merge transport, interleaving both must converge.
+		m, ok := r.next()
+		if !ok || m%3 != 0 {
+			continue
+		}
+		a := (int(m) / 3) % len(docs)
+		b := (a + 1) % len(docs)
+		ta, _ := r.next()
+		tb, ok := r.next()
+		if !ok {
+			break
+		}
+		if ta%2 == 0 {
+			docs[a].ApplyDelta(mustApply(t, docs[a], docs[b]))
+		} else {
+			docs[a].MergeFrom(docs[b])
+		}
+		if tb%2 == 0 {
+			docs[b].ApplyDelta(mustApply(t, docs[b], docs[a]))
+		} else {
+			docs[b].MergeFrom(docs[a])
+		}
+		if ga, gb := docs[a].GetString(), docs[b].GetString(); ga != gb {
+			t.Fatalf("delta-synced replicas %d and %d diverged: %q vs %q", a, b, ga, gb)
+		}
+		if !maps.Equal(docs[a].Version(), docs[b].Version()) {
+			t.Fatalf("delta-synced replicas %d and %d diverged in version: %v vs %v", a, b, docs[a].Version(), docs[b].Version())
+		}
+
+		// Shared all-converged checkpoint (the compaction oracle's
+		// discipline): converge all three via delta exchanges, then compact
+		// them together or not at all so compacted/compaction-point state
+		// never diverges between peers — the documented boundary panics must
+		// never fire from random inputs.
+		g, ok := r.next()
+		if !ok || g%4 != 0 {
+			continue
+		}
+		for i := 1; i < len(docs); i++ {
+			docs[0].ApplyDelta(mustApply(t, docs[0], docs[i]))
+		}
+		for i := 1; i < len(docs); i++ {
+			docs[i].ApplyDelta(mustApply(t, docs[i], docs[0]))
+			if gi, g0 := docs[i].GetString(), docs[0].GetString(); gi != g0 {
+				t.Fatalf("replicas %d and 0 diverged before compaction: %q vs %q", i, gi, g0)
+			}
+			if !maps.Equal(docs[i].Version(), docs[0].Version()) {
+				t.Fatalf("replicas %d and 0 diverged in version before compaction: %v vs %v", i, docs[i].Version(), docs[0].Version())
+			}
+		}
+		// Fully synced logs share one frontier; a single tip is Compact's
+		// precondition. Concurrent concurrency leaves >1 tip: skip.
+		if len(docs[0].doc.opLog.frontier) != 1 {
+			continue
+		}
+		for i := range docs {
+			docs[i].Compact()
+		}
+	}
+
+	// Final full sync: all replicas must agree (content, version, Check).
+	for i := 1; i < len(docs); i++ {
+		docs[0].MergeFrom(docs[i])
+	}
+	for i := 1; i < len(docs); i++ {
+		docs[i].MergeFrom(docs[0])
+		if docs[i].GetString() != docs[0].GetString() {
+			t.Fatalf("replica %d failed to converge: %q vs %q", i, docs[i].GetString(), docs[0].GetString())
+		}
+		if !maps.Equal(docs[i].Version(), docs[0].Version()) {
+			t.Fatalf("replica %d version diverged: %v vs %v", i, docs[i].Version(), docs[0].Version())
+		}
+		docs[i].Check()
+	}
+	docs[0].Check()
+}
+
+// fuzzDeltaMap runs the same loop on MapDocuments (string keys, int values —
+// a non-document value shape; document-typed Mergeable values stay
+// merge-only by design).
+func fuzzDeltaMap(t *testing.T, r *byteReader) {
+	t.Helper()
+	docs := []*MapDocument[string, int]{
+		NewMapDocument[string, int](0),
+		NewMapDocument[string, int](1),
+		NewMapDocument[string, int](2),
+	}
+
+	for {
+		x, ok := r.next()
+		if !ok {
+			break
+		}
+		y, ok := r.next()
+		if !ok {
+			break
+		}
+		target := int(x) % len(docs)
+
+		if y%3 != 0 {
+			k, ok := r.next()
+			if !ok {
+				break
+			}
+			v, ok := r.next()
+			if !ok {
+				break
+			}
+			docs[target].Set(fmt.Sprintf("k-%d", int(k)%8), int(v))
+		}
+
+		// Sync + checkpoint block (same structure as the rune loop).
+		m, ok := r.next()
+		if !ok || m%3 != 0 {
+			continue
+		}
+		a := (int(m) / 3) % len(docs)
+		b := (a + 1) % len(docs)
+		ta, _ := r.next()
+		tb, ok := r.next()
+		if !ok {
+			break
+		}
+		if ta%2 == 0 {
+			blob, err := docs[b].Delta(docs[a].Version())
+			if err != nil {
+				t.Fatalf("map Delta: %v", err)
+			}
+			docs[a].ApplyDelta(blob)
+		} else {
+			docs[a].MergeFrom(docs[b])
+		}
+		if tb%2 == 0 {
+			blob, err := docs[a].Delta(docs[b].Version())
+			if err != nil {
+				t.Fatalf("map Delta: %v", err)
+			}
+			docs[b].ApplyDelta(blob)
+		} else {
+			docs[b].MergeFrom(docs[a])
+		}
+		if !mapDocEqual(docs[a], docs[b]) {
+			t.Fatalf("delta-synced map replicas %d and %d diverged", a, b)
+		}
+		if !maps.Equal(docs[a].Version(), docs[b].Version()) {
+			t.Fatalf("delta-synced map replicas %d and %d diverged in version: %v vs %v", a, b, docs[a].Version(), docs[b].Version())
+		}
+
+		// Shared all-converged checkpoint, same discipline as the rune loop.
+		g, ok := r.next()
+		if !ok || g%4 != 0 {
+			continue
+		}
+		for i := 1; i < len(docs); i++ {
+			blob, err := docs[i].Delta(docs[0].Version())
+			if err != nil {
+				t.Fatalf("map Delta: %v", err)
+			}
+			docs[0].ApplyDelta(blob)
+		}
+		for i := 1; i < len(docs); i++ {
+			blob, err := docs[0].Delta(docs[i].Version())
+			if err != nil {
+				t.Fatalf("map Delta: %v", err)
+			}
+			docs[i].ApplyDelta(blob)
+			if !mapDocEqual(docs[i], docs[0]) {
+				t.Fatalf("map replicas %d and 0 diverged before compaction", i)
+			}
+			if !maps.Equal(docs[i].Version(), docs[0].Version()) {
+				t.Fatalf("map replicas %d and 0 diverged in version before compaction", i)
+			}
+		}
+		if len(docs[0].opLog.frontier) != 1 {
+			continue
+		}
+		for i := range docs {
+			docs[i].Compact()
+		}
+	}
+
+	// Final full sync.
+	for i := 1; i < len(docs); i++ {
+		docs[0].MergeFrom(docs[i])
+	}
+	for i := 1; i < len(docs); i++ {
+		docs[i].MergeFrom(docs[0])
+		if !mapDocEqual(docs[0], docs[i]) {
+			t.Fatalf("map replica %d failed to converge", i)
+		}
+		if !maps.Equal(docs[i].Version(), docs[0].Version()) {
+			t.Fatalf("map replica %d version diverged", i)
+		}
+	}
 }
 
 // FuzzArrayDocument checks convergence of replicated ArrayDocuments under

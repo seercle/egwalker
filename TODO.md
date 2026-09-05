@@ -74,6 +74,42 @@
 
 ## Tests / hygiene
 
+- [x] **Delta frames — resolved 2026-09-05** — `EGD1` delta frame format
+  (eleven columnar sections: run-encoded ops with `(agent, endSeq)` parents,
+  no Frontier, optional Coverage, informational-never-folded SenderVersion),
+  shared `ingestOp` ingestion, `Version()/Delta/ApplyDelta` on all three
+  document types, and the binding equivalence oracle `FuzzDeltaConvergence`
+  (delta/merge interleaving + all-or-nothing compaction checkpoints;
+  120 s → 42,006 execs, 0 crashers; re-runs clean: `FuzzMergeConvergence`
+  60 s → 66,947 execs, `FuzzBinaryFrame` 60 s → 1,863,656 execs after the
+  `ingestOp` refactor). Measured (`BenchmarkDeltaAtScale`, -benchtime=3x):
+  n=10,000: full binary frame 20,277 B / empty-since delta 22,963 B /
+  incremental delta 4,336 B, applied in 82.70 ms (82,697,750 ns/op);
+  n=50,000: 40,851 / 50,590 / 25,574 B, applied in 138.23 ms
+  (138,231,615 ns/op) — incremental apply is superlinear in log size
+  (parent resolution's backward scan; see the parked `runIdxForSeq` item).
+  Trace scale (`TestDeltaTraceScale`, 83,751 log ops): empty-since delta
+  397,126 B vs full binary frame 327,592 B, content byte-identical,
+  `Check()` green. Parked notes: `SenderVersion` is unused by the applier
+  (a future ack/watermark wrapper would be its first consumer); map/array
+  delta reconciliation inherits `mergeRecursive`'s shape (anchor-by-key for
+  map values, element-0-only recursive reconciliation for array elements —
+  the F4 carried carve-out); delta emission is an O(#ops) scan per sync (a
+  per-agent seq index would make it O(missing), tying into the parked
+  `runIdxForSeq` item above); document-typed `Mergeable` values (e.g.
+  `ArrayDocument[*MapDocument]`) stay merge-only — deltas for those shapes
+  are out of scope, so the fuzz oracle exercises rune, plain map, and
+  non-document Mergeable value shapes; `UnmarshalDelta` accepts the
+  reduplicated dual-coverage shape (anchor record with coverage AND riding
+  log-level table where the wire format only requires one) — decoding is
+  permissive where the encoder never emits it, parked as a tightening
+  candidate (the hostile suite's `rowCount` cases pin the rejection it does
+  enforce); the parent `(agent, endSeq)` encoding has a round-trip drift
+  guard only via `TestDeltaFrameLevelRoundTrip` (byte-level re-encode
+  identity of Parents is not pinned); the Coverage column truncation case
+  has no dedicated hostile case (an empty/1-row body truncation overlaps
+  the generic column-truncation test's `uncompacted Coverage body` skip).
+
 - [ ] **Extend FuzzDocumentOps's textChar alphabet** so fuzz inputs can
   become multibyte / invalid-UTF-8 document content — op-stream bytes
   currently map to ASCII only, so the raw-byte path is pinned by unit tests

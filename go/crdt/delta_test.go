@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/binary"
 	"maps"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -943,4 +944,43 @@ func TestDeltaFrameHostileCoverage(t *testing.T) {
 		corrupted[colDCoverage] = reencodeCoverageBody(rows2)
 		hostiledeltaCase(t, deltaFrameJoin(header, corrupted), "binary: anchor record without coverage")
 	})
+}
+
+// TestDeltaTraceScale applies the real editing trace through the delta
+// transport at trace scale: replay the trace into one replica, then hand the
+// whole content to a fresh replica as one Delta frame. Content must be
+// byte-identical, Check() green; the logged sizes are quoted verbatim in
+// CONTEXT.md.
+func TestDeltaTraceScale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("trace replay is slow")
+	}
+	raw, err := os.ReadFile("../../resources/editing-trace.json")
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	a := NewRuneDocument(1)
+	if err := replayTrace(a, raw); err != nil {
+		t.Fatalf("replay trace: %v", err)
+	}
+
+	fresh := NewRuneDocument(2)
+	blob, err := a.Delta(fresh.Version())
+	if err != nil {
+		t.Fatalf("Delta: %v", err)
+	}
+	fresh.ApplyDelta(blob)
+
+	if got, want := fresh.GetString(), a.GetString(); got != want {
+		t.Fatalf("content diverged at trace scale")
+	}
+	if !maps.Equal(fresh.Version(), a.Version()) {
+		t.Fatalf("version diverged at trace scale")
+	}
+	fullBlob, err := MarshalBinary(a.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	t.Logf("trace delta (empty since): %d bytes vs full binary frame %d bytes (%d log ops)", len(blob), len(fullBlob), len(a.doc.opLog.ops))
+	fresh.Check()
 }
