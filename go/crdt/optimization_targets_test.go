@@ -59,6 +59,6 @@ func TestTargetCriticalVersionCompaction(t *testing.T) {
 
 	keep := targetRetentionSet(a.doc.opLog)
 	if got, want := len(a.doc.opLog.ops), len(keep); got != want {
-		t.Errorf("critical-version truncation not implemented: opLog retains %d ops after full sync, compaction target is %d (frontier + critical versions)", got, want)
+		t.Errorf("compaction retention target not met: opLog retains %d ops, want %d (frontier + critical versions)", got, want)
 	}
 }

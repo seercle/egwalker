@@ -48,7 +48,17 @@
   per converged subtree instead of one global snapshot); merging from
   compacted into partially-converged state (panics today — unsupported in
   v1); late-compaction divergence is silently absorbed (documented v1
-  boundary).
+  boundary); a compacted src WITH post-compaction edits merging into a
+  full-history dest also panics (the F1 boundary: the incoming anchor is
+  covered-skipped at op_log.go:389-399, then the new op's `(-1, seq)`
+  parent edge has no agent-`-1` op to resolve against and panics in
+  `runIdxForSeq`, op_log.go:202). Supported merge directions today: both
+  sides compacted (shared or aligned compaction points, modulo the silent
+  absorption above); compacted dest ← full src; fresh (empty) dest
+  adoption; compacted src with NO post-compaction edits ← full dest.
+  Follow-up: `runIdxForSeq`'s "no op from agent -1 covers seq N" message
+  is unclear for this topology — a future hardening can convert it to the
+  documented-topology message.
 
 ## Tests / hygiene
 
