@@ -32,6 +32,17 @@ func buildBinaryTestLogT() *opLog[runeText] {
 	return d1.doc.opLog
 }
 
+// runeDocFromLog wraps a decoded opLog in a RuneDocument, rebuilding the tree
+// layer through checkout — the same from-log construction path doc.Compact
+// uses for its fresh branch.
+func runeDocFromLog(log *opLog[runeText], agent int) *RuneDocument {
+	d := &doc[runeText]{opLog: log, agent: agent, branch: newBranch[runeText]()}
+	d.branch.snapshot = checkout(log)
+	d.branch.frontier = make([]lv, len(log.frontier))
+	copy(d.branch.frontier, log.frontier)
+	return &RuneDocument{doc: d}
+}
+
 func TestBinaryRoundTrip(t *testing.T) {
 	log := buildBinaryTestLog(t)
 	want := log.Marshal()
@@ -73,13 +84,186 @@ func TestBinaryRoundTripEmpty(t *testing.T) {
 	}
 }
 
+// TestBinaryRoundTripCompacted pins that a compacted log round-trips: the
+// frame must carry the anchor coverage table so the decoded log is still
+// compacted, keeps its version vector (the per-op columns alone cannot
+// re-derive the pre-critical high-water marks), and merges like the original.
+func TestBinaryRoundTripCompacted(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "persist me")
+	a.Del(0, 4)
+	a.Compact()
+
+	data, err := MarshalBinary(a.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := UnmarshalBinary[runeText](data, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := runeDocFromLog(log, 1)
+
+	if got, want := b.GetString(), a.GetString(); got != want {
+		t.Errorf("content: %q != %q", got, want)
+	}
+	if !b.doc.opLog.isCompacted() {
+		t.Error("unmarshaled compacted log lost anchorCoverage")
+	}
+	for agent, seq := range a.doc.opLog.anchorCoverage {
+		if got := b.doc.opLog.anchorCoverage[agent]; got != seq {
+			t.Errorf("coverage[%d]: %d != %d", agent, seq, got)
+		}
+	}
+	if !reflect.DeepEqual(b.doc.opLog.version, a.doc.opLog.version) {
+		t.Errorf("version maps differ: want %v, got %v", a.doc.opLog.version, b.doc.opLog.version)
+	}
+	if !reflect.DeepEqual(b.doc.opLog.ops[0].coverage, a.doc.opLog.ops[0].coverage) {
+		t.Errorf("anchor op coverage differs: want %v, got %v", a.doc.opLog.ops[0].coverage, b.doc.opLog.ops[0].coverage)
+	}
+	// The round-tripped replica must still merge like the original: merge the
+	// same concurrent peer into both and require identical results. (c re-does
+	// the history concurrently, never having synced with a, so the union is
+	// not c's own state — the contract is that b behaves exactly like a.)
+	c := NewRuneDocument(2)
+	c.Ins(0, "persist me")
+	c.Del(0, 4)
+	c.Ins(0, "more ")
+	a.MergeFrom(c)
+	b.MergeFrom(c)
+	if got, want := b.GetString(), a.GetString(); got != want {
+		t.Errorf("post-roundtrip merge: %q != %q", got, want)
+	}
+	a.Check()
+	// Re-delivering the peer's ops must be skipped entirely — the
+	// reconstructed version vector claims the peer's history.
+	before := b.GetString()
+	b.MergeFrom(c)
+	if got := b.GetString(); got != before {
+		t.Errorf("re-delivered ops changed content: %q != %q", got, before)
+	}
+	b.Check()
+}
+
+// TestBinaryRoundTripCompactedAnchorless pins the two compacted shapes that
+// hold no anchor op: the zero-op log left by tombstone-only compaction, and
+// the edited empty-anchor log a local edit produces from it. Both are
+// compacted (anchorCoverage set) and must stay that way across the frame.
+func TestBinaryRoundTripCompactedAnchorless(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "abc")
+	a.Del(0, 3)
+	a.Compact()
+	if len(a.doc.opLog.ops) != 0 || !a.doc.opLog.isCompacted() {
+		t.Fatalf("expected a zero-op compacted log, got %d ops, compacted %v",
+			len(a.doc.opLog.ops), a.doc.opLog.isCompacted())
+	}
+
+	data, err := MarshalBinary(a.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err := UnmarshalBinary[runeText](data, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !round.isCompacted() {
+		t.Error("zero-op compacted log lost anchorCoverage")
+	}
+	if !reflect.DeepEqual(round.anchorCoverage, a.doc.opLog.anchorCoverage) {
+		t.Errorf("anchorCoverage: want %v, got %v", a.doc.opLog.anchorCoverage, round.anchorCoverage)
+	}
+	if !reflect.DeepEqual(round.version, a.doc.opLog.version) {
+		t.Errorf("version: want %v, got %v", a.doc.opLog.version, round.version)
+	}
+
+	// Edited empty-anchor shape: a local edit lands on the zero-op log, so
+	// the log holds real ops but still no anchor op.
+	a.Ins(0, "x")
+	data, err = MarshalBinary(a.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err = UnmarshalBinary[runeText](data, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(round.ops) != 1 || round.ops[0].id.agent == anchorAgent {
+		t.Fatalf("expected an edited empty-anchor log, got %d ops, ops[0] agent %d",
+			len(round.ops), round.ops[0].id.agent)
+	}
+	if !round.isCompacted() {
+		t.Error("edited empty-anchor log lost anchorCoverage")
+	}
+	if !reflect.DeepEqual(round.anchorCoverage, a.doc.opLog.anchorCoverage) {
+		t.Errorf("anchorCoverage: want %v, got %v", a.doc.opLog.anchorCoverage, round.anchorCoverage)
+	}
+	if !reflect.DeepEqual(round.version, a.doc.opLog.version) {
+		t.Errorf("version: want %v, got %v", a.doc.opLog.version, round.version)
+	}
+	b := runeDocFromLog(round, 1)
+	if got, want := b.GetString(), a.GetString(); got != want {
+		t.Errorf("content: %q != %q", got, want)
+	}
+	b.Check()
+}
+
+// TestBinaryV1StillDecodes pins v1 frame compatibility: v1 predates the
+// coverage column and can only describe uncompacted logs, so decode must
+// accept it and produce an uncompacted log.
+func TestBinaryV1StillDecodes(t *testing.T) {
+	// A hand-built v1 frame of the empty log — the exact encoding v1 writers
+	// produced (ten zero-count columns, no Coverage column).
+	log, err := UnmarshalBinary[runeText](
+		binaryZstdEncoder.EncodeAll(emptyColumns(frameHeader(1)), nil), RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log.isCompacted() {
+		t.Error("v1 frame decoded as compacted")
+	}
+	if len(log.ops) != 0 || len(log.frontier) != 0 {
+		t.Errorf("v1 empty frame decoded to %d ops, frontier %v", len(log.ops), log.frontier)
+	}
+}
+
+// TestBinaryRoundTripCompactedZeroSeq pins a subtle version-fold case: a
+// version entry of exactly 0 (a single length-1 op at seq 0) has no surviving
+// op to re-derive it from — the anchor op re-derives only the -1 sentinel —
+// so the coverage fold must create the key, not just raise existing values.
+func TestBinaryRoundTripCompactedZeroSeq(t *testing.T) {
+	a := NewRuneDocument(5)
+	a.Ins(0, "x")
+	a.Compact()
+	if !reflect.DeepEqual(a.doc.opLog.version, remoteVersion{5: 0}) {
+		t.Fatalf("setup: version = %v, want map[5:0]", a.doc.opLog.version)
+	}
+
+	data, err := MarshalBinary(a.doc.opLog, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err := UnmarshalBinary[runeText](data, RuneTextCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !round.isCompacted() {
+		t.Error("lost anchorCoverage")
+	}
+	if !reflect.DeepEqual(round.version, a.doc.opLog.version) {
+		t.Errorf("version: want %v, got %v", a.doc.opLog.version, round.version)
+	}
+}
+
 // frameHeader starts a hand-crafted frame: magic + uvarint version.
 func frameHeader(version uint64) []byte {
 	return binary.AppendUvarint(append([]byte{}, binaryMagic...), version)
 }
 
-// emptyColumns appends ten zero-count columns — the exact encoding of an
-// empty log — completing a valid frame after frameHeader.
+// emptyColumns appends the ten zero-count columns of an empty log. A v2 frame
+// additionally carries the (empty) Coverage column, appended by callers that
+// need a complete v2 frame — see TestBinaryV1StillDecodes and the trailing
+// bytes garbage case.
 func emptyColumns(frame []byte) []byte {
 	zero := binary.AppendUvarint(nil, 0)
 	for range 10 {
@@ -98,6 +282,52 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 	compress := func(frame []byte) []byte {
 		return binaryZstdEncoder.EncodeAll(frame, nil)
 	}
+
+	// hostileCols builds the magic, version, and ten op columns of a frame
+	// describing `ops` length-1 ins runs by a single agent at seq 0. The
+	// Coverage column is left for the caller so coverage cases can shape,
+	// truncate, or omit it.
+	hostileCols := func(agent int64, ops int) []byte {
+		f := frameHeader(binaryVersion)
+		f = appendBinaryColumn(f, binary.AppendUvarint(binary.AppendUvarint(nil, 1), 0)) // Types: one ins run
+		f = appendBinaryColumn(f, binary.AppendUvarint(binary.AppendUvarint(nil, 1), uint64(ops)))
+		f = appendBinaryColumn(f, append(binary.AppendUvarint(nil, 1), binary.AppendVarint(nil, agent)...))
+		f = appendBinaryColumn(f, binary.AppendUvarint(binary.AppendUvarint(nil, 1), uint64(ops)))
+		f = appendBinaryColumn(f, append(binary.AppendUvarint(nil, 1), binary.AppendVarint(nil, 0)...))
+		positions := binary.AppendUvarint(nil, uint64(ops))
+		lengths := binary.AppendUvarint(nil, uint64(ops))
+		content := binary.AppendUvarint(nil, uint64(ops))
+		parents := binary.AppendUvarint(nil, uint64(ops))
+		for range ops {
+			positions = append(positions, 0) // delta 0
+			lengths = append(lengths, 1)     // run of 1
+			content = append(content, 0)     // empty blob
+			parents = append(parents, 0)     // no parents
+		}
+		f = appendBinaryColumn(f, positions)
+		f = appendBinaryColumn(f, lengths)
+		f = appendBinaryColumn(f, content)
+		f = appendBinaryColumn(f, parents)
+		return appendBinaryColumn(f, binary.AppendUvarint(nil, 0)) // Frontier: empty
+	}
+
+	// coverageRows renders a Coverage column body: uvarint rowCount, then
+	// each row as a length-prefixed body.
+	coverageRows := func(rows ...[]byte) []byte {
+		body := binary.AppendUvarint(nil, uint64(len(rows)))
+		for _, row := range rows {
+			body = appendBinaryColumn(body, row)
+		}
+		return body
+	}
+	// tableRow12 is a coverage table with the single entry {agent 1: seq 2}.
+	tableRow12 := func() []byte {
+		body := binary.AppendUvarint(nil, 1) // one entry
+		body = binary.AppendVarint(body, 1)  // agent delta 1 → agent 1
+		return binary.AppendUvarint(body, 2) // seq 2
+	}
+	emptyRow := []byte{}
+	fiveEntryHeader := []byte{0x05} // table claiming 5 entries, no bytes follow
 
 	cases := []struct {
 		name string
@@ -131,8 +361,9 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 		},
 		{
 			name: "unsupported version",
+			// binaryVersion is 2; the frame claims 3.
 			in:   compress(emptyColumns(frameHeader(binaryVersion + 1))),
-			want: "unsupported version 2",
+			want: "unsupported version 3",
 		},
 		{
 			name: "column bodyLen exceeds frame",
@@ -151,7 +382,8 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 		},
 		{
 			name: "trailing bytes after Frontier",
-			in:   compress(append(append([]byte{}, emptyColumns(frameHeader(binaryVersion))...), 0x00)),
+			// A complete v2 frame (empty Coverage column) plus one stray byte.
+			in:   compress(append(append(append([]byte{}, emptyColumns(frameHeader(binaryVersion))...), binary.AppendUvarint(nil, 0)...), 0x00)),
 			want: "trailing bytes after Frontier",
 		},
 		{
@@ -172,6 +404,71 @@ func TestBinaryRejectsGarbage(t *testing.T) {
 				return f
 			}()),
 			want: "run length 0",
+		},
+		{
+			name: "coverage row length exceeds remaining bytes",
+			// One-op anchor frame whose single coverage row claims 15 bytes
+			// that the frame does not hold.
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 1), binary.AppendUvarint(binary.AppendUvarint(nil, 1), 0x0f))),
+			want: "Coverage row 0 truncated",
+		},
+		{
+			name: "coverage row on non-anchor op",
+			// op 0 belongs to a real agent but carries the coverage row.
+			in:   compress(appendBinaryColumn(hostileCols(5, 1), coverageRows(tableRow12()))),
+			want: "coverage on non-anchor op",
+		},
+		{
+			name: "coverage row on a later op",
+			// The anchor op's row is legitimate; op 1 (non-anchor) carries
+			// one too.
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 2), coverageRows(tableRow12(), tableRow12()))),
+			want: "coverage on non-anchor op",
+		},
+		{
+			name: "anchor op without coverage",
+			// The frame claims an anchor op but ships an empty coverage row
+			// where the table should be.
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 1), coverageRows(emptyRow))),
+			want: "anchor op without coverage",
+		},
+		{
+			name: "anchor op in anchorless coverage layout",
+			// rowCount == ops+1 declares the anchorless layout, which has no
+			// per-op row an anchor op could claim its coverage from.
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 1), coverageRows(tableRow12(), emptyRow))),
+			want: "anchor op without coverage",
+		},
+		{
+			name: "compacted coverage without anchor",
+			// A non-empty Coverage column means compacted, but with a real
+			// agent at op 0 and an empty row there is no table anywhere.
+			in:   compress(appendBinaryColumn(hostileCols(5, 1), coverageRows(emptyRow))),
+			want: "coverage column without anchor coverage",
+		},
+		{
+			name: "coverage row count mismatches op count",
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 1), coverageRows(emptyRow, emptyRow, emptyRow, emptyRow, emptyRow))),
+			want: "Coverage row count 5 != op count 1",
+		},
+		{
+			name: "coverage entries exceed row body",
+			// The anchor's table claims 5 entries; the row ends immediately.
+			in:   compress(appendBinaryColumn(hostileCols(anchorAgent, 1), coverageRows(fiveEntryHeader))),
+			want: "Coverage entries count 5 exceeds",
+		},
+		{
+			name: "coverage column truncated",
+			// Coverage bodyLen claims 32 bytes; the frame ends first.
+			in:   compress(append(hostileCols(anchorAgent, 1), 0x20)),
+			want: "Coverage column truncated",
+		},
+		{
+			name: "v2 frame without coverage column",
+			// Ten columns then end of frame: the Coverage bodyLen read hits
+			// nothing. (Writers always append the column, empty or not.)
+			in:   compress(hostileCols(anchorAgent, 1)),
+			want: "truncated varint in Coverage",
 		},
 	}
 	for _, tc := range cases {

@@ -4,11 +4,39 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/klauspost/compress/zstd"
 )
 
-// binaryMagic frames every encoded opLog: magic + version, then columns.
+// The binary frame layout (compressed as a whole with zstd, all integers
+// varint-encoded — signed values in zigzag form):
+//
+//	magic "EGW1" || uvarint version || column × N
+//
+// A column is a length-prefixed body: uvarint bodyLen || body. v1 frames
+// (N == 10) carry Types, TypeRuns, Agents, AgentRuns, Seqs, Positions,
+// Lengths, Content, Parents, Frontier. v2 frames (N == 11, the only version
+// writers emit) append the Coverage column; v1 frames remain decodable and
+// can only describe uncompacted logs, so they decode as such.
+//
+// The Coverage column carries an anchor log's coverage table. The column is
+// never omitted: uncompacted logs write a zero-length body, so a non-empty
+// body unambiguously means "compacted". Its body is
+//
+//	uvarint rowCount || rowCount × (uvarint rowLen || rowLen bytes)
+//
+// The first row always holds the coverage table itself: uvarint entryCount,
+// then per entry in ascending-agent order a zigzag agent delta (from the
+// previous agent, first delta from 0) and a uvarint seq. With an anchor op
+// (ops[0].agent == anchorAgent) rowCount == op count and row 0 is that op's
+// per-op row; every later row is an empty per-op row. Anchorless compaction
+// (a zero-op or edited empty-anchor log has no anchor op to carry the table)
+// emits rowCount == op count + 1: the table row followed by one empty per-op
+// row per op. Decode reconstructs the anchor op's coverage from the table,
+// folds the table into the version vector (compaction never rewrites
+// version, so the pre-critical high-water marks must ride with the coverage
+// table), and scrubs the anchor sentinel from version.
 const binaryMagic = "EGW1"
 
 // maxBinaryDecoded bounds the decompressed frame size accepted from any
@@ -44,9 +72,10 @@ func mustZstdReader() *zstd.Decoder {
 	return dec
 }
 
-// binaryVersion is the frame version written by MarshalBinary; decode rejects
-// any other value.
-const binaryVersion = 1
+// binaryVersion is the frame version written by MarshalBinary; decode
+// accepts 1 (legacy, uncompacted) and 2, and rejects any other value. v2
+// adds the optional anchor-coverage column; v1 writers are gone.
+const binaryVersion = 2
 
 // opTypeCode maps an opType to its one-byte wire code (Types column body).
 func opTypeCode(t opType) (byte, bool) {
@@ -71,7 +100,8 @@ func opTypeFromCode(b byte) (opType, bool) {
 }
 
 // MarshalBinary encodes the opLog's columnar form into a byte frame: a magic
-// and version header followed by ten length-prefixed column bodies, then
+// and version header followed by ten length-prefixed column bodies plus, for
+// v2, the Coverage column (see the frame-structure comment above), then
 // compresses the whole frame with zstd at the default speed level. Integers
 // use varints (zigzag where values may be negative); content values go
 // through the codec and travel as opaque length-prefixed blobs. The frame
@@ -168,7 +198,87 @@ func MarshalBinary[C content[C]](log *opLog[C], codec ContentCodec[C]) ([]byte, 
 	}
 	frame = appendBinaryColumn(frame, body)
 
+	// Column 11: Coverage — the anchor coverage table of a compacted log.
+	// Uncompacted logs write a zero-length body (the column is never
+	// omitted; see the frame-structure comment).
+	body = body[:0]
+	if log.isCompacted() {
+		anchorless := len(log.ops) == 0 || log.ops[0].id.agent != anchorAgent
+		rows := len(log.ops)
+		if anchorless {
+			rows++ // no anchor op to carry the table: it rides in its own row
+		}
+		body = binary.AppendUvarint(body, uint64(rows))
+		body = appendCoverageRow(body, encodeCoverageTable(nil, log.anchorCoverage))
+		for range rows - 1 {
+			body = binary.AppendUvarint(body, 0) // empty per-op row
+		}
+	}
+	frame = appendBinaryColumn(frame, body)
+
 	return binaryZstdEncoder.EncodeAll(frame, nil), nil
+}
+
+// appendCoverageRow appends one coverage row: uvarint rowLen || bytes.
+func appendCoverageRow(body, row []byte) []byte {
+	body = binary.AppendUvarint(body, uint64(len(row)))
+	return append(body, row...)
+}
+
+// encodeCoverageTable appends a version vector as a coverage table: uvarint
+// entry count, then per entry in ascending-agent order the zigzag delta to
+// the previous agent (first delta from 0) and the uvarint seq.
+func encodeCoverageTable(body []byte, m remoteVersion) []byte {
+	agents := make([]int, 0, len(m))
+	for agent := range m {
+		agents = append(agents, agent)
+	}
+	sort.Ints(agents)
+	body = binary.AppendUvarint(body, uint64(len(agents)))
+	prev := 0
+	for _, agent := range agents {
+		body = binary.AppendVarint(body, int64(agent-prev))
+		prev = agent
+		body = binary.AppendUvarint(body, uint64(m[agent]))
+	}
+	return body
+}
+
+// parseCoverageTable decodes one coverage row produced by
+// encodeCoverageTable.
+func parseCoverageTable(row []byte) (remoteVersion, error) {
+	br := &binaryReader{buf: row}
+	n, err := br.count("Coverage entries")
+	if err != nil {
+		return nil, err
+	}
+	m := make(remoteVersion, n)
+	prev := 0
+	for i := uint64(0); i < n; i++ {
+		d, err := br.varint("Coverage agent delta")
+		if err != nil {
+			return nil, err
+		}
+		delta, err := varintToInt(d, "Coverage agent delta")
+		if err != nil {
+			return nil, err
+		}
+		agent := prev + delta
+		v, err := br.uvarint("Coverage seq")
+		if err != nil {
+			return nil, err
+		}
+		seq, err := uvarintToInt(v, "Coverage seq")
+		if err != nil {
+			return nil, err
+		}
+		m[agent] = seq
+		prev = agent
+	}
+	if err := br.exact("Coverage entries"); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // appendBinaryColumn appends one column to the frame: uvarint bodyLen || body.
@@ -303,7 +413,10 @@ func readRunLens(br *binaryReader, n uint64, maxOps uint64, name string) ([]int,
 // into an opLog: decompress with zstd, parse magic and version, then each
 // length-prefixed column with bounds-checked reads, validating the count
 // invariants the columnar form relies on, and rebuild the log through
-// Unmarshal.
+// Unmarshal. v1 frames carry no coverage column and decode as uncompacted
+// logs; v2 frames carry the Coverage column, whose table restores
+// anchorCoverage, the anchor op's coverage, and (by folding the table into
+// version) the pre-critical high-water marks compaction never rewrote.
 func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C], error) {
 	frame, err := binaryZstdDecoder.DecodeAll(data, nil)
 	if err != nil {
@@ -318,7 +431,7 @@ func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C
 	if err != nil {
 		return nil, err
 	}
-	if version != binaryVersion {
+	if version != 1 && version != binaryVersion {
 		return nil, fmt.Errorf("binary: unsupported version %d", version)
 	}
 
@@ -617,11 +730,86 @@ func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C
 		return nil, err
 	}
 
+	// Column 11: Coverage (v2 only) — see the frame-structure comment at the
+	// top of the file. The column is always present in v2; a zero-length
+	// body means the log is uncompacted.
+	var anchorCoverage remoteVersion
+	var anchorOpCoverage remoteVersion
+	if version >= 2 {
+		body, err = r.column("Coverage")
+		if err != nil {
+			return nil, err
+		}
+		if len(body) > 0 {
+			br = &binaryReader{buf: body}
+			n, err = br.count("Coverage")
+			if err != nil {
+				return nil, err
+			}
+			if n != uint64(totalOps) && n != uint64(totalOps)+1 {
+				return nil, fmt.Errorf("binary: Coverage row count %d != op count %d", n, totalOps)
+			}
+			rows := make([][]byte, n)
+			for i := range rows {
+				rowLen, err := br.uvarint("Coverage row length")
+				if err != nil {
+					return nil, err
+				}
+				if rowLen > uint64(len(br.buf)-br.off) {
+					return nil, fmt.Errorf("binary: Coverage row %d truncated: %d bytes claimed, %d remain", i, rowLen, len(br.buf)-br.off)
+				}
+				rows[i] = br.buf[br.off : br.off+int(rowLen)]
+				br.off += int(rowLen)
+			}
+			if err := br.exact("Coverage"); err != nil {
+				return nil, err
+			}
+			if n == uint64(totalOps) {
+				// Row 0 is the anchor op's per-op row and carries the table.
+				if n == 0 {
+					return nil, fmt.Errorf("binary: Coverage column declares no rows")
+				}
+				if agents[0] != anchorAgent {
+					if len(rows[0]) != 0 {
+						return nil, fmt.Errorf("binary: coverage on non-anchor op")
+					}
+					return nil, fmt.Errorf("binary: coverage column without anchor coverage")
+				}
+				if len(rows[0]) == 0 {
+					return nil, fmt.Errorf("binary: anchor op without coverage")
+				}
+				anchorOpCoverage, err = parseCoverageTable(rows[0])
+				if err != nil {
+					return nil, err
+				}
+				// Compact holds the anchor op's coverage and the log's table
+				// as separate clones; decode mirrors that.
+				anchorCoverage = cloneRemoteVersion(anchorOpCoverage)
+			} else {
+				// Anchorless layout: row 0 is the table, the rest are empty
+				// per-op rows. No anchor op may exist — there is no row that
+				// could carry its coverage.
+				if totalOps > 0 && agents[0] == anchorAgent {
+					return nil, fmt.Errorf("binary: anchor op without coverage")
+				}
+				anchorCoverage, err = parseCoverageTable(rows[0])
+				if err != nil {
+					return nil, err
+				}
+			}
+			for i := 1; i < len(rows); i++ {
+				if len(rows[i]) != 0 {
+					return nil, fmt.Errorf("binary: coverage on non-anchor op")
+				}
+			}
+		}
+	}
+
 	if r.off != len(r.buf) {
 		return nil, fmt.Errorf("binary: %d trailing bytes after Frontier column", len(r.buf)-r.off)
 	}
 
-	return Unmarshal[C](&ColumnarData[C]{
+	log := Unmarshal[C](&ColumnarData[C]{
 		Types:     types,
 		TypeRuns:  typeRuns,
 		Agents:    agents,
@@ -632,5 +820,26 @@ func UnmarshalBinary[C content[C]](data []byte, codec ContentCodec[C]) (*opLog[C
 		Content:   content,
 		Parents:   parents,
 		Frontier:  frontier,
-	}), nil
+	})
+	if anchorCoverage != nil {
+		log.anchorCoverage = anchorCoverage
+		if anchorOpCoverage != nil {
+			// Row 0 belonged to the anchor op (agents[0] == anchorAgent in
+			// this layout), so op 0 is the anchor.
+			log.ops[0].coverage = anchorOpCoverage
+		}
+		// The per-op columns re-derive only the entries the surviving ops
+		// cover; the pre-critical high-water marks ride in the coverage
+		// table (compaction never rewrites version). Fold them in — the
+		// key must exist even when its value is 0 — and scrub the anchor
+		// sentinel Unmarshal recorded from the anchor op: neither Compact
+		// nor adoption ever leaves it in version.
+		for agent, seq := range log.anchorCoverage {
+			if cur, ok := log.version[agent]; !ok || cur < seq {
+				log.version[agent] = seq
+			}
+		}
+		delete(log.version, anchorAgent)
+	}
+	return log, nil
 }
