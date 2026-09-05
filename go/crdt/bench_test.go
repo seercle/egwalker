@@ -94,6 +94,7 @@ func BenchmarkCheckoutScale(b *testing.B) {
 // the load-and-replay loop of TestTrace in trace_test.go (which must not be
 // modified). It errors on malformed input and leaves doc with the full trace
 // applied.
+// Mirrors trace_test.go's loadTrace/replay pair; kept separate because the previous plan froze trace_test.go — consolidate only if that file's tests change.
 func replayTrace(doc *RuneDocument, raw []byte) error {
 	var trace Trace
 	if err := json.Unmarshal(raw, &trace); err != nil {

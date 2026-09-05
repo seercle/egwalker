@@ -10,8 +10,8 @@ func TestRuneTextCodecRoundTrip(t *testing.T) {
 		"\xff\xfe raw invalid bytes", // preserved as raw bytes in memory
 		"line1\nline2\ttabbed\r\n",
 	}
+	c := ContentCodec[runeText](RuneTextCodec{})
 	for _, in := range cases {
-		var c ContentCodec[runeText] = RuneTextCodec{}
 		blob, err := c.Encode(in)
 		if err != nil {
 			t.Fatalf("Encode(%q): %v", in, err)

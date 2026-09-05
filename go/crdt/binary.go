@@ -18,14 +18,31 @@ const binaryMagic = "EGW1"
 // allocation).
 const maxBinaryDecoded = 1 << 26 // 64 MiB
 
-// Shared stateless zstd codec instances. EncodeAll runs each call on a
-// single goroutine and DecodeAll is safe for concurrent use, so one shared
-// pair amortizes the codec setup across all calls. A nil reader/writer is
-// the documented stateless pattern and only fails on invalid options.
+// Shared stateless zstd codec instances. Both are documented safe for
+// concurrent use (EncodeAll/DecodeAll with internal pooling), so one shared
+// pair amortizes codec setup across all calls. Construction with constant
+// options cannot fail; the init panics only guard against future option
+// typos, before any decode path exists.
 var (
-	binaryZstdEncoder, _ = zstd.NewWriter(nil)
-	binaryZstdDecoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxBinaryDecoded))
+	binaryZstdEncoder = mustZstdWriter()
+	binaryZstdDecoder = mustZstdReader()
 )
+
+func mustZstdWriter() *zstd.Encoder {
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		panic(fmt.Sprintf("binary: zstd writer init: %v", err))
+	}
+	return enc
+}
+
+func mustZstdReader() *zstd.Decoder {
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxBinaryDecoded))
+	if err != nil {
+		panic(fmt.Sprintf("binary: zstd reader init: %v", err))
+	}
+	return dec
+}
 
 // binaryVersion is the frame version written by MarshalBinary; decode rejects
 // any other value.
@@ -234,6 +251,8 @@ func uvarintToInt(v uint64, what string) (int, error) {
 }
 
 // varintToInt converts a signed varint to int, rejecting overflow.
+// The MinInt check is dead on 64-bit (v is already int64) but guards 32-bit
+// int builds.
 func varintToInt(v int64, what string) (int, error) {
 	if v < math.MinInt || v > math.MaxInt {
 		return 0, fmt.Errorf("binary: %s overflows int: %d", what, v)
