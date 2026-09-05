@@ -26,6 +26,10 @@
 - [ ] **(parked, RLE era) runIdxForSeq backward scan** — O(#ops) per lookup;
   measured 2026-09-05: t(50k)/t(10k) ≈ 7.75 (127.4 ms → 987.6 ms for 5× op
   growth) — below the ≥10 quadratic trigger, still parked.
+- [ ] **(recorded 2026-09-05) map merge scaling** — BenchmarkMapMergeAtScale
+  measures t(50k)/t(10k) = 17.8× (rune: 7.75, linear ~5); allocs linear, time
+  superlinear (mergeInto + keyIndex rebuild). Investigate only if map
+  workloads at >10k concurrent ops matter.
 
 ## Tests / hygiene
 
