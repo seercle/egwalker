@@ -187,7 +187,11 @@ func (log *opLog[C]) opEndLVForSeq(agent, seq int) lv {
 	if log.coveredByAnchor(agent, seq) {
 		return log.endLV(0)
 	}
-	return log.endLV(log.runIdxForSeq(agent, seq))
+	j := log.runIdxForSeq(agent, seq)
+	if o := &log.ops[j]; o.id.agent == anchorAgent && seq != o.id.seq+o.length-1 {
+		panic(nonAlignedAnchorMsg)
+	}
+	return log.endLV(j)
 }
 
 // runIdxForSeq returns the index of the run op from `agent` whose seq range
@@ -241,6 +245,16 @@ func (log *opLog[C]) splitRunOp(j, k int) lv {
 	return prefixEnd
 }
 
+// nonAlignedAnchorMsg is the documented v1 boundary for replicas compacted at
+// different points: an (agent -1, seq) reference that lands inside dest's own
+// anchor but not at its end means the sender's anchor is shorter (it
+// compacted earlier), and honoring the reference would split dest's anchor —
+// silently poisoning the log (a second agent-(-1) op without coverage,
+// multiple frontier tips, panics far from the causing merge). Every other
+// unsupported topology already panics loudly at the causing merge; this one
+// must too.
+const nonAlignedAnchorMsg = "oplog: cannot merge replicas compacted at different points (non-aligned anchor reference; unsupported in v1)"
+
 // resolveParentLV returns the run-node lv in log for the character (agent, seq).
 // If that character is interior to one of our run ops (a replica observed a
 // boundary inside a run we hold fused), the run is split at the character so the
@@ -250,7 +264,9 @@ func (log *opLog[C]) splitRunOp(j, k int) lv {
 //
 // On a compacted log, a reference into the pre-critical history (covered by
 // anchorCoverage) resolves to the anchor's end lv: the folded history no longer
-// exists as individual ops, and the anchor is its causal head.
+// exists as individual ops, and the anchor is its causal head. A reference to
+// the anchor AGENT that is not at the anchor's end is the non-aligned
+// compaction-points boundary and panics instead of splitting the anchor.
 func (log *opLog[C]) resolveParentLV(agent, seq int) lv {
 	if log.coveredByAnchor(agent, seq) {
 		return log.endLV(0) // anchor spans [0, len): its end is the causal head for all pre-critical history
@@ -259,6 +275,9 @@ func (log *opLog[C]) resolveParentLV(agent, seq int) lv {
 	o := &log.ops[j]
 	if seq == o.id.seq+o.length-1 {
 		return log.endLV(j)
+	}
+	if o.id.agent == anchorAgent {
+		panic(nonAlignedAnchorMsg)
 	}
 	return log.splitRunOp(j, seq-o.id.seq+1)
 }

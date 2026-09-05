@@ -272,6 +272,14 @@ func (doc *ArrayDocument[T]) mergeRecursive(other *ArrayDocument[T]) {
 		if _, ok := any(elems[0]).(Mergeable); !ok {
 			continue
 		}
+		// Pre-critical op: its contribution is folded into the anchor's
+		// converged snapshot and its id no longer exists in our log to
+		// merge into (same guard as MapDocument.MergeFrom's recursion).
+		// Ordinary Mergeable element runs are length-1, so seq+length-1 ==
+		// seq; the span form also covers multi-entry anchor ops wholesale.
+		if covered, ok := oLog.anchorCoverage[o.id.agent]; ok && o.id.seq+o.length-1 <= covered {
+			continue
+		}
 		if lastSeq, ok := oLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			ourLV := idToLV(oLog, o.id)
 			our := []T(oLog.opAt(ourLV).content)
@@ -363,6 +371,13 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 // op per binding, except the compaction anchor which spans one lv per live
 // binding — so the entry index is the lv's offset within its run op (always 0
 // for ordinary length-1 map ops).
+//
+// LWW semantic difference on a compacted map (uncompacted maps never see
+// this): the anchor is one candidate per key carrying agent -1, so it enters
+// Get's concurrency filter and loses every LWW tie against a real agent's
+// post-compaction Set — the anchor entry is consulted only while no later
+// binding exists. The recursion keeps Mergeable values reconciled (idempotent:
+// values are shared by reference), so the lost tie never drops state.
 func (m *MapDocument[K, V]) mapEntryAt(l lv) MapOp[K, V] {
 	i := m.opLog.opIdxAt(l)
 	return m.opLog.ops[i].content[int(l-m.opLog.opLV[i])]

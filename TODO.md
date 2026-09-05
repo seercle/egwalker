@@ -50,15 +50,27 @@
   v1); late-compaction divergence is silently absorbed (documented v1
   boundary); a compacted src WITH post-compaction edits merging into a
   full-history dest also panics (the F1 boundary: the incoming anchor is
-  covered-skipped at op_log.go:389-399, then the new op's `(-1, seq)`
+  covered-skipped at op_log.go:383-421, then the new op's `(-1, seq)`
   parent edge has no agent-`-1` op to resolve against and panics in
-  `runIdxForSeq`, op_log.go:202). Supported merge directions today: both
-  sides compacted (shared or aligned compaction points, modulo the silent
-  absorption above); compacted dest ← full src; fresh (empty) dest
-  adoption; compacted src with NO post-compaction edits ← full dest.
-  Follow-up: `runIdxForSeq`'s "no op from agent -1 covers seq N" message
-  is unclear for this topology — a future hardening can convert it to the
-  documented-topology message.
+  `runIdxForSeq`, op_log.go:206); sentinel-agent documents
+  (`NewRuneDocument(-1)` & co.) are constructible and panic confusingly in
+  `mergeInto`'s anchor rules — a constructor rejection is parked (behavior
+  change out of scope). Supported merge directions today: both sides
+  compacted (shared or aligned compaction points — a non-aligned anchor
+  reference now panics loudly at the causing merge with the
+  documented-topology message instead of silently splitting dest's anchor,
+  pinned by `TestNonAlignedCompactionPointsPanic`; modulo the silent
+  absorption above); compacted dest ← full src for ANCHORED dests — a
+  zero-op / edited-empty-anchor dest holds no anchor lv and accepts only
+  root or post-critical parentage; a pre-critical parent query on it
+  panics (pinned by `TestEmptyAnchorCoveredParentPanics`); fresh (empty)
+  dest adoption; compacted src with NO post-compaction edits ← full dest.
+  Resolved 2026-09-05: the "unclear `runIdxForSeq` message" follow-up —
+  the case where dest's own `-1` op matches the query (non-aligned
+  compaction points) converts to the documented-topology message
+  (`nonAlignedAnchorMsg`) instead of splitting the anchor; the F1 case
+  above keeps `runIdxForSeq`'s message, which is literally accurate there
+  (dest holds no `-1` op at all).
 
 ## Tests / hygiene
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -526,6 +527,104 @@ func TestCompactTraceScale(t *testing.T) {
 
 	if a.GetString() != before {
 		t.Fatal("content changed across compaction")
+	}
+	a.Check()
+}
+
+// TestCompactArrayMergeableValues pins the array counterpart of
+// TestCompactMapMergeableValues: a compacted array of Mergeable values (maps)
+// merging a full-history peer must skip the peer's pre-critical Mergeable ops
+// via the coverage table instead of resolving their folded ids with idToLV
+// (which panics "Could not find id in oplog"), and both directions must
+// converge with the element values intact.
+func TestCompactArrayMergeableValues(t *testing.T) {
+	dest := NewArrayDocument[*MapDocument[string, int]](1)
+	childA := NewMapDocument[string, int](10)
+	childA.Set("k", 1)
+	childB := NewMapDocument[string, int](11)
+	childB.Set("k", 2)
+	dest.Ins(0, []*MapDocument[string, int]{childA, childB})
+	dest.Check()
+
+	full := NewArrayDocument[*MapDocument[string, int]](2)
+	full.MergeFrom(dest)
+	full.Check()
+
+	dest.Compact() // folds the two Mergeable element ops into the anchor
+	dest.Check()
+
+	// Post-compaction element append on the full replica: its op parents
+	// into full's pre-critical frontier, which the compacted dest resolves
+	// via coverage. The recursion pass over full's pre-critical Mergeable
+	// ops is the C1 regression: without the coverage guard it panics.
+	childC := NewMapDocument[string, int](12)
+	childC.Set("k", 3)
+	full.Ins(2, []*MapDocument[string, int]{childC})
+	dest.MergeFrom(full)
+	if got, want := dest.Len(), 3; got != want {
+		t.Errorf("dest.Len() = %d, want %d", got, want)
+	}
+	items := dest.GetItems()
+	if len(items) != 3 || items[0] != childA || items[1] != childB || items[2] != childC {
+		t.Errorf("dest elements = %v, want [childA childB childC] pointer-identical", items)
+	}
+	if v, ok := items[2].Get("k"); !ok || v != 3 {
+		t.Errorf("childC.Get(%q) = (%v, %v), want (3, true)", "k", v, ok)
+	}
+	dest.Check()
+
+	// Reverse direction: the full replica takes dest's post-compaction edit
+	// and both converge without corruption.
+	childD := NewMapDocument[string, int](13)
+	childD.Set("k", 4)
+	dest.Ins(3, []*MapDocument[string, int]{childD})
+	full.MergeFrom(dest)
+	fullItems := full.GetItems()
+	if len(fullItems) != 4 || fullItems[2] != childC || fullItems[3] != childD {
+		t.Errorf("full elements after reverse merge = %v, want childC+childD appended", fullItems)
+	}
+	if v, ok := fullItems[3].Get("k"); !ok || v != 4 {
+		t.Errorf("childD.Get(%q) = (%v, %v), want (4, true)", "k", v, ok)
+	}
+	full.Check()
+	dest.Check()
+}
+
+// TestNonAlignedCompactionPointsPanic pins the loud boundary for replicas
+// compacted at different points: when src's post-compaction op references
+// src's (shorter) anchor end, dest's own longer anchor matches the (-1, seq)
+// query — resolving it would split dest's anchor and silently poison the log
+// (a second agent-(-1) op without coverage, two frontier tips, later panics
+// far from the cause). The merge must panic with the documented-topology
+// message and leave dest untouched.
+func TestNonAlignedCompactionPointsPanic(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "hi")
+	b := NewRuneDocument(2)
+	b.MergeFrom(a)
+	a.MergeFrom(b)
+	b.Compact()   // b: anchor "hi", coverage {1:1}
+	a.Ins(2, "!") // independent edit on a
+	a.Compact()   // a: anchor "hi!" (longer), coverage {1:2}
+
+	b.Ins(0, ">") // b's post-compaction op parents b's anchor end (-1, 1)
+	content := a.GetString()
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Error("expected panic merging replicas compacted at different points")
+				return
+			}
+			msg, ok := r.(string)
+			if !ok || !strings.Contains(msg, "compacted at different points") {
+				t.Errorf("panic %v does not name the non-aligned-compaction topology", r)
+			}
+		}()
+		a.MergeFrom(b)
+	}()
+	if got := a.GetString(); got != content {
+		t.Errorf("dest content corrupted by failed merge: %q -> %q", content, got)
 	}
 	a.Check()
 }
