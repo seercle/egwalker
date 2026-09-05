@@ -393,6 +393,9 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 			}
 		}
 		if o.id.agent == anchorAgent {
+			if o.coverage == nil {
+				panic("oplog: anchor op without coverage")
+			}
 			// Other's anchor: compaction discarded the original op ids,
 			// so anchor entries match our state by KEY. Merge other's
 			// compaction-time winner value into our current winner value
@@ -429,7 +432,12 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 	mergeInto(m.opLog, other.opLog)
 	for i := oldLen; i < len(m.opLog.ops); i++ {
 		o := m.opLog.ops[i]
-		m.keyIndex[o.content[0].Key] = append(m.keyIndex[o.content[0].Key], m.opLog.opLV[i])
+		// Index every entry of every appended op: ordinary map runs hold
+		// one binding (j == 0), an adopted anchor holds one binding per lv
+		// of its span — matching Compact's own anchor indexing.
+		for j, e := range o.content {
+			m.keyIndex[e.Key] = append(m.keyIndex[e.Key], m.opLog.opLV[i]+lv(j))
+		}
 	}
 }
 

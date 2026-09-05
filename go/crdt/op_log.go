@@ -371,13 +371,20 @@ func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 				// dest now holds every pre-critical op, which is what makes
 				// the skip-delivery check below drop re-deliveries (and
 				// keeps checkCompacted's coverage<=version invariant).
+				// The anchor sentinel is scrubbed from both tables
+				// (mirroring Compact's own cleanup): agent -1 must never
+				// survive adoption in version (skip-delivery, seq
+				// continuation, serialization) or in the coverage a later
+				// re-Compact would clone from it.
 				pushRemoteOpLV(dest, o, nil)
 				dest.anchorCoverage = cloneRemoteVersion(o.coverage)
+				delete(dest.anchorCoverage, anchorAgent)
 				for agent, seq := range o.coverage {
 					if dest.version[agent] < seq {
 						dest.version[agent] = seq
 					}
 				}
+				delete(dest.version, anchorAgent)
 			default:
 				// dest holds real history: the anchor is redundant iff dest
 				// already holds every op the coverage stands for; otherwise

@@ -296,7 +296,118 @@ func TestFreshReplicaAdoptsAnchor(t *testing.T) {
 	if got, want := fresh.GetString(), "seed"; got != want {
 		t.Errorf("after re-delivery: GetString() = %q, want %q", got, want)
 	}
+	// The anchor sentinel must never survive adoption in version (it would
+	// leak agent -1 into skip-delivery, seq continuation, and serialization).
+	if _, ok := fresh.doc.opLog.version[anchorAgent]; ok {
+		t.Error("version carries the anchor sentinel after adoption")
+	}
 	fresh.Check()
+}
+
+// TestMapFreshReplicaAdoptsAnchor pins map adoption of a multi-entry anchor:
+// every binding of the anchor must become reachable through keyIndex (not
+// just content[0]), values must survive, the log must satisfy the compacted
+// invariants, and the adopting replica must re-compact idempotently.
+// MapDocument has no Check() (see Task 1 report F2), so the shared
+// checkCompacted helper stands in for the log-level invariants.
+func TestMapFreshReplicaAdoptsAnchor(t *testing.T) {
+	src := NewMapDocument[string, int](1)
+	src.Set("a", 1)
+	src.Set("b", 2)
+	src.Set("c", 3)
+	src.Compact()
+
+	fresh := NewMapDocument[string, int](2)
+	fresh.MergeFrom(src)
+
+	if !fresh.opLog.isCompacted() {
+		t.Fatal("fresh map did not adopt anchorCoverage")
+	}
+	if _, ok := fresh.opLog.version[anchorAgent]; ok {
+		t.Error("version carries the anchor sentinel after adoption")
+	}
+	if _, ok := fresh.opLog.anchorCoverage[anchorAgent]; ok {
+		t.Error("anchorCoverage carries the anchor sentinel after adoption")
+	}
+	for k, want := range map[string]int{"a": 1, "b": 2, "c": 3} {
+		if got, ok := fresh.Get(k); !ok || got != want {
+			t.Errorf("Get(%q) = (%v, %v), want (%v, true)", k, got, ok, want)
+		}
+	}
+	if keys := fresh.Keys(); len(keys) != 3 {
+		t.Errorf("Keys() = %v, want 3 keys", keys)
+	}
+	checkCompacted(fresh.opLog)
+
+	// The adopting replica can re-compact idempotently and stays intact.
+	fresh.Compact()
+	for k, want := range map[string]int{"a": 1, "b": 2, "c": 3} {
+		if got, ok := fresh.Get(k); !ok || got != want {
+			t.Errorf("after re-Compact: Get(%q) = (%v, %v), want (%v, true)", k, got, ok, want)
+		}
+	}
+	if keys := fresh.Keys(); len(keys) != 3 {
+		t.Errorf("after re-Compact: Keys() = %v, want 3 keys", keys)
+	}
+	if _, ok := fresh.opLog.version[anchorAgent]; ok {
+		t.Error("re-Compact reintroduced the anchor sentinel into version")
+	}
+	checkCompacted(fresh.opLog)
+}
+
+// TestEmptyAnchorCoveredParentPanics pins the empty-anchor fall-through: a
+// zero-op compacted log and an edited empty-anchor log hold no anchor lv, so
+// a pre-critical parent query falls through the coverage interception and
+// panics in runIdxForSeq — there is no lv it could resolve to. The failed
+// merge must leave the destination untouched.
+func TestEmptyAnchorCoveredParentPanics(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "abc")
+	c := NewRuneDocument(3)
+	c.MergeFrom(a)
+	c.Ins(3, "!") // {3,0} parents the pre-critical run end (1, 2)
+
+	// Edited empty-anchor shape: tombstone-only compaction followed by a
+	// local edit — ops[0] is a real-agent root, no anchor op exists.
+	b := NewRuneDocument(2)
+	b.MergeFrom(a)
+	b.Del(0, 3)
+	b.Compact()
+	b.Ins(0, "x")
+	if b.doc.opLog.ops[0].id.agent == anchorAgent {
+		t.Fatal("expected an edited empty-anchor log without an anchor op")
+	}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("expected panic resolving a pre-critical parent on an edited empty-anchor log")
+			}
+		}()
+		b.MergeFrom(c)
+	}()
+	if got, want := b.GetString(), "x"; got != want {
+		t.Errorf("dest mutated by failed merge: GetString() = %q, want %q", got, want)
+	}
+	if len(b.doc.opLog.ops) != 1 {
+		t.Errorf("dest log mutated by failed merge: %d ops, want 1", len(b.doc.opLog.ops))
+	}
+
+	// Zero-op shape: the same query before any local edit.
+	d := NewRuneDocument(4)
+	d.MergeFrom(a)
+	d.Del(0, 3)
+	d.Compact() // zero ops, coverage set
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("expected panic resolving a pre-critical parent on a zero-op compacted log")
+			}
+		}()
+		d.MergeFrom(c)
+	}()
+	if got := d.GetString(); got != "" {
+		t.Errorf("dest mutated by failed merge: GetString() = %q, want empty", got)
+	}
 }
 
 // TestMergeIntoPartialStatePanics pins the unsupported-topology guard: merging
