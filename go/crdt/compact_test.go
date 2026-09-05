@@ -85,6 +85,34 @@ func TestCompactThenLocalEdits(t *testing.T) {
 	a.Check()
 }
 
+// TestCompactTombstoneOnly pins the empty-content anchor path: a document
+// whose content was fully deleted compacts to a zero-op log (tombstones
+// physically dropped) that still carries the coverage table, and local
+// editing continues normally from the empty state.
+func TestCompactTombstoneOnly(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "abc")
+	a.Del(0, 3)
+	a.Compact()
+
+	if len(a.doc.opLog.ops) != 0 {
+		t.Fatalf("after Compact: %d ops, want 0 (empty-content anchor)", len(a.doc.opLog.ops))
+	}
+	if a.doc.opLog.anchorCoverage == nil {
+		t.Error("opLog.anchorCoverage not set")
+	}
+	if got := a.GetString(); got != "" {
+		t.Errorf("GetString() = %q, want empty", got)
+	}
+	a.Check()
+
+	a.Ins(0, "xyz")
+	if got := a.GetString(); got != "xyz" {
+		t.Errorf("GetString() = %q, want %q after post-compaction Ins", got, "xyz")
+	}
+	a.Check()
+}
+
 // TestCompactPreservesVersion pins the invariant that version is untouched by
 // compaction (skip-delivery depends on it).
 func TestCompactPreservesVersion(t *testing.T) {
@@ -106,6 +134,7 @@ func TestCompactPreservesVersion(t *testing.T) {
 	if len(a.doc.opLog.version) != len(before) {
 		t.Errorf("version gained/lost agents: %v -> %v", before, a.doc.opLog.version)
 	}
+	a.Check()
 }
 
 // TestCompactArray pins the same contract for the generic array document:
@@ -159,14 +188,11 @@ func TestCompactMapMergeableValues(t *testing.T) {
 	if got, want := m1.opLog.ops[0].content.Len(), 2; got != want {
 		t.Errorf("anchor holds %d bindings, want %d", got, want)
 	}
-	for _, k := range []string{"a", "b"} {
-		v, ok := m1.Get(k)
-		if !ok {
-			t.Fatalf("key %q lost by compaction", k)
-		}
-		if v != childA && v != childB {
-			t.Errorf("Get(%q) returned a different value after compaction", k)
-		}
+	if v, ok := m1.Get("a"); !ok || v != childA {
+		t.Errorf("Get(%q) = (_, %v), want pointer-identical childA after compaction", "a", ok)
+	}
+	if v, ok := m1.Get("b"); !ok || v != childB {
+		t.Errorf("Get(%q) = (_, %v), want pointer-identical childB after compaction", "b", ok)
 	}
 	if got, _ := m1.Get("a"); got.GetString() != "A1" {
 		t.Errorf("Get(%q).GetString() = %q, want %q", "a", got.GetString(), "A1")

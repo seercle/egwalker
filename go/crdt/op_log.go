@@ -426,17 +426,19 @@ func (log *opLog[C]) replaceWith(fresh *opLog[C]) {
 	log.anchorCoverage = fresh.anchorCoverage
 }
 
-// checkCompacted validates the compacted-log invariants: the log starts with
-// the anchor op carrying coverage (or, for an empty-content anchor, holds no
-// ops at all), and coverage never exceeds version. Called from the document
-// Check() implementations when the log is compacted.
+// checkCompacted validates the compacted-log invariants: when the log carries
+// an anchor op it must be the first op and carry coverage (an empty-content
+// anchor log holds no anchor op at all, and still holds none once edits land
+// on the empty state), and coverage never exceeds version. Called from the
+// document Check() implementations when the log is compacted.
 func checkCompacted[C content[C]](log *opLog[C]) {
-	if log.totalLV > 0 {
-		if len(log.ops) == 0 || log.ops[0].id.agent != anchorAgent || log.ops[0].coverage == nil {
-			panic("Check: compacted log must start with an anchor op carrying coverage")
+	if len(log.ops) > 0 && log.ops[0].id.agent == anchorAgent && log.ops[0].coverage == nil {
+		panic("Check: compacted log's anchor op must carry coverage")
+	}
+	for i := 1; i < len(log.ops); i++ {
+		if log.ops[i].id.agent == anchorAgent {
+			panic("Check: compacted log's anchor op must be the first op")
 		}
-	} else if len(log.ops) != 0 {
-		panic("Check: compacted log with zero lvs must hold no ops")
 	}
 	for agent, seq := range log.anchorCoverage {
 		if log.version[agent] < seq {
