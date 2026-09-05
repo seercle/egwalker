@@ -476,3 +476,32 @@ func FuzzArrayDocument(f *testing.F) {
 		}
 	})
 }
+
+// FuzzDeltaFrame checks that any input either cleanly rejects in
+// UnmarshalDelta or decodes into a frame without panicking. Mirrors
+// FuzzBinaryFrame's structure. Seeds are real deltas: a full frame and a
+// partial-since frame of a rune document with edits (map/array codecs do not
+// exist yet, so those documents have no seeds here).
+func FuzzDeltaFrame(f *testing.F) {
+	sender, synced := NewRuneDocument(1), NewRuneDocument(2)
+	sender.Ins(0, "delta seed")
+	synced.MergeFrom(sender)
+	sender.Ins(9, "更多")
+	if blob, err := MarshalDelta(sender.doc.opLog, RuneTextCodec{}, cloneRemoteVersion(synced.doc.opLog.version)); err == nil {
+		f.Add(blob)
+	}
+	if blob, err := MarshalDelta(sender.doc.opLog, RuneTextCodec{}, remoteVersion{}); err == nil {
+		f.Add(blob)
+	}
+	if blob, err := MarshalDelta(newOpLog[runeText](), RuneTextCodec{}, remoteVersion{}); err == nil {
+		f.Add(blob)
+	}
+	f.Add([]byte("EGD1\x01"))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if _, err := UnmarshalDelta[runeText](data, RuneTextCodec{}); err != nil {
+			return // clean rejection is always acceptable
+		}
+	})
+}
