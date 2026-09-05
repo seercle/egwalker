@@ -224,3 +224,157 @@ func TestCompactMapMergeableValues(t *testing.T) {
 		t.Errorf("Get(%q).GetString() = %q after post-compaction Set, want %q", "a", got.GetString(), "A1")
 	}
 }
+
+// TestMergeIntoCompactedFromFullState pins the §2 case: a compacted replica
+// merging a non-compacted peer that has made NEW edits since the compaction
+// point. The peer's new ops parent into its own pre-critical frontier; those
+// parents must resolve to the anchor via coverage.
+func TestMergeIntoCompactedFromFullState(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "hello")
+	b := NewRuneDocument(2)
+	b.MergeFrom(a)
+	a.MergeFrom(b)
+	a.Compact() // a: [anchor], coverage {1:4, 2:4}
+
+	b.Ins(5, " world") // b's new op parents into b's pre-critical frontier
+	a.MergeFrom(b)
+	if got, want := a.GetString(), "hello world"; got != want {
+		t.Errorf("GetString() = %q, want %q", got, want)
+	}
+	a.Check()
+
+	// Reverse direction: b (full history) merges a (anchor) — a has nothing
+	// new, so b must converge without corruption.
+	b.MergeFrom(a)
+	if got, want := b.GetString(), "hello world"; got != want {
+		t.Errorf("reverse merge: GetString() = %q, want %q", got, want)
+	}
+	b.Check()
+}
+
+// TestMergeCompactedPeers pins two compacted replicas exchanging new edits.
+func TestMergeCompactedPeers(t *testing.T) {
+	a := NewRuneDocument(1)
+	b := NewRuneDocument(2)
+	a.Ins(0, "hi")
+	b.MergeFrom(a)
+	a.MergeFrom(b)
+	a.Compact()
+	b.Compact()
+	a.Ins(2, "!")
+	b.Ins(0, ">")
+	a.MergeFrom(b)
+	b.MergeFrom(a)
+	if a.GetString() != b.GetString() {
+		t.Errorf("divergence: a=%q b=%q", a.GetString(), b.GetString())
+	}
+	a.Check()
+	b.Check()
+}
+
+// TestFreshReplicaAdoptsAnchor pins bootstrap: an empty replica receives a
+// compacted peer's anchor and ends up with the content AND the coverage table,
+// so subsequent re-delivery of pre-critical ops is skipped.
+func TestFreshReplicaAdoptsAnchor(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "seed")
+	a.Compact()
+	fresh := NewRuneDocument(3)
+	fresh.MergeFrom(a)
+	if got, want := fresh.GetString(), "seed"; got != want {
+		t.Errorf("GetString() = %q, want %q", got, want)
+	}
+	if !fresh.doc.opLog.isCompacted() {
+		t.Error("fresh replica did not adopt anchorCoverage")
+	}
+	// Pre-critical re-delivery must be skipped (version covers it): merging a
+	// full-history replica must not duplicate content.
+	full := NewRuneDocument(1)
+	full.Ins(0, "seed")
+	fresh.MergeFrom(full)
+	if got, want := fresh.GetString(), "seed"; got != want {
+		t.Errorf("after re-delivery: GetString() = %q, want %q", got, want)
+	}
+	fresh.Check()
+}
+
+// TestMergeIntoPartialStatePanics pins the unsupported-topology guard: merging
+// from a compacted peer into a partially-converged replica panics.
+func TestMergeIntoPartialStatePanics(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "abc")
+	a.Compact()
+	partial := NewRuneDocument(2)
+	partial.Ins(0, "zz") // holds unrelated content: neither empty nor converged
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("expected panic merging compacted replica into partial state")
+			}
+		}()
+		partial.MergeFrom(a)
+	}()
+}
+
+// TestMergeStraddlingExtendedRun pins contract item (3): an extended run
+// re-arriving at a compacted replica whose held prefix is folded into the
+// anchor. The re-arrival path must split off the unknown suffix and parent it
+// at the anchor's end via coverage, not demand the (discarded) prefix op id.
+func TestMergeStraddlingExtendedRun(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "hello")
+	b := NewRuneDocument(2)
+	b.MergeFrom(a)
+	a.MergeFrom(b)
+	a.Compact() // a: [anchor "hello"], coverage {1:4}
+
+	// full re-derives agent 1's history as one extended run: {1,0} len 11.
+	full := NewRuneDocument(1)
+	full.Ins(0, "hello world")
+	a.MergeFrom(full)
+	if got, want := a.GetString(), "hello world"; got != want {
+		t.Errorf("GetString() = %q, want %q", got, want)
+	}
+	a.Check()
+
+	// The suffix op a derived must round-trip to the full replica as a no-op.
+	full.MergeFrom(a)
+	if got, want := full.GetString(), "hello world"; got != want {
+		t.Errorf("reverse merge: GetString() = %q, want %q", got, want)
+	}
+	full.Check()
+}
+
+// TestCompactZeroOpIdempotent pins that Compact on an already-compacted
+// zero-op log (empty frontier — the tombstone-only shape) is a no-op rather
+// than a precondition panic: there is no history left to collapse.
+func TestCompactZeroOpIdempotent(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "abc")
+	a.Del(0, 3)
+	a.Compact() // zero-op compacted log: ops empty, frontier empty
+
+	before := map[int]int{}
+	for k, v := range a.doc.opLog.version {
+		before[k] = v
+	}
+
+	a.Compact() // must be a no-op, not a panic
+
+	if len(a.doc.opLog.ops) != 0 {
+		t.Errorf("after re-Compact: %d ops, want 0", len(a.doc.opLog.ops))
+	}
+	if a.doc.opLog.anchorCoverage == nil {
+		t.Error("re-Compact lost anchorCoverage")
+	}
+	for k, v := range before {
+		if got := a.doc.opLog.version[k]; got != v {
+			t.Errorf("version[%d]: %d -> %d", k, v, got)
+		}
+	}
+	if got := a.GetString(); got != "" {
+		t.Errorf("GetString() = %q, want empty", got)
+	}
+	a.Check()
+}

@@ -382,16 +382,37 @@ func (m *MapDocument[K, V]) MergeFrom(other *MapDocument[K, V]) {
 		if len(otherElems) == 0 {
 			continue
 		}
-		if _, ok := any(otherElems[0].Value).(Mergeable); !ok {
-			continue
-		}
 		if m.opLog.anchorCoverage != nil {
-			if covered, ok := m.opLog.anchorCoverage[o.id.agent]; ok && o.id.seq <= covered {
-				// Pre-critical op: its contribution is already folded into
-				// the anchor's converged snapshot, and its id no longer
-				// exists in our log to merge into.
+			// Pre-critical op: its contribution is already folded into
+			// the anchor's converged snapshot, and its id no longer
+			// exists in our log to merge into. (Ordinary map runs are
+			// length-1, so seq+length-1 == seq; the span form also covers
+			// multi-entry anchor ops wholesale.)
+			if covered, ok := m.opLog.anchorCoverage[o.id.agent]; ok && o.id.seq+o.length-1 <= covered {
 				continue
 			}
+		}
+		if o.id.agent == anchorAgent {
+			// Other's anchor: compaction discarded the original op ids,
+			// so anchor entries match our state by KEY. Merge other's
+			// compaction-time winner value into our current winner value
+			// (Get resolves through keyIndex into the anchor span when we
+			// are compacted ourselves); keys we do not hold are the
+			// log-merge's business, not the recursion's.
+			for _, e := range otherElems {
+				if _, ok := any(e.Value).(Mergeable); !ok {
+					continue
+				}
+				if v, ok := m.Get(e.Key); ok {
+					if mrg, ok := any(v).(Mergeable); ok {
+						mrg.MergeFromAny(e.Value)
+					}
+				}
+			}
+			continue
+		}
+		if _, ok := any(otherElems[0].Value).(Mergeable); !ok {
+			continue
 		}
 		if lastSeq, ok := m.opLog.version[o.id.agent]; ok && lastSeq >= o.id.seq {
 			// We have this op. Find our version and merge if mergeable.

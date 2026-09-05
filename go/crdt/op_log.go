@@ -181,8 +181,12 @@ func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
 // opEndLVForSeq returns the end lv of the run op from `agent` whose seq range
 // contains `seq`. Used to parent a split-off extension op correctly when a run
 // op re-arrives in extended form, and to re-encode parent references across
-// replicas whose run boundaries differ.
+// replicas whose run boundaries differ. Pre-critical references on a compacted
+// log resolve to the anchor's end lv.
 func (log *opLog[C]) opEndLVForSeq(agent, seq int) lv {
+	if log.coveredByAnchor(agent, seq) {
+		return log.endLV(0)
+	}
 	return log.endLV(log.runIdxForSeq(agent, seq))
 }
 
@@ -243,7 +247,14 @@ func (log *opLog[C]) splitRunOp(j, k int) lv {
 // reference resolves to a real boundary. This keeps ancestry, and therefore the
 // winding-based origin computation, identical across replicas whose run
 // boundaries differ.
+//
+// On a compacted log, a reference into the pre-critical history (covered by
+// anchorCoverage) resolves to the anchor's end lv: the folded history no longer
+// exists as individual ops, and the anchor is its causal head.
 func (log *opLog[C]) resolveParentLV(agent, seq int) lv {
+	if log.coveredByAnchor(agent, seq) {
+		return log.endLV(0) // anchor spans [0, len): its end is the causal head for all pre-critical history
+	}
 	j := log.runIdxForSeq(agent, seq)
 	o := &log.ops[j]
 	if seq == o.id.seq+o.length-1 {
@@ -300,7 +311,10 @@ func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 	// Instead we keep our prefix op untouched and append the not-yet-known
 	// suffix as a NEW op at the log tail, so no later opLV shifts.
 	if seq <= last_known_seq {
-		if _, exists := log.idToLV[o.id]; !exists {
+		// On a compacted log the prefix op may be folded into the anchor
+		// (its id no longer exists in idToLV); the coverage interception in
+		// opEndLVForSeq then supplies the anchor end as the suffix's parent.
+		if _, exists := log.idToLV[o.id]; !exists && !log.coveredByAnchor(agent, seq) {
 			panic("overlapping seq range without a matching op id")
 		}
 		offset := last_known_seq + 1 - seq
@@ -341,6 +355,47 @@ func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 // splits then.
 func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 	for _, o := range src.ops {
+		// Anchor ops (compaction snapshots) never merge as ordinary ops:
+		// their agent, id, and parents are sentinels, and their content is
+		// a snapshot dest may already hold under other op boundaries.
+		if o.id.agent == anchorAgent {
+			if o.coverage == nil {
+				panic("oplog: anchor op without coverage")
+			}
+			switch {
+			case dest.isCompacted():
+				// dest has its own anchor; the incoming one adds nothing.
+			case dest.totalLV == 0:
+				// Bootstrap: adopt the anchor as the base content and its
+				// coverage. Raising version to the coverage records that
+				// dest now holds every pre-critical op, which is what makes
+				// the skip-delivery check below drop re-deliveries (and
+				// keeps checkCompacted's coverage<=version invariant).
+				pushRemoteOpLV(dest, o, nil)
+				dest.anchorCoverage = cloneRemoteVersion(o.coverage)
+				for agent, seq := range o.coverage {
+					if dest.version[agent] < seq {
+						dest.version[agent] = seq
+					}
+				}
+			default:
+				// dest holds real history: the anchor is redundant iff dest
+				// already holds every op the coverage stands for; otherwise
+				// the topology (partially converged + compacted peer) is
+				// unsupported in v1.
+				redundant := true
+				for agent, seq := range o.coverage {
+					if dest.version[agent] < seq {
+						redundant = false
+						break
+					}
+				}
+				if !redundant {
+					panic("oplog: cannot merge a compacted replica into a partially converged state (unsupported in v1)")
+				}
+			}
+			continue
+		}
 		// Ops dest fully holds are discarded by pushRemoteOpLV; resolving
 		// their parents first is pure wasted scan (profiled 2026-09-05:
 		// 91% of map-merge CPU at 50k ops, 48% of rune's). Skip them.
@@ -366,6 +421,20 @@ func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 // isCompacted reports whether the log has been collapsed to a snapshot anchor.
 func (log *opLog[C]) isCompacted() bool { return log.anchorCoverage != nil }
 
+// coveredByAnchor reports whether the character (agent, seq) lies in the
+// pre-critical history folded into the log's anchor op. Only a compacted log
+// that actually holds the anchor op qualifies: a zero-op compacted log and an
+// edited empty-anchor log have no anchor lv for a parent reference to resolve
+// to, so those queries fall through (there is no pre-critical history a
+// parent could point at in them).
+func (log *opLog[C]) coveredByAnchor(agent, seq int) bool {
+	if log.anchorCoverage == nil || len(log.ops) == 0 || log.ops[0].id.agent != anchorAgent {
+		return false
+	}
+	covered, ok := log.anchorCoverage[agent]
+	return ok && seq <= covered
+}
+
 // cloneRemoteVersion shallow-copies a version vector (small: one entry per
 // agent).
 func cloneRemoteVersion(m remoteVersion) remoteVersion {
@@ -389,6 +458,13 @@ func cloneRemoteVersion(m remoteVersion) remoteVersion {
 // snapshot compacts to a zero-op log that still carries the coverage table, so
 // tombstone-only documents compact too.
 func (log *opLog[C]) Compact(content C) error {
+	if log.isCompacted() && len(log.frontier) == 0 {
+		// Already a zero-op compacted log (empty-content anchor): there is
+		// no history left to collapse, and the single-tip precondition below
+		// would reject the empty frontier. Re-compacting is a no-op,
+		// mirroring the non-empty anchor's idempotence.
+		return nil
+	}
 	if len(log.frontier) != 1 {
 		return fmt.Errorf("oplog: Compact requires a fully synchronized document (frontier has %d tips)", len(log.frontier))
 	}
