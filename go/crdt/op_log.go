@@ -372,71 +372,86 @@ func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 // that will actually append; run-boundary convergence driven by already-held
 // ops' references becomes lazy — a future merge that references those seqs
 // splits then.
+// ingestOp applies one remote op to dest: anchor records follow the
+// compaction merge rules (skip-if-compacted / adopt-if-empty / redundant-
+// check-else-panic), ops dest fully holds are skipped, everything else is
+// appended through pushRemoteOpLV with parents resolved by resolve — a lazy
+// closure so translation work happens only for ops that actually append.
+// Returns true iff an ordinary op was applied. mergeInto and the delta
+// applier share this body; their only difference is how resolve sources
+// parents (src-lv translation vs wire (agent, seq) references).
+func (log *opLog[C]) ingestOp(o op[C], resolve func(o op[C]) []lv) bool {
+	// Anchor ops (compaction snapshots) never merge as ordinary ops:
+	// their agent, id, and parents are sentinels, and their content is
+	// a snapshot dest may already hold under other op boundaries.
+	if o.id.agent == anchorAgent {
+		if o.coverage == nil {
+			panic("oplog: anchor op without coverage")
+		}
+		switch {
+		case log.isCompacted():
+			// dest has its own anchor; the incoming one adds nothing.
+		case log.totalLV == 0:
+			// Bootstrap: adopt the anchor as the base content and its
+			// coverage. Raising version to the coverage records that
+			// dest now holds every pre-critical op, which is what makes
+			// the skip-delivery check below drop re-deliveries (and
+			// keeps checkCompacted's coverage<=version invariant).
+			// The anchor sentinel is scrubbed from both tables
+			// (mirroring Compact's own cleanup): agent -1 must never
+			// survive adoption in version (skip-delivery, seq
+			// continuation, serialization) or in the coverage a later
+			// re-Compact would clone from it.
+			pushRemoteOpLV(log, o, nil)
+			log.anchorCoverage = cloneRemoteVersion(o.coverage)
+			delete(log.anchorCoverage, anchorAgent)
+			for agent, seq := range o.coverage {
+				if log.version[agent] < seq {
+					log.version[agent] = seq
+				}
+			}
+			delete(log.version, anchorAgent)
+		default:
+			// dest holds real history: the anchor is redundant iff dest
+			// already holds every op the coverage stands for; otherwise
+			// the topology (partially converged + compacted peer) is
+			// unsupported in v1.
+			redundant := true
+			for agent, seq := range o.coverage {
+				if log.version[agent] < seq {
+					redundant = false
+					break
+				}
+			}
+			if !redundant {
+				panic("oplog: cannot merge a compacted replica into a partially converged state (unsupported in v1)")
+			}
+		}
+		return false
+	}
+	// Ops dest fully holds are discarded by pushRemoteOpLV; resolving
+	// their parents first is pure wasted scan (profiled 2026-09-05:
+	// 91% of map-merge CPU at 50k ops, 48% of rune's). Skip them.
+	// src ops always carry a set length (pushLocalOp/pushRemoteOpLV
+	// normalize before append), so this matches the effective range
+	// pushRemoteOpLV's skip check uses.
+	if last, ok := log.version[o.id.agent]; ok && last >= o.id.seq+o.length-1 {
+		return false
+	}
+	pushRemoteOpLV(log, o, resolve(o))
+	return true
+}
+
 func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 	for _, o := range src.ops {
-		// Anchor ops (compaction snapshots) never merge as ordinary ops:
-		// their agent, id, and parents are sentinels, and their content is
-		// a snapshot dest may already hold under other op boundaries.
-		if o.id.agent == anchorAgent {
-			if o.coverage == nil {
-				panic("oplog: anchor op without coverage")
+		dest.ingestOp(o, func(o op[C]) []lv {
+			parents := make([]lv, len(o.parents))
+			for i, p_lv := range o.parents {
+				pa := src.opAt(p_lv)
+				parents[i] = dest.resolveParentLV(pa.id.agent, src.seqAt(p_lv))
 			}
-			switch {
-			case dest.isCompacted():
-				// dest has its own anchor; the incoming one adds nothing.
-			case dest.totalLV == 0:
-				// Bootstrap: adopt the anchor as the base content and its
-				// coverage. Raising version to the coverage records that
-				// dest now holds every pre-critical op, which is what makes
-				// the skip-delivery check below drop re-deliveries (and
-				// keeps checkCompacted's coverage<=version invariant).
-				// The anchor sentinel is scrubbed from both tables
-				// (mirroring Compact's own cleanup): agent -1 must never
-				// survive adoption in version (skip-delivery, seq
-				// continuation, serialization) or in the coverage a later
-				// re-Compact would clone from it.
-				pushRemoteOpLV(dest, o, nil)
-				dest.anchorCoverage = cloneRemoteVersion(o.coverage)
-				delete(dest.anchorCoverage, anchorAgent)
-				for agent, seq := range o.coverage {
-					if dest.version[agent] < seq {
-						dest.version[agent] = seq
-					}
-				}
-				delete(dest.version, anchorAgent)
-			default:
-				// dest holds real history: the anchor is redundant iff dest
-				// already holds every op the coverage stands for; otherwise
-				// the topology (partially converged + compacted peer) is
-				// unsupported in v1.
-				redundant := true
-				for agent, seq := range o.coverage {
-					if dest.version[agent] < seq {
-						redundant = false
-						break
-					}
-				}
-				if !redundant {
-					panic("oplog: cannot merge a compacted replica into a partially converged state (unsupported in v1)")
-				}
-			}
-			continue
-		}
-		// Ops dest fully holds are discarded by pushRemoteOpLV; resolving
-		// their parents first is pure wasted scan (profiled 2026-09-05:
-		// 91% of map-merge CPU at 50k ops, 48% of rune's). Skip them.
-		// src ops always carry a set length (pushLocalOp/pushRemoteOpLV
-		// normalize before append), so this matches the effective range
-		// pushRemoteOpLV's skip check uses.
-		if last, ok := dest.version[o.id.agent]; ok && last >= o.id.seq+o.length-1 {
-			continue
-		}
-		parents := make([]lv, len(o.parents))
-		for i, p_lv := range o.parents {
-			pa := src.opAt(p_lv)
-			parents[i] = dest.resolveParentLV(pa.id.agent, src.seqAt(p_lv))
-		}
-		pushRemoteOpLV(dest, o, parents)
+			return parents
+		})
 	}
 }
 
