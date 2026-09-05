@@ -25,11 +25,16 @@
   the single-replica trace (its deletes take the local run-granular path).
 - [ ] **(parked, RLE era) runIdxForSeq backward scan** — O(#ops) per lookup;
   measured 2026-09-05: t(50k)/t(10k) ≈ 7.75 (127.4 ms → 987.6 ms for 5× op
-  growth) — below the ≥10 quadratic trigger, still parked.
-- [ ] **(recorded 2026-09-05) map merge scaling** — BenchmarkMapMergeAtScale
-  measures t(50k)/t(10k) = 17.8× (rune: 7.75, linear ~5); allocs linear, time
-  superlinear (mergeInto + keyIndex rebuild). Investigate only if map
-  workloads at >10k concurrent ops matter.
+  growth) — below the ≥10 quadratic trigger. Common-case lookups eliminated
+  2026-09-05 by the `mergeInto` skip (see map merge scaling item);
+  cold-path lookups (ops the destination does not fully hold) remain
+  O(#ops) — still parked.
+- [x] **map merge scaling — resolved 2026-09-05 by the `mergeInto` skip** —
+  BenchmarkMapMergeAtScale measured t(50k)/t(10k) = 17.8× (rune: 7.75,
+  linear ~5); allocs linear, time superlinear (mergeInto + keyIndex
+  rebuild). Post-fix same-session A/B: 26.36× → 4.33×, ~linear again
+  (rune: 4.41× → 4.72×); map 50k 57.1 ms (was 3334.0 ms — 58.4× faster),
+  10k 13.2 ms (was 126.5 ms — 9.6× faster).
 
 ## Tests / hygiene
 
