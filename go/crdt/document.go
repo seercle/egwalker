@@ -1,6 +1,8 @@
 package crdt
 
 import (
+	"bytes"
+	"encoding/gob"
 	"reflect"
 	"strings"
 )
@@ -68,6 +70,23 @@ func (d *doc[C]) mergeFrom(other *doc[C]) {
 		return
 	}
 	mergeInto(d.opLog, other.opLog)
+	checkoutFancy(d.opLog, d.branch, d.opLog.frontier)
+}
+
+// Version returns a defensive copy of the document's version vector — the
+// handshake token a peer passes to Delta.
+func (d *doc[C]) version() map[int]int {
+	out := make(map[int]int, len(d.opLog.version))
+	for k, v := range d.opLog.version {
+		out[k] = v
+	}
+	return out
+}
+
+// applyDelta applies a delta frame at the log and re-checks out the branch:
+// the delta counterpart of mergeFrom's tail.
+func (d *doc[C]) applyDelta(frame *deltaFrame[C]) {
+	d.opLog.applyDelta(frame)
 	checkoutFancy(d.opLog, d.branch, d.opLog.frontier)
 }
 
@@ -140,6 +159,28 @@ func (doc *RuneDocument) MergeFrom(other *RuneDocument) {
 	doc.doc.mergeFrom(other.doc)
 }
 
+// Version returns a defensive copy of the document's version vector — the
+// handshake token a peer passes to Delta.
+func (doc *RuneDocument) Version() map[int]int { return doc.doc.version() }
+
+// Delta encodes a delta frame carrying everything this document holds that a
+// peer at version `since` lacks.
+func (doc *RuneDocument) Delta(since map[int]int) ([]byte, error) {
+	return MarshalDelta(doc.doc.opLog, RuneTextCodec{}, since)
+}
+
+// ApplyDelta decodes and applies a delta frame. A syntactically corrupt frame
+// panics (wrapping the decode error); a semantically invalid topology panics
+// from the applier exactly as MergeFrom does.
+func (doc *RuneDocument) ApplyDelta(data []byte) {
+	frame, err := UnmarshalDelta[runeText](data, RuneTextCodec{})
+	if err != nil {
+		panic("crdt: ApplyDelta: " + err.Error())
+	}
+	doc.doc.applyDelta(frame)
+	doc.Check()
+}
+
 // Reset clears the document state.
 func (doc *RuneDocument) Reset() { doc.doc.Reset() }
 
@@ -172,6 +213,52 @@ func (doc *RuneDocument) MergeFromAny(other any) {
 // ==========================================
 // ArrayDocument
 // ==========================================
+
+// gobCodecValue/gobDecodeValue back the generic run codecs: map and array
+// content carry arbitrary Go values (plain types, or Mergeable documents kept
+// on the wire as value snapshots — pointer-carrying document types like
+// *RuneDocument are not gob-encodable and stay merge-only), so the opaque
+// blobs use gob over the whole run slice. A fresh Encoder per blob avoids
+// cross-blob type-id state.
+func gobEncodeValue[T any](v T) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func gobDecodeValue[T any](b []byte) (T, error) {
+	var out T
+	if err := gob.NewDecoder(bytes.NewReader(b)).Decode(&out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// MapRunCodec is the codec for MapDocument's mapRun content: the run slice
+// gob-encoded whole (each MapOp's Key/Value arrive as their encoded shapes).
+type MapRunCodec[K comparable, V any] struct{}
+
+func (MapRunCodec[K, V]) Encode(r mapRun[K, V]) ([]byte, error) {
+	return gobEncodeValue(r)
+}
+
+func (MapRunCodec[K, V]) Decode(b []byte) (mapRun[K, V], error) {
+	return gobDecodeValue[mapRun[K, V]](b)
+}
+
+// ItemRunCodec is the codec for ArrayDocument's itemRun content: the element
+// slice gob-encoded whole.
+type ItemRunCodec[T any] struct{}
+
+func (ItemRunCodec[T]) Encode(r itemRun[T]) ([]byte, error) {
+	return gobEncodeValue(r)
+}
+
+func (ItemRunCodec[T]) Decode(b []byte) (itemRun[T], error) {
+	return gobDecodeValue[itemRun[T]](b)
+}
 
 // ArrayDocument represents a generic CRDT array document.
 type ArrayDocument[T any] struct {
@@ -219,6 +306,55 @@ func (doc *ArrayDocument[T]) MergeFrom(other *ArrayDocument[T]) {
 	}
 	doc.mergeRecursive(other)
 	doc.doc.mergeFrom(other.doc)
+}
+
+// Version returns a defensive copy of the document's version vector — the
+// handshake token a peer passes to Delta.
+func (doc *ArrayDocument[T]) Version() map[int]int { return doc.doc.version() }
+
+// Delta encodes a delta frame carrying everything this document holds that a
+// peer at version `since` lacks.
+func (doc *ArrayDocument[T]) Delta(since map[int]int) ([]byte, error) {
+	return MarshalDelta(doc.doc.opLog, ItemRunCodec[T]{}, since)
+}
+
+// ApplyDelta decodes and applies a delta frame: the element-0 reconciliation
+// port of mergeRecursive runs BEFORE the log apply (same F4 limitation as
+// MergeFrom — reconciliation by identity, not better), then the log applies
+// and the branch re-checks out. A corrupt frame panics; an unsupported
+// topology panics from the applier exactly as MergeFrom does.
+func (doc *ArrayDocument[T]) ApplyDelta(data []byte) {
+	frame, err := UnmarshalDelta[itemRun[T]](data, ItemRunCodec[T]{})
+	if err != nil {
+		panic("crdt: ApplyDelta: " + err.Error())
+	}
+	oLog := doc.doc.opLog
+	for _, rec := range frame.ops {
+		elems := []T(rec.op.content)
+		if len(elems) == 0 {
+			continue
+		}
+		if _, ok := any(elems[0]).(Mergeable); !ok {
+			continue
+		}
+		// Pre-critical op: its contribution is folded into the anchor's
+		// converged snapshot and its id no longer exists in our log to
+		// merge into (same guard as mergeRecursive).
+		if covered, ok := oLog.anchorCoverage[rec.op.id.agent]; ok && rec.op.id.seq+rec.op.length-1 <= covered {
+			continue
+		}
+		if lastSeq, ok := oLog.version[rec.op.id.agent]; ok && lastSeq >= rec.op.id.seq {
+			ourLV := idToLV(oLog, rec.op.id)
+			our := []T(oLog.opAt(ourLV).content)
+			if len(our) > 0 {
+				if m, ok := any(our[0]).(Mergeable); ok {
+					m.MergeFromAny(elems[0])
+				}
+			}
+		}
+	}
+	doc.doc.applyDelta(frame)
+	doc.Check()
 }
 
 // Len returns the number of elements in the document.
@@ -315,6 +451,7 @@ func NewMapDocument[K comparable, V any](agent int) *MapDocument[K, V] {
 // Set sets the value for the given key.
 func (m *MapDocument[K, V]) Set(key K, value V) {
 	curLV := m.opLog.pushLocalOp(m.agent, op[mapRun[K, V]]{
+		opType:  opTypeIns,
 		content: mapRun[K, V]{{Key: key, Value: value}},
 	})
 	m.keyIndex[key] = append(m.keyIndex[key], curLV)
@@ -476,6 +613,97 @@ func (m *MapDocument[K, V]) Compact() {
 	m.keyIndex = make(map[K][]lv, len(entries))
 	for i, e := range entries {
 		m.keyIndex[e.Key] = append(m.keyIndex[e.Key], lv(i))
+	}
+}
+
+// Version returns a defensive copy of the document's version vector — the
+// handshake token a peer passes to Delta.
+func (m *MapDocument[K, V]) Version() map[int]int {
+	out := make(map[int]int, len(m.opLog.version))
+	for k, v := range m.opLog.version {
+		out[k] = v
+	}
+	return out
+}
+
+// Delta encodes a delta frame carrying everything this document holds that a
+// peer at version `since` lacks.
+func (m *MapDocument[K, V]) Delta(since map[int]int) ([]byte, error) {
+	return MarshalDelta(m.opLog, MapRunCodec[K, V]{}, since)
+}
+
+// ApplyDelta decodes and applies a delta frame: the reconciliation port of
+// MergeFrom's recursion pass runs BEFORE the log apply (reading frame records
+// instead of other's log), then the log applies, the appended range is
+// indexed into keyIndex (same loop as MergeFrom's), and a compacted log is
+// invariant-checked (the map has no Check() — compaction plan F2). A corrupt
+// frame panics; an unsupported topology panics from the applier exactly as
+// MergeFrom does.
+func (m *MapDocument[K, V]) ApplyDelta(data []byte) {
+	frame, err := UnmarshalDelta[mapRun[K, V]](data, MapRunCodec[K, V]{})
+	if err != nil {
+		panic("crdt: ApplyDelta: " + err.Error())
+	}
+	for _, rec := range frame.ops {
+		otherElems := rec.op.content
+		if len(otherElems) == 0 {
+			continue
+		}
+		if m.opLog.anchorCoverage != nil {
+			// Pre-critical op: its contribution is already folded into
+			// the anchor's converged snapshot, and its id no longer
+			// exists in our log to merge into (same guard as
+			// MergeFrom's recursion).
+			if covered, ok := m.opLog.anchorCoverage[rec.op.id.agent]; ok && rec.op.id.seq+rec.op.length-1 <= covered {
+				continue
+			}
+		}
+		if rec.op.id.agent == anchorAgent {
+			if rec.coverage == nil {
+				panic("oplog: anchor op without coverage")
+			}
+			// Anchor record: compaction discarded the original op ids,
+			// so anchor entries match our state by KEY. Merge the
+			// record's winner value into our current winner value; keys
+			// we do not hold are the log-apply's business.
+			for _, e := range otherElems {
+				if _, ok := any(e.Value).(Mergeable); !ok {
+					continue
+				}
+				if v, ok := m.Get(e.Key); ok {
+					if mrg, ok := any(v).(Mergeable); ok {
+						mrg.MergeFromAny(e.Value)
+					}
+				}
+			}
+			continue
+		}
+		if _, ok := any(otherElems[0].Value).(Mergeable); !ok {
+			continue
+		}
+		if lastSeq, ok := m.opLog.version[rec.op.id.agent]; ok && lastSeq >= rec.op.id.seq {
+			// We have this op. Find our version and merge if mergeable.
+			ourLV := idToLV(m.opLog, rec.op.id)
+			ourElems := m.opLog.opAt(ourLV).content
+			if len(ourElems) > 0 {
+				if mrg, ok := any(ourElems[0].Value).(Mergeable); ok {
+					mrg.MergeFromAny(otherElems[0].Value)
+				}
+			}
+		}
+	}
+	oldLen := m.opLog.applyDelta(frame)
+	for i := oldLen; i < len(m.opLog.ops); i++ {
+		o := m.opLog.ops[i]
+		// Index every entry of every appended op: ordinary map runs hold
+		// one binding (j == 0), an adopted anchor holds one binding per
+		// lv of its span — matching Compact's own anchor indexing.
+		for j, e := range o.content {
+			m.keyIndex[e.Key] = append(m.keyIndex[e.Key], m.opLog.opLV[i]+lv(j))
+		}
+	}
+	if m.opLog.isCompacted() {
+		checkCompacted(m.opLog)
 	}
 }
 

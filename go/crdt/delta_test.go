@@ -1,8 +1,12 @@
 package crdt
 
 import (
+	"cmp"
 	"encoding/binary"
+	"maps"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -211,7 +215,463 @@ func TestDeltaFrameEmptyLog(t *testing.T) {
 	}
 }
 
-// === Hostile frames ===
+// TestDeltaRoundTripFull pins the encoder-equivalence guard: applying a
+// sender's full delta (empty-since) to an empty replica through the public
+// API reproduces the sender exactly.
+func TestDeltaRoundTripFull(t *testing.T) {
+	a := NewRuneDocument(1)
+	a.Ins(0, "the quick brown fox")
+	a.Del(4, 6)
+	b := NewRuneDocument(2)
+	b.MergeFrom(a)
+	b.Ins(3, "ZZ")
+	a.MergeFrom(b)
+
+	fresh := NewRuneDocument(3)
+	blob, err := a.Delta(fresh.Version())
+	if err != nil {
+		t.Fatalf("Delta: %v", err)
+	}
+	fresh.ApplyDelta(blob)
+	if got, want := fresh.GetString(), a.GetString(); got != want {
+		t.Errorf("content: %q != %q", got, want)
+	}
+	if len(fresh.doc.opLog.ops) != len(a.doc.opLog.ops) {
+		t.Errorf("op count: %d != %d", len(fresh.doc.opLog.ops), len(a.doc.opLog.ops))
+	}
+	if !maps.Equal(fresh.Version(), a.Version()) {
+		t.Errorf("version: %v != %v", fresh.Version(), a.Version())
+	}
+	fresh.Check()
+}
+
+// mustApply encodes src's delta against dst's version and applies it.
+func mustApply(t *testing.T, dst *RuneDocument, src *RuneDocument) []byte {
+	t.Helper()
+	blob, err := src.Delta(dst.Version())
+	if err != nil {
+		t.Fatalf("Delta: %v", err)
+	}
+	return blob
+}
+
+// mergeableCell is a gob-encodable Mergeable element standing in for the
+// matrix entry's element maps: racing Set on its inner map reconciles through
+// the element-0 MergeFromAny pass (same semantics as merge, F4 carried).
+type mergeableCell struct{ Entries map[string]int }
+
+func (c *mergeableCell) MergeFromAny(other any) {
+	o, ok := other.(*mergeableCell)
+	if !ok {
+		return
+	}
+	for k, v := range o.Entries {
+		c.Entries[k] = v
+	}
+}
+
+// cellsText renders a cell array's content as a stable comparable form
+// (elements may arrive unordered across components, so sort by the "a" key).
+func cellsText(items []*mergeableCell) string {
+	var sb strings.Builder
+	for _, c := range items {
+		keys := make([]string, 0, len(c.Entries))
+		for k := range c.Entries {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			sb.WriteString(k)
+			sb.WriteString("=")
+			sb.WriteString(strconv.Itoa(c.Entries[k]))
+			sb.WriteString(" ")
+		}
+		sb.WriteString("|")
+	}
+	return sb.String()
+}
+
+// mapEntries renders a map doc's state deterministically (Keys order is not).
+func mapEntries[K cmp.Ordered, V comparable](keys []K, get func(K) (V, bool)) map[K]V {
+	out := make(map[K]V, len(keys))
+	for _, k := range keys {
+		v, ok := get(k)
+		if ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// TestDeltaEqualsMerge is the core equivalence matrix: for each family and
+// sync shape, ApplyDelta(Delta(since)) must land exactly where MergeFrom
+// lands — content, version, and Check.
+func TestDeltaEqualsMerge(t *testing.T) {
+	t.Run("rune", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hello")
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+		a.Ins(5, " world")
+		a.Del(0, 1)
+
+		viaMerge := NewRuneDocument(3)
+		viaMerge.MergeFrom(a)
+
+		viaDelta := NewRuneDocument(3)
+		viaDelta.ApplyDelta(mustApply(t, viaDelta, a))
+
+		if viaDelta.GetString() != viaMerge.GetString() {
+			t.Errorf("content diverged: %q vs %q", viaDelta.GetString(), viaMerge.GetString())
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+		viaDelta.Check()
+	})
+
+	t.Run("rune full log round trip", func(t *testing.T) {
+		a := baseDeltaDoc()
+		b := NewRuneDocument(4)
+		b.MergeFrom(a)
+		a.Ins(1, "Q")
+		a.Ins(4, "R")
+		a.Del(6, 2)
+
+		viaMerge := NewRuneDocument(5)
+		viaMerge.MergeFrom(a)
+
+		viaDelta := NewRuneDocument(6)
+		viaDelta.ApplyDelta(mustApply(t, viaDelta, a))
+
+		if viaDelta.GetString() != viaMerge.GetString() {
+			t.Errorf("content diverged: %q vs %q", viaDelta.GetString(), viaMerge.GetString())
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+		if len(viaDelta.doc.opLog.ops) != len(viaMerge.doc.opLog.ops) {
+			t.Errorf("op count diverged: %d vs %d", len(viaDelta.doc.opLog.ops), len(viaMerge.doc.opLog.ops))
+		}
+		viaDelta.Check()
+	})
+
+	t.Run("map", func(t *testing.T) {
+		m1 := NewMapDocument[string, string](1)
+		m2 := NewMapDocument[string, string](2)
+		m1.Set("k", "x1")
+		m2.MergeFrom(m1)
+		m1.MergeFrom(m2)
+		m1.Set("k", "a")
+		m2.Set("k", "b") // racing Set, both unresolved in one place:
+		hub := NewMapDocument[string, string](3)
+		hub.MergeFrom(m1)
+		hub.MergeFrom(m2) // hub holds the racing pair: agent 2 wins LWW
+		hub.Set("onlyHub", "x")
+
+		viaMerge := NewMapDocument[string, string](4)
+		viaMerge.MergeFrom(hub)
+
+		viaDelta := NewMapDocument[string, string](3)
+		blob, err := hub.Delta(viaDelta.Version())
+		if err != nil {
+			t.Fatalf("Delta: %v", err)
+		}
+		viaDelta.ApplyDelta(blob)
+
+		if v, ok := viaDelta.Get("k"); !ok || v != "b" {
+			t.Errorf("viaDelta.Get(k) = (%q, %v), want (%q, true) — LWW winner agent 2", v, ok, "b")
+		}
+		if !maps.Equal(mapEntries[string, string](viaDelta.Keys(), viaDelta.Get),
+			mapEntries[string, string](viaMerge.Keys(), viaMerge.Get)) {
+			t.Errorf("maps diverged: %v vs %v",
+				mapEntries[string, string](viaDelta.Keys(), viaDelta.Get),
+				mapEntries[string, string](viaMerge.Keys(), viaMerge.Get))
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+	})
+
+	t.Run("map mergeable values", func(t *testing.T) {
+		m1 := NewMapDocument[string, *mergeableCell](1)
+		cell := &mergeableCell{Entries: map[string]int{"a": 1}}
+		m1.Set("k", cell)
+
+		m2 := NewMapDocument[string, *mergeableCell](2)
+		m2.MergeFrom(m1)
+		m1.MergeFrom(m2)
+		cell.Entries["z"] = 9 // shared-reference mutation: no new ops
+
+		viaMerge := NewMapDocument[string, *mergeableCell](3)
+		viaMerge.MergeFrom(m1)
+		viaMerge.MergeFrom(m2)
+
+		viaDelta := NewMapDocument[string, *mergeableCell](3)
+		blob, err := m2.Delta(viaDelta.Version())
+		if err != nil {
+			t.Fatalf("Delta: %v", err)
+		}
+		viaDelta.ApplyDelta(blob)
+
+		g1, _ := viaMerge.Get("k")
+		g2, ok := viaDelta.Get("k")
+		if got, want := cellsText([]*mergeableCell{g2}), cellsText([]*mergeableCell{g1}); !ok || got != want {
+			t.Errorf("cell diverged: %q vs %q (present %v)", got, want, ok)
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+	})
+
+	t.Run("array mergeable elements", func(t *testing.T) {
+		arr1 := NewArrayDocument[*mergeableCell](1)
+		cellA := &mergeableCell{Entries: map[string]int{"a": 1}}
+		arr1.Ins(0, []*mergeableCell{cellA})
+		arr2 := NewArrayDocument[*mergeableCell](2)
+		arr2.MergeFrom(arr1)
+
+		// New elements both sides plus racing Set on the shared cell.
+		arr1.Ins(1, []*mergeableCell{{Entries: map[string]int{"b": 2}}})
+		arr2.Ins(0, []*mergeableCell{{Entries: map[string]int{"c": 0}}})
+		cellA.Entries["z"] = 9
+
+		viaMerge := NewArrayDocument[*mergeableCell](3)
+		viaMerge.MergeFrom(arr1)
+		viaMerge.MergeFrom(arr2)
+
+		viaDelta := NewArrayDocument[*mergeableCell](3)
+		viaDelta.MergeFrom(arr1)
+		blob, err := arr2.Delta(viaDelta.Version())
+		if err != nil {
+			t.Fatalf("Delta: %v", err)
+		}
+		viaDelta.ApplyDelta(blob)
+
+		if got, want := cellsText(viaDelta.GetItems()), cellsText(viaMerge.GetItems()); got != want {
+			t.Errorf("array diverged: %q vs %q", got, want)
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+		viaDelta.Check()
+		viaMerge.Check()
+	})
+
+	t.Run("straddle", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hello")
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+		a.Ins(5, " world") // extends a's tail run past what b holds
+
+		before := len(b.doc.opLog.ops)
+		b.ApplyDelta(mustApply(t, b, a))
+
+		// The delta rides pushRemoteOpLV's suffix path: one new suffix op.
+		if got := len(b.doc.opLog.ops); got != before+1 {
+			t.Errorf("op count grew by %d, want 1", got-before)
+		}
+		suffix := b.doc.opLog.ops[len(b.doc.opLog.ops)-1]
+		if string(suffix.content) != " world" || suffix.id != (id{agent: 1, seq: 5}) {
+			t.Errorf("suffix op = %+v, want (world, {1 5})", suffix)
+		}
+		if got, want := b.GetString(), "hello world"; got != want {
+			t.Errorf("GetString() = %q, want %q", got, want)
+		}
+		if !maps.Equal(b.Version(), a.Version()) {
+			t.Errorf("version diverged: %v vs %v", b.Version(), a.Version())
+		}
+		b.Check()
+	})
+
+	t.Run("compacted dest, full src", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hello")
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+		a.MergeFrom(b)
+		a.Compact()
+		b.Ins(5, " world")
+
+		viaMerge := NewRuneDocument(3)
+		viaMerge.MergeFrom(a)
+		viaMerge.MergeFrom(b)
+
+		viaDelta := NewRuneDocument(3)
+		viaDelta.MergeFrom(a) // adopts a's anchor: compacted dest
+		if !viaDelta.doc.opLog.isCompacted() {
+			t.Fatal("viaDelta should be compacted before the delta")
+		}
+		viaDelta.ApplyDelta(mustApply(t, viaDelta, b))
+
+		if got, want := viaDelta.GetString(), viaMerge.GetString(); got != want {
+			t.Errorf("content diverged: %q vs %q", got, want)
+		}
+		if !maps.Equal(viaDelta.Version(), viaMerge.Version()) {
+			t.Errorf("version diverged: %v vs %v", viaDelta.Version(), viaMerge.Version())
+		}
+		viaDelta.Check()
+		viaMerge.Check()
+	})
+
+	t.Run("compacted src, fresh dest", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hello")
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+		b.Ins(5, " world")
+		a.MergeFrom(b)
+		a.Compact()
+
+		fresh := NewRuneDocument(3)
+		fresh.ApplyDelta(mustApply(t, fresh, a))
+
+		if !fresh.doc.opLog.isCompacted() {
+			t.Error("fresh dest did not adopt the anchor: isCompacted() false")
+		}
+		if !maps.Equal(fresh.doc.opLog.anchorCoverage, a.doc.opLog.anchorCoverage) {
+			t.Errorf("coverage not restored: %v vs %v", fresh.doc.opLog.anchorCoverage, a.doc.opLog.anchorCoverage)
+		}
+		if got, want := fresh.GetString(), "hello world"; got != want {
+			t.Errorf("GetString() = %q, want %q", got, want)
+		}
+		if got := len(fresh.doc.opLog.ops); got != 1 {
+			t.Errorf("fresh dest holds %d ops, want 1 (the adopted anchor)", got)
+		}
+
+		// Pre-critical re-delivery from the full-history replica: no dup.
+		since := cloneRemoteVersion(b.doc.opLog.version)
+		redelivery := mustUnmarshalDelta(t, mustDelta(t, b, since))
+		if len(redelivery.ops) != 0 {
+			t.Errorf("b's delta vs the adoption-raised vector has %d ops, want 0", len(redelivery.ops))
+		}
+		opsBefore := len(fresh.doc.opLog.ops)
+		fresh.ApplyDelta(mustApply(t, fresh, b))
+		if got := len(fresh.doc.opLog.ops); got != opsBefore {
+			t.Errorf("re-delivery duplicated ops: %d -> %d", opsBefore, got)
+		}
+		fresh.Check()
+	})
+
+	t.Run("both compacted", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		b := NewRuneDocument(2)
+		a.Ins(0, "hi")
+		b.MergeFrom(a)
+		a.MergeFrom(b)
+		a.Compact()
+		b.Compact()
+		a.Ins(2, "!")
+		b.Ins(0, ">")
+
+		aDelta := mustApply(t, a, b) // b -> a, computed before either applies
+		bDelta := mustApply(t, b, a)
+		a.ApplyDelta(aDelta)
+		b.ApplyDelta(bDelta)
+
+		if a.GetString() != b.GetString() {
+			t.Errorf("divergence: a=%q b=%q", a.GetString(), b.GetString())
+		}
+		if !maps.Equal(a.Version(), b.Version()) {
+			t.Errorf("version diverged: %v vs %v", a.Version(), b.Version())
+		}
+		a.Check()
+		b.Check()
+	})
+
+	t.Run("boundary pin", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hi")
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+		a.MergeFrom(b)
+		b.Compact()   // b: anchor "hi", coverage {1:1}
+		a.Ins(2, "!") // independent edit on a
+		a.Compact()   // a: anchor "hi!" (longer), coverage {1:2}
+		b.Ins(0, ">") // b's post-compaction op parents b's anchor end (-1, 1)
+
+		content := a.GetString()
+		opsBefore := len(a.doc.opLog.ops)
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Error("expected panic applying delta across non-aligned compaction points")
+					return
+				}
+				msg, ok := r.(string)
+				if !ok || !strings.Contains(msg, "compacted at different points") {
+					t.Errorf("panic %v does not name the non-aligned-compaction topology", r)
+				}
+			}()
+			a.ApplyDelta(mustApply(t, a, b))
+		}()
+		if got := a.GetString(); got != content {
+			t.Errorf("dest content corrupted by failed apply: %q -> %q", content, got)
+		}
+		if got := len(a.doc.opLog.ops); got != opsBefore {
+			t.Errorf("dest log mutated by failed apply: %d ops -> %d", opsBefore, got)
+		}
+		a.Check()
+	})
+
+	t.Run("zero-op delta", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "hello")
+		a.Del(0, 2)
+		b := NewRuneDocument(2)
+		b.MergeFrom(a)
+
+		opsBefore := len(b.doc.opLog.ops)
+		b.ApplyDelta(mustApply(t, b, a))
+
+		if got := len(b.doc.opLog.ops); got != opsBefore {
+			t.Errorf("op count changed: %d -> %d", opsBefore, got)
+		}
+		if got, want := b.GetString(), a.GetString(); got != want {
+			t.Errorf("content changed: %q vs %q", got, want)
+		}
+		if !maps.Equal(b.Version(), a.Version()) {
+			t.Errorf("version changed: %v vs %v", b.Version(), a.Version())
+		}
+	})
+
+	t.Run("zero-op compacted sender", func(t *testing.T) {
+		a := NewRuneDocument(1)
+		a.Ins(0, "abc")
+		a.Del(0, 3) // tombstone-only content: compaction leaves zero ops
+		a.Compact()
+		if !a.doc.opLog.isCompacted() || len(a.doc.opLog.ops) != 0 {
+			t.Fatal("sender fixture: expected a zero-op compacted log")
+		}
+
+		fresh := NewRuneDocument(3)
+		blob, err := a.Delta(fresh.Version())
+		if err != nil {
+			t.Fatalf("Delta: %v", err)
+		}
+		frame := mustUnmarshalDelta(t, blob)
+		if len(frame.ops) != 0 {
+			t.Fatalf("tombstone-only delta has %d ops, want 0", len(frame.ops))
+		}
+		if frame.anchorCoverage == nil {
+			t.Fatal("tombstone-only delta must ride the log-level coverage table")
+		}
+		fresh.ApplyDelta(blob)
+
+		if !fresh.doc.opLog.isCompacted() {
+			t.Error("fresh dest did not adopt the log-level coverage: isCompacted() false")
+		}
+		if !maps.Equal(fresh.doc.opLog.anchorCoverage, a.doc.opLog.anchorCoverage) {
+			t.Errorf("coverage: %v vs %v", fresh.doc.opLog.anchorCoverage, a.doc.opLog.anchorCoverage)
+		}
+		if !maps.Equal(fresh.Version(), a.Version()) {
+			t.Errorf("version: %v vs %v", fresh.Version(), a.Version())
+		}
+		fresh.Check()
+	})
+}
 
 // baseDeltaDoc builds a valid doc whose delta exercises every column: mixed
 // types, multi-byte content, and cross-agent parents.

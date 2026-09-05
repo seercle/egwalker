@@ -455,6 +455,45 @@ func mergeInto[C content[C]](dest *opLog[C], src *opLog[C]) {
 	}
 }
 
+// applyDelta applies a decoded delta frame: each record goes through
+// ingestOp with parents resolved directly against this log's causal state
+// (the wire references are (agent, end seq) pairs — no sender-lv
+// indirection, which is the whole point of the delta format). Returns the
+// op-log length before applying so callers can index the appended range.
+func (log *opLog[C]) applyDelta(frame *deltaFrame[C]) int {
+	oldLen := len(log.ops)
+	for _, rec := range frame.ops {
+		o := rec.op
+		o.coverage = rec.coverage // wire records carry coverage beside the op
+		log.ingestOp(o, func(o op[C]) []lv {
+			parents := make([]lv, len(rec.parents))
+			for i, p := range rec.parents {
+				parents[i] = log.resolveParentLV(p.agent, p.seq)
+			}
+			return parents
+		})
+	}
+	// The anchorless log-level coverage table (zero-record frame of a
+	// compacted sender) adopts into an EMPTY log only: a non-empty dest
+	// would claim pre-critical history it may not hold. This is the same
+	// bootstrap the anchor record's adopt branch performs (ingestOp):
+	// version rises to the coverage so dest counts as holding every
+	// pre-critical op (skip-delivery drops re-deliveries, and
+	// checkCompacted's coverage<=version invariant holds — a tombstone-only
+	// compaction keeps the compaction-time version, which here would
+	// otherwise never arrive). The coverage is never folded in BEYOND that
+	// bootstrap: no pre-critical content exists to back it.
+	if frame.anchorCoverage != nil && log.totalLV == 0 && log.anchorCoverage == nil {
+		log.anchorCoverage = cloneRemoteVersion(frame.anchorCoverage)
+		for agent, seq := range log.anchorCoverage {
+			if log.version[agent] < seq {
+				log.version[agent] = seq
+			}
+		}
+	}
+	return oldLen
+}
+
 // ==========================================
 // Snapshot-Anchor Compaction
 // ==========================================
