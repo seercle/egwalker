@@ -483,13 +483,18 @@ func (log *opLog[C]) applyDelta(frame *deltaFrame[C]) int {
 	// compaction keeps the compaction-time version, which here would
 	// otherwise never arrive). The coverage is never folded in BEYOND that
 	// bootstrap: no pre-critical content exists to back it.
+	// The anchor sentinel is scrubbed from both tables, mirroring
+	// ingestOp's record-adopt branch (and Compact's own cleanup): agent
+	// -1 must never survive adoption.
 	if frame.anchorCoverage != nil && log.totalLV == 0 && log.anchorCoverage == nil {
 		log.anchorCoverage = cloneRemoteVersion(frame.anchorCoverage)
+		delete(log.anchorCoverage, anchorAgent)
 		for agent, seq := range log.anchorCoverage {
 			if log.version[agent] < seq {
 				log.version[agent] = seq
 			}
 		}
+		delete(log.version, anchorAgent)
 	}
 	return oldLen
 }
