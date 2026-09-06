@@ -23,12 +23,20 @@
   consecutive endPos = statically adjacent chars; backward jumps = gaps).
   Needs the correctness argument the Shape B report deferred; zero effect on
   the single-replica trace (its deletes take the local run-granular path).
-- [ ] **(parked, RLE era) runIdxForSeq backward scan** — O(#ops) per lookup;
-  measured 2026-09-05: t(50k)/t(10k) ≈ 7.75 (127.4 ms → 987.6 ms for 5× op
-  growth) — below the ≥10 quadratic trigger. Common-case lookups eliminated
-  2026-09-05 by the `mergeInto` skip (see map merge scaling item);
-  cold-path lookups (ops the destination does not fully hold) remain
-  O(#ops) — still parked.
+- [x] **(parked, RLE era) runIdxForSeq backward scan — resolved 2026-09-06
+  by the per-agent seq index** — the backward O(#ops) scan in
+  `runIdxForSeq` / `resolveParentLV` lookups was replaced by a per-agent
+  index (agent → ascending `{startSeq, headLV}`; headLV stable across run
+  splits, resolution headLV → `opIdxAt`). Measured (same-session):
+  `MergeAtScale` 1k 24.4 ms → 4.7 ms (5.2×), 10k 296.5 ms → 65.0 ms
+  (4.6×), 50k 1157.7 ms → 565.3 ms (2.05×); growth 3.9× → 8.7× ns
+  (10k → 50k), byte growth steady at 4.8× B (index ~5 B/replica-op at
+  trace scale, +1.34 MB for the 83,751-op trace; replay wall 602 ms →
+  250 ms, 2.4×). Fuzzed ~3.0M total execs, 0 crashers
+  (`FuzzMergeConvergence` 145,952 @ 120 s, `FuzzDeltaConvergence`
+  66,288 @ 120 s, `FuzzBinaryFrame` 2,800,492 @ 60 s). Parked: delta
+  emission could use per-agent suffix cursors for O(kept) frames —
+  parked, not measured as a hotspot.
 - [x] **map merge scaling — resolved 2026-09-05 by the `mergeInto` skip** —
   BenchmarkMapMergeAtScale measured t(50k)/t(10k) = 17.8× (rune: 7.75,
   linear ~5); allocs linear, time superlinear (mergeInto + keyIndex
