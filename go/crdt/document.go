@@ -326,15 +326,17 @@ func (doc *ArrayDocument[T]) Ins(pos int, items []T) {
 }
 
 // GetItems returns all items in the array, served from the lazy render
-// cache when no mutation landed since the last render.
+// cache when no mutation landed since the last render. The returned slice
+// is always a defensive copy: mutating it does not affect the document or
+// the cache.
 func (doc *ArrayDocument[T]) GetItems() []T {
 	if doc.itemsHas && !doc.itemsDirty {
-		return doc.itemsValue
+		return append([]T(nil), doc.itemsValue...)
 	}
 	out := make([]T, 0, doc.Len())
 	doc.doc.branch.snapshot.ForEachContent(func(r itemRun[T]) { out = append(out, []T(r)...) })
 	doc.itemsValue, doc.itemsHas, doc.itemsDirty = out, true, false
-	return doc.itemsValue
+	return append([]T(nil), out...)
 }
 
 // MergeFrom merges changes from another document. Mergeable children are

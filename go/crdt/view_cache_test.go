@@ -64,3 +64,29 @@ func TestGetItemsCacheCoherence(t *testing.T) {
 	a.MergeFrom(b)
 	expect(a, []int{1, 3, 7})
 }
+
+// TestGetItemsCopyOnReturn pins the fresh-slice contract: mutating a slice
+// handed out by GetItems must not affect later reads or the cache.
+func TestGetItemsCopyOnReturn(t *testing.T) {
+	a := NewArrayDocument[int](1)
+	a.Ins(0, []int{1, 2, 3})
+
+	got := a.GetItems()
+	got[0] = 99
+
+	if want := []int{1, 2, 3}; !equalInts(a.GetItems(), want) {
+		t.Fatalf("GetItems after mutation = %v, want %v", a.GetItems(), want)
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
