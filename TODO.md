@@ -134,18 +134,27 @@
   has no dedicated hostile case (an empty/1-row body truncation overlaps
   the generic column-truncation test's `uncompacted Coverage body` skip).
 
-- [ ] **Extend FuzzDocumentOps's textChar alphabet** so fuzz inputs can
-  become multibyte / invalid-UTF-8 document content — op-stream bytes
-  currently map to ASCII only, so the raw-byte path is pinned by unit tests
-  alone (parked review finding).
-- [ ] **Pin an upper leaf bound in TestShapeBInteriorDeleteSplitsOneLeaf** —
-  still lenient; its 1000-char leaves legitimately stay split (> cap after
-  coalescing), so a bound must account for that (e.g. <= 4).
-- [ ] **estimateSize hardcodes rune byte width** (serialization_test.go,
-  test-only) — silently wrong for future non-runeText instantiations; take
-  the width from the instantiated content type or document harder.
-- [ ] **Report cosmetics** — Shape B report caveats 2-4 sit under the
-  delete-run heading; split into an "Additional caveats" subhead.
+- [x] **Extend FuzzDocumentOps's textChar alphabet — resolved 2026-09-06,
+  multibyte-but-valid** — the font now includes valid 2/3/4-byte runes ("é",
+  "你", emoji) flowing through insert/delete/merge; raw invalid-UTF-8 bytes
+  were dropped after fuzzing surfaced that run fusion re-decodes adjacent
+  invalid bytes as one valid rune ("\xc3"+"\x80" → "À", 1+1 runes → 1),
+  breaking per-token rune invariants — runeText keeps invalid bytes intact
+  within a single run but per-rune invariants only hold for valid UTF-8
+  (pinned by the in-code comment). 60 s fuzz: 180,814 execs, 0 crashers.
+- [x] **Pin an upper leaf bound in TestShapeBInteriorDeleteSplitsOneLeaf —
+  resolved 2026-09-06 at exactly 2** — mechanism-derived, not lucky-run: the
+  single-leaf interior delete directly rebuilds one 999-char survivor leaf
+  (no split; the prior "3 leaves" note predates the direct-build delete) and
+  both survivors (999/1000 chars) exceed ropeLeafCap so no coalescing can
+  join them; asserted == 2 with message, stable at -count=5.
+- [x] **estimateSize hardcodes rune byte width — resolved 2026-09-06
+  (test-only)** — width now derived from the instantiated content type
+  (`contentByteWidth[C]`: runeText → sizeof(rune); other instantiations
+  panic with the type name instead of silently misestimating).
+- [x] **Report cosmetics — resolved 2026-09-06** — Shape B report caveats 2-4
+  moved under an "Additional caveats" subhead; caveat 1 stays with the
+  delete-run heading.
 
 ## Housekeeping
 

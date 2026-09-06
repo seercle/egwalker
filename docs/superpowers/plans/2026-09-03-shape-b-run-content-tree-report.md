@@ -129,6 +129,9 @@ Out-of-scope items were untouched: `bxtree`, the serialization wire format
    (`snapshot.Delete(pos, delLen)` once) and for all inserts. Batching remote
    delete runs into fewer rope calls is possible follow-up but needs a
    correctness argument first.
+
+### Additional caveats
+
 2. **Rope fragmentation under scattered deletes.** `contentTree.Delete` splits
    leaves but never re-coalesces adjacent halves, so merge-heavy per-character
    delete workloads can fragment leaves toward single characters (unlike
