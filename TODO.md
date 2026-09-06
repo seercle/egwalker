@@ -8,11 +8,11 @@
   shows replay 338–381 ms vs 473–475 ms for the coalescing-only state on the
   same machine — ~33% faster, no regression. The earlier "wall time remains
   above ~410 ms" reading was a battery-throttling artifact and is retracted.
-- [ ] **bxtree: closure-free summary descent** — `FindPath` is ~33% of the
-  trace profile; the per-item predicate closure (up to 128 calls/leaf) and the
-  generic indirection could be replaced by a summary-targeted descent with
-  plain integer compares. Requires touching bxtree (currently off-limits by
-  plan convention) — needs explicit go-ahead.
+- [x] ~~**bxtree: closure-free summary descent**~~ — dropped 2026-09-06 by
+  user decision (was: `FindPath` ~33% of the trace profile; would have
+  required touching bxtree, off-limits by plan convention). Superseded in
+  intent by the `IntBxTree.FindCumulative` plan
+  (`docs/superpowers/plans/2026-09-04-bxtree-int-find.md`, unexecuted).
 - [x] **runeText SplitAt/Concat rune round-trips — resolved: `c2b60da`** —
   allocation-free `runeText` (`Len` via `utf8.RuneCountInString`, zero-copy
   byte-offset `SplitAt`) removed the `[]rune` conversions; storm allocs/op
