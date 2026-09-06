@@ -437,6 +437,16 @@ type MapDocument[K comparable, V any] struct {
 	agent    int
 	opLog    *opLog[mapRun[K, V]]
 	keyIndex map[K][]lv
+
+	// Per-key LWW winner cache: winnerLV[key] is the winning binding lv as
+	// of epoch winnerEpoch[key] = len(keyIndex[key]) at resolve time. New
+	// bindings (Set/MergeFrom/ApplyDelta) are the only way the binding list
+	// changes, so an unchanged epoch means the cached winner still stands.
+	// Both maps are lazily allocated on first record and shared by the
+	// keys-map; Compact strips them (it rebuilds keyIndex from scratch, so
+	// cached lvs would be stale — and could collide epoch-wise).
+	winnerLV    map[K]lv
+	winnerEpoch map[K]int
 }
 
 // NewMapDocument creates a new generic CRDT map document.
@@ -457,11 +467,24 @@ func (m *MapDocument[K, V]) Set(key K, value V) {
 	m.keyIndex[key] = append(m.keyIndex[key], curLV)
 }
 
-// Get returns the value for the given key using LWW strategy, with recursive merging for Mergeable values.
+// Get returns the value for the given key using LWW strategy, with recursive
+// merging for Mergeable values. The per-key winner (the lv whose binding wins
+// the LWW race, not the value) is cached with an epoch bound to
+// len(keyIndex[key]): new bindings are the only mutation, so an unchanged
+// epoch means the cached resolution stands. The Mergeable recursion below
+// runs on every Get exactly as before (values are shared by reference and
+// MergeFromAny is idempotent), so cached and uncached paths are identical.
 func (m *MapDocument[K, V]) Get(key K) (V, bool) {
+	bindings := m.keyIndex[key]
+	if m.winnerLV != nil {
+		if lvCached, ok := m.winnerLV[key]; ok && m.winnerEpoch[key] == len(bindings) {
+			return m.getAtCached(key, lvCached, bindings)
+		}
+	}
+
 	var concurrentLVs []lv
 
-	for _, curLV := range m.keyIndex[key] {
+	for _, curLV := range bindings {
 		// Filter out any existing concurrent LVs that are ancestors of this one
 		nextConcurrent := []lv{curLV}
 		for _, existingLV := range concurrentLVs {
@@ -492,6 +515,8 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 		}
 	}
 
+	m.recordWinner(key, bestLV, bindings)
+
 	// Recursive merge if V is Mergeable
 	if mergeable, ok := any(bestV).(Mergeable); ok {
 		for _, l := range concurrentLVs {
@@ -502,6 +527,32 @@ func (m *MapDocument[K, V]) Get(key K) (V, bool) {
 	}
 
 	return bestV, true
+}
+
+// getAtCached finishes Get from a cached winner: the epoch guarantees the
+// binding list is unchanged, so [winner] IS the full concurrent-candidate
+// set (the filter is what proves a candidate is not dominated; the cached
+// winner's dominance was decided against the same binding epoch). No
+// candidate walk and no loser recursion is needed here — the loser state
+// was already folded into the shared winner value object by the recompute
+// that populated the cache (values are shared by reference and
+// MergeFromAny is idempotent), and the empty-set loop over the recompute
+// tail would contribute nothing.
+func (m *MapDocument[K, V]) getAtCached(key K, winnerLV lv, bindings []lv) (V, bool) {
+	return m.mapEntryAt(winnerLV).Value, true
+}
+
+// recordWinner stores the (winner, epoch) pair into the lazily allocated
+// winner cache. Called on the recompute path only, right before the loser
+// recursion folds the concurrent losers into the shared winner value
+// object — after this, cached hits need no further reconciliation.
+func (m *MapDocument[K, V]) recordWinner(key K, bestLV lv, bindings []lv) {
+	if m.winnerLV == nil {
+		m.winnerLV = make(map[K]lv)
+		m.winnerEpoch = make(map[K]int)
+	}
+	m.winnerLV[key] = bestLV
+	m.winnerEpoch[key] = len(bindings)
 }
 
 // mapEntryAt resolves the MapOp stored at character lv l. Map runs hold one
@@ -611,6 +662,9 @@ func (m *MapDocument[K, V]) Compact() {
 	// The anchor op spans one lv per live binding (entry i sits at lv i), so
 	// each key indexes directly into the anchor's span.
 	m.keyIndex = make(map[K][]lv, len(entries))
+	// The winner cache holds pre-compaction lvs that no longer exist here,
+	// so drop it outright (lazily re-armed on the next Get).
+	m.winnerLV, m.winnerEpoch = nil, nil
 	for i, e := range entries {
 		m.keyIndex[e.Key] = append(m.keyIndex[e.Key], lv(i))
 	}
@@ -713,16 +767,12 @@ func (m *MapDocument[K, V]) MergeFromAny(other any) {
 	}
 }
 
-// Keys returns all keys that have been set in the map.
+// Keys returns all keys that have been set in the map. keyIndex holds every
+// key ever Set — LWW map ops are append-only, nothing is ever deleted — so
+// its key set IS the answer (O(#keys) vs a full O(#ops) log scan).
 func (m *MapDocument[K, V]) Keys() []K {
-	keysMap := make(map[K]bool)
-	for _, o := range m.opLog.ops {
-		for _, e := range o.content {
-			keysMap[e.Key] = true
-		}
-	}
-	keys := make([]K, 0, len(keysMap))
-	for k := range keysMap {
+	keys := make([]K, 0, len(m.keyIndex))
+	for k := range m.keyIndex {
 		keys = append(keys, k)
 	}
 	return keys
