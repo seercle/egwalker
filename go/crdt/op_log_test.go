@@ -399,9 +399,14 @@ func TestShapeBInteriorDeleteSplitsOneLeaf(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, strings.Repeat("a", 1000))
 	doc.Ins(1000, strings.Repeat("b", 1000)) // second leaf
-	doc.Del(500, 1)                          // interior delete in first leaf
-	// Lenient on purpose: an interior delete splits the run's leaf (the 1000-char
-	// "a" leaf becomes two around the deleted rune), so the count here is 3, not 2.
+	doc.Del(500, 1) // interior delete in first leaf
+	// The interior delete is the single-leaf direct build (contentTree.Delete's
+	// iL == iR branch): the survivor replaces leaf 1 as ONE merged leaf of 999
+	// chars — no split, no seam. Both survivors (999-char "a", 1000-char "b")
+	// exceed ropeLeafCap, so no coalescing can join them either: exactly 2.
+	if leaves := doc.doc.branch.snapshot.leafCount(); leaves != 2 {
+		t.Fatalf("interior delete left %d leaves; want exactly 2 (999-char a-run + unchanged 1000-char b-run)", leaves)
+	}
 	if got := doc.GetString(); len([]rune(got)) != 1999 {
 		t.Fatalf("len=%d", len([]rune(got)))
 	}
