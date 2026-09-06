@@ -5,12 +5,26 @@ import (
 	"maps"
 	"math/rand"
 	"reflect"
+	"strings"
 	"testing"
 )
 
-const textAlphabet = " abcdefghijklmnopqrstuvwxyz"
+// textAlphabet is the character font fuzz inputs draw document content from.
+// Beyond plain ASCII it includes valid multibyte runes (2, 3, and 4 bytes), so
+// multibyte content flows through the whole insert/delete machinery. Raw
+// invalid UTF-8 bytes are intentionally NOT part of the font: runeText keeps
+// them intact within one run, but adjacent same-agent runs fuse via Concat,
+// and neighboring invalid bytes can re-decode as a single valid rune
+// ("\xc3"+"\x80" -> "À"), collapsing the fused run's rune count (1+1 -> 1)
+// and breaking the per-token mirror. Per-rune invariants only hold for valid
+// UTF-8 content; see the TODO resolution note.
+var textAlphabet = []string{
+	" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+	"n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+	"é", "ü", "β", "你", "好", "€", "\U0001F600",
+}
 
-func textChar(b byte) byte {
+func textChar(b byte) string {
 	return textAlphabet[int(b)%len(textAlphabet)]
 }
 
@@ -46,7 +60,7 @@ func addSeeds(f *testing.F, seeds [][]byte) {
 
 type textDelta struct {
 	insert bool
-	ch     byte
+	ch     string
 	pos    int
 	del    int
 }
@@ -97,7 +111,7 @@ func nextTextDelta(L int, r *byteReader) (textDelta, bool) {
 
 func applyTextDelta(doc *RuneDocument, d textDelta) {
 	if d.insert {
-		doc.Ins(d.pos, string(d.ch))
+		doc.Ins(d.pos, d.ch)
 	} else {
 		doc.Del(d.pos, d.del)
 	}
@@ -114,13 +128,16 @@ func textDocSeeds() [][]byte {
 	}
 }
 
-// FuzzDocumentOps checks a single RuneDocument against a []rune reference
-// model after every insert/delete.
+// FuzzDocumentOps checks a single RuneDocument against a token-stream
+// reference model after every insert/delete. The mirror is one token per
+// document rune: each alphabet entry is a single rune for the document's
+// rune counting (runeText's Len a valid rune or an invalid byte as one
+// rune, so token and rune positions stay aligned).
 func FuzzDocumentOps(f *testing.F) {
 	addSeeds(f, textDocSeeds())
 	// Multibyte and invalid-UTF-8 byte streams pin the runeText rewrite:
 	// multibyte op sequences and raw \xff bytes must never diverge from the
-	// []rune mirror below.
+	// token mirror below.
 	f.Add([]byte("héllo 你好 \U0001F600"))
 	f.Add([]byte("\xff\xfe\xffx\xfd"))
 
@@ -129,7 +146,7 @@ func FuzzDocumentOps(f *testing.F) {
 			return
 		}
 		doc := NewRuneDocument(1)
-		var mirror []rune
+		var mirror []string
 		r := &byteReader{data: data}
 
 		for {
@@ -140,19 +157,23 @@ func FuzzDocumentOps(f *testing.F) {
 			}
 
 			if d.insert {
-				doc.Ins(d.pos, string(d.ch))
-				mirror = append(mirror, 0)
+				doc.Ins(d.pos, d.ch)
+				mirror = append(mirror, "")
 				copy(mirror[d.pos+1:], mirror[d.pos:])
-				mirror[d.pos] = rune(d.ch)
+				mirror[d.pos] = d.ch
 			} else {
 				doc.Del(d.pos, d.del)
 				mirror = append(mirror[:d.pos], mirror[d.pos+d.del:]...)
 			}
 
-			if got := doc.GetString(); got != string(mirror) {
-				t.Fatalf("document diverged: got %q, mirror %q", got, string(mirror))
+			if got := doc.GetString(); got != strings.Join(mirror, "") {
+				t.Fatalf("document diverged: got %q, mirror %q", got, strings.Join(mirror, ""))
+			}
+			if doc.Len() != len(mirror) {
+				t.Fatalf("Len diverged: got %d, mirror %d", doc.Len(), len(mirror))
 			}
 		}
+		doc.Check()
 	})
 }
 
