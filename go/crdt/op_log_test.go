@@ -399,7 +399,7 @@ func TestShapeBInteriorDeleteSplitsOneLeaf(t *testing.T) {
 	doc := NewRuneDocument(1)
 	doc.Ins(0, strings.Repeat("a", 1000))
 	doc.Ins(1000, strings.Repeat("b", 1000)) // second leaf
-	doc.Del(500, 1) // interior delete in first leaf
+	doc.Del(500, 1)                          // interior delete in first leaf
 	// The interior delete is the single-leaf direct build (contentTree.Delete's
 	// iL == iR branch): the survivor replaces leaf 1 as ONE merged leaf of 999
 	// chars — no split, no seam. Both survivors (999-char "a", 1000-char "b")
