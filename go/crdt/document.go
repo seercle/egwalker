@@ -126,6 +126,14 @@ func (d *doc[C]) Compact(content C) {
 // parameter; its run content is runeText.
 type RuneDocument struct {
 	doc *doc[runeText]
+	// Lazy render cache: GetString re-renders the whole rope per call
+	// otherwise. textDirty is set by every path that mutates the snapshot
+	// (Ins, Del, MergeFrom, ApplyDelta, Compact, Reset); the string is
+	// materialized on the first read after each mutation, so the cache
+	// only costs memory once reads actually happen.
+	textDirty bool
+	textHas   bool
+	textValue string
 }
 
 // NewRuneDocument creates a new CRDT document for runes with the given agent ID.
@@ -136,13 +144,19 @@ func NewRuneDocument(agent int) *RuneDocument {
 // Ins inserts the given text at the specified position.
 func (doc *RuneDocument) Ins(pos int, text string) {
 	doc.doc.InsRun(pos, runeText(text))
+	doc.textDirty = true
 }
 
-// GetString returns the current text content of the document.
+// GetString returns the current text content of the document, served from
+// the lazy render cache when no mutation landed since the last render.
 func (doc *RuneDocument) GetString() string {
+	if doc.textHas && !doc.textDirty {
+		return doc.textValue
+	}
 	var sb strings.Builder
 	doc.doc.branch.snapshot.ForEachContent(func(r runeText) { sb.WriteString(string(r)) })
-	return sb.String()
+	doc.textValue, doc.textHas, doc.textDirty = sb.String(), true, false
+	return doc.textValue
 }
 
 // Len returns the number of runes in the document.
@@ -151,12 +165,16 @@ func (doc *RuneDocument) Len() int { return doc.doc.Len() }
 // Del deletes n runes starting from the specified position.
 func (doc *RuneDocument) Del(pos, n int) {
 	doc.doc.Del(pos, n)
+	doc.textDirty = true
 }
 
 // MergeFrom merges changes from another document. Runes are never Mergeable, so
 // there is no recursion pass.
 func (doc *RuneDocument) MergeFrom(other *RuneDocument) {
 	doc.doc.mergeFrom(other.doc)
+	if doc != other {
+		doc.textDirty = true
+	}
 }
 
 // Version returns a defensive copy of the document's version vector — the
@@ -178,16 +196,21 @@ func (doc *RuneDocument) ApplyDelta(data []byte) {
 		panic("crdt: ApplyDelta: " + err.Error())
 	}
 	doc.doc.applyDelta(frame)
+	doc.textDirty = true
 	doc.Check()
 }
 
 // Reset clears the document state.
-func (doc *RuneDocument) Reset() { doc.doc.Reset() }
+func (doc *RuneDocument) Reset() {
+	doc.doc.Reset()
+	doc.textDirty = true
+}
 
 // Compact collapses the op log into a single anchor op holding the current
 // content. Requires a fully synchronized document (single-tip frontier).
 func (doc *RuneDocument) Compact() {
 	doc.doc.Compact(runeText(doc.GetString()))
+	doc.textDirty = true
 	doc.Check()
 }
 
@@ -263,6 +286,13 @@ func (ItemRunCodec[T]) Decode(b []byte) (itemRun[T], error) {
 // ArrayDocument represents a generic CRDT array document.
 type ArrayDocument[T any] struct {
 	doc *doc[itemRun[T]]
+	// Lazy render cache, mirroring RuneDocument: itemsDirty is set by
+	// every path that mutates the snapshot (Ins, Del, MergeFrom,
+	// ApplyDelta, Compact, Reset); the slice is materialized on the first
+	// read after each mutation.
+	itemsDirty bool
+	itemsHas   bool
+	itemsValue []T
 }
 
 // NewArrayDocument creates a new generic CRDT array document.
@@ -285,17 +315,26 @@ func (doc *ArrayDocument[T]) Ins(pos int, items []T) {
 				})
 			}
 			doc.doc.syncRun(pos, itemRun[T](items))
+			doc.itemsDirty = true
 			return
 		}
 	}
 	doc.doc.InsRun(pos, itemRun[T](items))
+	if len(items) > 0 {
+		doc.itemsDirty = true
+	}
 }
 
-// GetItems returns all items in the array.
+// GetItems returns all items in the array, served from the lazy render
+// cache when no mutation landed since the last render.
 func (doc *ArrayDocument[T]) GetItems() []T {
+	if doc.itemsHas && !doc.itemsDirty {
+		return doc.itemsValue
+	}
 	out := make([]T, 0, doc.Len())
 	doc.doc.branch.snapshot.ForEachContent(func(r itemRun[T]) { out = append(out, []T(r)...) })
-	return out
+	doc.itemsValue, doc.itemsHas, doc.itemsDirty = out, true, false
+	return doc.itemsValue
 }
 
 // MergeFrom merges changes from another document. Mergeable children are
@@ -306,6 +345,7 @@ func (doc *ArrayDocument[T]) MergeFrom(other *ArrayDocument[T]) {
 	}
 	doc.mergeRecursive(other)
 	doc.doc.mergeFrom(other.doc)
+	doc.itemsDirty = true
 }
 
 // Version returns a defensive copy of the document's version vector — the
@@ -354,6 +394,7 @@ func (doc *ArrayDocument[T]) ApplyDelta(data []byte) {
 		}
 	}
 	doc.doc.applyDelta(frame)
+	doc.itemsDirty = true
 	doc.Check()
 }
 
@@ -363,15 +404,20 @@ func (doc *ArrayDocument[T]) Len() int { return doc.doc.Len() }
 // Del deletes n elements starting from the specified position.
 func (doc *ArrayDocument[T]) Del(pos, n int) {
 	doc.doc.Del(pos, n)
+	doc.itemsDirty = true
 }
 
 // Reset clears the document state.
-func (doc *ArrayDocument[T]) Reset() { doc.doc.Reset() }
+func (doc *ArrayDocument[T]) Reset() {
+	doc.doc.Reset()
+	doc.itemsDirty = true
+}
 
 // Compact collapses the op log into a single anchor op holding the current
 // content. Requires a fully synchronized document (single-tip frontier).
 func (doc *ArrayDocument[T]) Compact() {
 	doc.doc.Compact(itemRun[T](doc.GetItems()))
+	doc.itemsDirty = true
 	doc.Check()
 }
 
