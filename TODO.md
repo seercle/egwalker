@@ -37,6 +37,22 @@
   66,288 @ 120 s, `FuzzBinaryFrame` 2,800,492 @ 60 s). Parked: delta
   emission could use per-agent suffix cursors for O(kept) frames —
   parked, not measured as a hotspot.
+- [x] **Incremental accessor views — resolved 2026-09-06** — `MapDocument.Keys()`
+  iterates `keyIndex` instead of scanning the log (O(#ops) → O(#keys)):
+  10k 1.37 ms → 0.23 ms (5.9×, 80 → 1 allocs), 50k 6.91 ms → 0.65 ms (10.6×,
+  274 → 1 allocs); per-key LWW winner cache on `Get` with epoch invalidation
+  (`epoch = len(keyIndex[key])`; `Compact()` strips the cache): warm Get 1k
+  144 µs → 33 µs (4.3×), 10k 1.15 ms → 0.40 ms (2.8×). Parked note: cold Get
+  at 10k is +33% (the miss pays a one-time cache fill on top of the walk) —
+  inherent to caching, fine at this scale. Lazy render caches on
+  RuneDocument/ArrayDocument (one dirty-flag invalidation at the
+  `Ins`/`Del`/`MergeFrom`/`ApplyDelta`/`Compact`/`Reset` tails; `GetItems`
+  returns a defensive copy preserving the fresh-slice contract): repeated
+  `GetString` on untouched text 239 µs → 143 ns (~1670×), warm path only —
+  the per-edit render still pays the full rope walk cold, so render caches
+  profit read-after-read workloads, not one-render-per-edit editors.
+  Oracles: `FuzzMapDocument` 60 s → 197,963 execs, 0 crashers; trace heap
+  +~0.01 MB (24.23 → 24.24 MB).
 - [x] **map merge scaling — resolved 2026-09-05 by the `mergeInto` skip** —
   BenchmarkMapMergeAtScale measured t(50k)/t(10k) = 17.8× (rune: 7.75,
   linear ~5); allocs linear, time superlinear (mergeInto + keyIndex
