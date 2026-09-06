@@ -67,12 +67,26 @@ func TestSerializationLossless(t *testing.T) {
 	}
 }
 
+// contentByteWidth returns the byte width of one content element for the
+// instantiated run type — the element count (Len) multiplied by this width
+// estimates a run's content bytes.
+func contentByteWidth[C content[C]]() int {
+	var c C
+	switch any(c).(type) {
+	case runeText:
+		return int(unsafe.Sizeof(rune(0)))
+	default:
+		panic("estimateSize: no known byte width for content type " + reflect.TypeOf(c).String())
+	}
+}
+
 // estimateSize provides a rough byte count for comparison. Rows are run ops: a
-// per-op fixed cost plus the run content bytes each op holds. Content is
-// rune-backed in every instantiation used by these tests, so the content byte
-// width is sizeof(rune); only the rune count is visible through content[C].
+// per-op fixed cost plus the run content bytes each op holds. The content byte
+// width is derived from the instantiated run type (a runeText element is one
+// rune; only the rune count is visible through content[C]); other
+// instantiations are a hard test failure rather than a silently wrong estimate.
 func estimateSize[C content[C]](log *opLog[C], data *ColumnarData[C]) (int, int) {
-	runeSize := int(unsafe.Sizeof(*new(rune)))
+	runeSize := contentByteWidth[C]()
 	opSize := int(unsafe.Sizeof(op[C]{}))
 	contentHeader := int(unsafe.Sizeof(*new(C)))
 
