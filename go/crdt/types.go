@@ -55,6 +55,15 @@ type opLog[C content[C]] struct {
 	// anchorCoverage is set only on compacted logs: a snapshot of version at
 	// compaction time (agent -> max seq covered by the anchor). nil otherwise.
 	anchorCoverage remoteVersion
+
+	// seqIndex maps agent -> that agent's run ops as parallel seq-ascending
+	// slices: starts[i] is the op's first per-agent sequence number,
+	// headLVs[i] the lv of its FIRST character (opLV of the op). headLVs
+	// survive run splits immutable (lv spans are never renumbered), which
+	// makes (start, headLV) a stable seq->op reference: resolution goes
+	// headLV -> opIdxAt -> the CURRENT op covering the seq, even after
+	// later splits shortened the original run.
+	seqIndex map[int]*agentSeqIndex
 }
 
 type diffResult struct {

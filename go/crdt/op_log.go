@@ -9,6 +9,70 @@ import (
 // OpLog Functions (Internal)
 // ==========================================
 
+type agentSeqIndex struct {
+	starts  []int
+	headLVs []lv
+}
+
+// indexAppend records one run op in the per-agent seq index. Appends MUST be
+// seq-ascending per agent: pushLocalOp/pushRemoteOpLV only ever append
+// version[agent]+1 (gap panics enforce remote order), and Unmarshal's
+// rebuild walks valid logs. A violation is a structural bug — panic.
+func (log *opLog[C]) indexAppend(agent int, start int, head lv) {
+	idx := log.seqIndex[agent]
+	if idx == nil {
+		idx = &agentSeqIndex{}
+		log.seqIndex[agent] = idx
+	}
+	if n := len(idx.starts); n > 0 && start <= idx.starts[n-1] {
+		panic(fmt.Sprintf("oplog: seqIndex append for agent %d not ascending (%d after %d)", agent, start, idx.starts[n-1]))
+	}
+	idx.starts = append(idx.starts, start)
+	idx.headLVs = append(idx.headLVs, head)
+}
+
+// seqIndexOf binary-searches the per-agent index for the op whose seq range
+// contains seq, returning its CURRENT op index. Range validation happens on
+// the resolved op (splits may have subdivided the entry's original span;
+// the last start <= seq always points into the entry now covering seq).
+func (log *opLog[C]) seqIndexOf(agent, seq int) (int, bool) {
+	idx := log.seqIndex[agent]
+	if idx == nil {
+		return 0, false
+	}
+	i := sort.Search(len(idx.starts), func(i int) bool { return idx.starts[i] > seq }) - 1
+	if i < 0 {
+		return 0, false
+	}
+	j := log.opIdxAt(idx.headLVs[i])
+	o := &log.ops[j]
+	if o.id.agent != agent || seq >= o.id.seq+o.length {
+		return 0, false
+	}
+	return j, true
+}
+
+// checkSeqIndex validates every index entry: headLV resolves to the op
+// whose agent and start seq match the entry. Panics on the first mismatch.
+// Oracle-test only; never called in production paths.
+func (log *opLog[C]) checkSeqIndex() {
+	for agent, idx := range log.seqIndex {
+		if len(idx.starts) != len(idx.headLVs) {
+			panic("oplog: seqIndex parallel slices out of sync")
+		}
+		for i := range idx.starts {
+			if i > 0 && idx.starts[i] <= idx.starts[i-1] {
+				panic(fmt.Sprintf("oplog: seqIndex starts not ascending for agent %d", agent))
+			}
+			j := log.opIdxAt(idx.headLVs[i])
+			o := &log.ops[j]
+			if o.id.agent != agent || o.id.seq != idx.starts[i] {
+				panic(fmt.Sprintf("oplog: seqIndex entry inconsistent: agent %d entry %d (start %d, headLV %d) resolves to op %d id %v", agent, i, idx.starts[i], idx.headLVs[i], j, o.id))
+			}
+		}
+	}
+}
+
 func newOpLog[C content[C]]() *opLog[C] {
 	return &opLog[C]{
 		ops:      []op[C]{},
@@ -17,6 +81,7 @@ func newOpLog[C content[C]]() *opLog[C] {
 		frontier: []lv{},
 		version:  make(remoteVersion),
 		idToLV:   make(map[id]lv),
+		seqIndex: make(map[int]*agentSeqIndex),
 	}
 }
 
@@ -88,6 +153,9 @@ func (log *opLog[C]) pushLocalOp(agent int, o op[C]) lv {
 		log.idToLV[log.ops[last].id] = end
 		log.version[agent] = o.id.seq + o.length - 1
 		log.totalLV += lv(o.length)
+		// Fold path: no new seqIndex entry — the folded tail op keeps its
+		// original start seq and headLV; the index entry made when the tail
+		// was first appended already covers the extended span.
 		return first
 	}
 
@@ -100,6 +168,7 @@ func (log *opLog[C]) pushLocalOp(agent int, o op[C]) lv {
 	log.idToLV[o.id] = first + lv(o.length) - 1
 	log.frontier = []lv{first + lv(o.length) - 1}
 	log.version[agent] = o.id.seq + o.length - 1
+	log.indexAppend(o.id.agent, o.id.seq, first)
 	return first
 }
 
@@ -195,15 +264,14 @@ func (log *opLog[C]) opEndLVForSeq(agent, seq int) lv {
 }
 
 // runIdxForSeq returns the index of the run op from `agent` whose seq range
-// contains `seq`.
+// contains `seq`, via the per-agent sequence index (O(log k + log n) vs the
+// former backward whole-log scan).
 func (log *opLog[C]) runIdxForSeq(agent, seq int) int {
-	for i := len(log.ops) - 1; i >= 0; i-- {
-		o := &log.ops[i]
-		if o.id.agent == agent && seq >= o.id.seq && seq < o.id.seq+o.length {
-			return i
-		}
+	j, ok := log.seqIndexOf(agent, seq)
+	if !ok {
+		panic(fmt.Sprintf("oplog: no op from agent %d covers seq %d", agent, seq))
 	}
-	panic(fmt.Sprintf("oplog: no op from agent %d covers seq %d", agent, seq))
+	return j
 }
 
 // splitRunOp splits run op j so that its first k characters form the prefix op
@@ -242,6 +310,23 @@ func (log *opLog[C]) splitRunOp(j, k int) lv {
 
 	log.idToLV[o.id] = prefixEnd
 	log.idToLV[suffixOp.id] = log.endLV(j + 1)
+
+	// The suffix entry is seq-sorted-inserted: its start sits below any
+	// later ops this agent already appended. Splits are bounded by op
+	// count, so the memmove amortizes like splitRunOp's own copy.
+	suffixStart := o.id.seq + k
+	host := log.seqIndex[suffixOp.id.agent]
+	if host != nil {
+		p := sort.Search(len(host.starts), func(i int) bool { return host.starts[i] > suffixStart })
+		host.starts = append(host.starts, 0)
+		copy(host.starts[p+1:], host.starts[p:])
+		host.starts[p] = suffixStart
+		host.headLVs = append(host.headLVs, 0)
+		copy(host.headLVs[p+1:], host.headLVs[p:])
+		host.headLVs[p] = prefixEnd + 1
+	} else {
+		log.indexAppend(suffixOp.id.agent, suffixStart, prefixEnd+1)
+	}
 	return prefixEnd
 }
 
@@ -361,6 +446,7 @@ func pushRemoteOpLV[C content[C]](log *opLog[C], o op[C], parents []lv) {
 	log.idToLV[o.id] = first + lv(o.length) - 1
 	log.frontier = advanceFrontier(log.frontier, first+lv(o.length)-1, o.parents)
 	log.version[agent] = o.id.seq + o.length - 1
+	log.indexAppend(o.id.agent, o.id.seq, first)
 }
 
 // mergeInto copies src's ops into dest. Parent references are re-encoded by
@@ -585,6 +671,7 @@ func (log *opLog[C]) replaceWith(fresh *opLog[C]) {
 	log.frontier = fresh.frontier
 	log.idToLV = fresh.idToLV
 	log.anchorCoverage = fresh.anchorCoverage
+	log.seqIndex = fresh.seqIndex
 }
 
 // checkCompacted validates the compacted-log invariants: when the log carries

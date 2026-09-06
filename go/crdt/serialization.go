@@ -164,6 +164,8 @@ func Unmarshal[C content[C]](data *ColumnarData[C]) *opLog[C] {
 		// idToLV maps an op id to its causal head (end) LV.
 		log.idToLV[log.ops[i].id] = log.opLV[i] + lv(log.ops[i].length) - 1
 
+		log.indexAppend(log.ops[i].id.agent, log.ops[i].id.seq, log.opLV[i])
+
 		// Update version map (high-water seq covers the whole run).
 		agent := log.ops[i].id.agent
 		seq := log.ops[i].id.seq + log.ops[i].length - 1
