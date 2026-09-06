@@ -252,6 +252,109 @@ func BenchmarkBinaryRoundTrip(b *testing.B) {
 	b.ReportMetric(float64(len(blob)), "blob-bytes")
 }
 
+// BenchmarkMapKeysAtScale measures Keys() at map scale: n keys, each set
+// once, then one full MergeFrom so keyIndex is populated on the reader.
+// The 10k->50k growth ratio is the O(#ops) -> O(#keys) signal. Fixtures are
+// built untimed per size; run with:
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkMapKeysAtScale' -benchmem -benchtime=3x
+func BenchmarkMapKeysAtScale(b *testing.B) {
+	for _, n := range []int{10_000, 50_000} {
+		b.Run("keys="+strconv.Itoa(n), func(b *testing.B) {
+			b.StopTimer()
+			a := NewMapDocument[string, int](0)
+			for i := 0; i < n; i++ {
+				a.Set(strconv.Itoa(i), i)
+			}
+			r := NewMapDocument[string, int](1)
+			r.MergeFrom(a)
+			keys := r.Keys()
+			if len(keys) != n {
+				b.Fatalf("Keys() = %d keys, want %d", len(keys), n)
+			}
+			b.ReportAllocs()
+			b.StartTimer()
+
+			for b.Loop() {
+				keys := r.Keys()
+				_ = keys
+			}
+		})
+	}
+}
+
+// BenchmarkMapGetOverwrite measures Get on an overwrite-hot key: n re-Sets
+// of the same key, then m = n Gets. The winner cache turns the O(k^2)-worst
+// binding walk into one recompute per epoch. Two sub-benchmarks: "warm"
+// (repeat Gets — cache hit path) and "cold" (Get right after a Set — epoch
+// invalidated, recompute path). Fixtures are built untimed; run with:
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkMapGetOverwrite' -benchmem -benchtime=3x
+func BenchmarkMapGetOverwrite(b *testing.B) {
+	for _, n := range []int{1_000, 10_000} {
+		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
+			b.Run("warm", func(b *testing.B) {
+				b.StopTimer()
+				doc := NewMapDocument[string, int](0)
+				for i := 0; i < n; i++ {
+					doc.Set("hot", i)
+				}
+				b.ReportAllocs()
+				b.StartTimer()
+
+				for b.Loop() {
+					v, ok := doc.Get("hot")
+					if !ok || v != n-1 {
+						b.Fatalf("Get = (%v,%v), want (%d,true)", v, ok, n-1)
+					}
+				}
+			})
+			b.Run("cold", func(b *testing.B) {
+				b.StopTimer()
+				doc := NewMapDocument[string, int](0)
+				for i := 0; i < n; i++ {
+					doc.Set("hot", i)
+				}
+				b.ReportAllocs()
+				b.StartTimer()
+
+				for b.Loop() {
+					doc.Set("hot", n-1)
+					if v, ok := doc.Get("hot"); !ok || v != n-1 {
+						b.Fatalf("Get = (%v,%v), want (%d,true)", v, ok, n-1)
+					}
+				}
+			})
+		})
+	}
+}
+
+// BenchmarkGetStringRepeat measures repeated GetString on a stable document
+// at trace scale (the cache hit path) vs the full rope walk. The trace is
+// replayed once untimed and one warm-up GetString is taken; the timed loop
+// asserts the length invariant every iteration. Run with:
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkGetStringRepeat' -benchmem -benchtime=3x
+func BenchmarkGetStringRepeat(b *testing.B) {
+	raw, err := os.ReadFile("../../resources/editing-trace.json")
+	if err != nil {
+		b.Fatalf("read trace: %v", err)
+	}
+	doc := NewRuneDocument(0)
+	if err := replayTrace(doc, raw); err != nil {
+		b.Fatalf("replay trace: %v", err)
+	}
+	want := doc.GetString()
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if got := doc.GetString(); len(got) != len(want) {
+			b.Fatalf("GetString length %d, want %d", len(got), len(want))
+		}
+	}
+}
+
 // buildDeltaFixtureB builds a sender with n single-char ops and a receiver
 // synced after the first n-k of them (a real incremental receiver: a genuine
 // common-ancestor prefix, then the sender gains the last k ops it is
