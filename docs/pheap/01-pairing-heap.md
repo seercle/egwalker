@@ -57,18 +57,21 @@ the way the code sees it; every edge is annotated with the field that realizes
 it and the function that built it:
 
 ```mermaid
-graph TD
+ graph TD
     R["8 · root<br/>(PairingHeap.root)"]
     R -->|child — Push pheap.go:119| A["1"]
-    R -.->|sibling — Push pheap.go:119| B["5"]
-    B -.->|sibling — Push pheap.go:119| C["3"]
+    A -.->|sibling — Push pheap.go:119| B["5"]
+    B -->|child — Push pheap.go:119| C["3"]
     A2["push order:<br/>meld(new, root)"]
     A2 -.-> R
 ```
 
-The root (8) has a child list `1 → 5 → 3`, i.e. exactly the nodes that lost at
-some point to 8 in `meld` (each `Push` made the smaller of {new, root} become
-the other's first child, pheap.go:29-37).
+The root (8) holds the child list `1 → 5`, and **5 keeps its own first-child 3**
+(it became 3's parent during `Push(3)` and keeps that subtree; melding under 8
+never flattens anyone into a sibling of anyone else's grandparent, pheap.go:29-37).
+Verified by dumping the structure the code actually builds — there is no
+`1 → 5 → 3` chain: each `Push` made the smaller of {new, root} become the
+other's first *child*, via `meld` (pheap.go:29-37).
 
 ## `Push`: meld the new node onto the root
 
@@ -247,28 +250,29 @@ graph TD
 ### Worked example: `push 5, 3, 8, 1`, then `Pop`
 
 Recall the heap after those four pushes (built exactly as in the layout
-section): root **8**, children `1 → 5 → 3`. Now `Pop()` in the default
+section): root **8**, children `1 → 5` (with `5.child = 3`). Now `Pop()` in the default
 max-heap:
 
 | # | Op | State after (function involved) |
 |---|----|---------------------------------|
 | 1 | `Push(5)` | root 5 (`meld`, pheap.go:19) |
 | 2 | `Push(3)` | root 5, child 3 (`meld` else-branch, pheap.go:33) |
-| 3 | `Push(8)` | root 8, children `5 → 3` (`meld`, pheap.go:29: less(5,8)=true, so 8 wins and links 5 under itself at pheap.go:30-32) |
-| 4 | `Push(1)` | root 8, children `1 → 5 → 3` (`meld` else-branch, pheap.go:34) |
-| 5 | `Pop()` → 8 | `mergePairs(1→5→3)`, pheap.go:134 |
-| 6 | pass 1, pair (1,5) | `meld(1,5)`: 5 wins → winner 5; prepend ⇒ pairs `5` (pheap.go:57-59) |
-| 7 | pass 1, odd child 3 | `curr = 3`, no sibling ⇒ prepend: pairs `3 → 5` (pheap.go:64-67) |
-| 8 | pass 2, `meld(3,5)` | 5 wins: root 5, child 3 — final heap ⇒ children `3`, pheap.go:81 |
+| 3 | `Push(8)` | root 8, child **5**, and 5 keeps its own child 3 — `meld(8,5)` true-branch: `5.sibling = 8.child (nil)`, `8.child = 5` (pheap.go:29-32); 3 stays under 5 |
+| 4 | `Push(1)` | root 8, children `1 → 5`, 5.child = 3 (`meld(1,8)` else-branch: `1.sibling = 8.child = 5`, `8.child = 1`, pheap.go:33-36) |
+| 5 | `Pop()` → 8 | `mergePairs(1→5)` — exactly one pair, no odd leftover (pheap.go:134) |
+| 6 | pass 1 pair (1,5) | `meld(1,5)`: `less(5,1)` = false ⇒ else-branch: `1.sibling = 5.child = 3`, `5.child = 1`; winner 5 with children `1 → 3`; `pairs = 5` (pheap.go:57-59) |
+| 7 | pass 2 | single winner, `pairs.sibling = nil` ⇒ loop body never runs; root stays 5 (pheap.go:76-83) |
 
-Wait — step 8 deserves a check against the code: `meld(3,5)` asks
-`less(5, 3)` = `5 < 3` = false, so the *else* branch (pheap.go:33-36) runs:
-3 lands under 5, exactly as the table says. After `Pop`, the heap is
+Checking step 6 against the code: after `a.sibling = nil; b.sibling = nil`
+(pheap.go:54-55) meld(1,5) asks `less(5, 1)` = `5 < 1` = false, so the *else*
+branch (pheap.go:33-36) runs — 1 becomes 5's first child, and 5's old child 3
+slides to 1's sibling slot for the next round. After `Pop`, the heap is
 
 ```mermaid
 graph TD
-    R["root: 5<br/>(Pop → mergePairs → meld, pheap.go:134,57,81)"]
-    R -->|child| A["3"]
+    R["root: 5<br/>(Pop → mergePairs → meld, pheap.go:134,57)"]
+    R -->|child| A["1"]
+    A -.->|sibling| B["3"]
 ```
 
 ## Decrease-key: not implemented
@@ -298,19 +302,27 @@ Recall the two costs in this structure:
 | `Pop` | `mergePairs` over k children (`k` = root's child count) | O(k) / **O(log n)** |
 | `Peek`/`Size` | pheap.go:149-158, pheap.go:140-145 | O(1) |
 
-The standard argument: track the *potential* Φ = (number of children of the
-root) roughly via the number of "pairs" produced by pass 1. Each
-`meld(a,b)` inside `mergePairs` consumes two trees and emits one, so pass 1
-turns k children into about k/2 winners; pass 2 then folds those k/2 into one
-root, and `meld` shrinks the winner count again. Total work is Θ(k), but pass 1
-left behind ~k/2 fewer trees — that stored "slack" is what the next `Pop`
-spends. Hence the classic amortized bound of O(log n) per delete-min (and the
-practically excellent behavior even for worst-case-exponential theory, which
-is the reason anyone uses this structure). Note that no per-node rank exists
-here to maintain (unlike Fibonacci heaps), and that lazily deferring work is
-*possible* (`Push` never consolidates) but never *required*: the heap stays a
-single tree at all times, so each `Pop` pays for at most the children it
-discovers (pheap.go:41-86).
+The potential argument, stated plainly: the *potential* is Φ = the number of
+trees the structure could be holding (for a pairing heap, expressed through the
+children of the root). A `Pop` with k children does Θ(k) real work — pass 1
+melds the k children pairwise into about k/2 trees, pass 2 folds those ~k/2
+winners into one tree with `meld` (pheap.go:46-83). Two things keep the
+amortized cost bounded:
+
+1. Each `meld` inside `mergePairs` consumes two trees and emits one, so the
+   tournament halves the tree count per pass, and the fold in pass 2 costs one
+   `meld` per remaining tree — O(k) total, never more.
+2. The children that caused the big k are produced by earlier, cheap `Push`
+   operations; the classic analysis charges that credit to the pushes, giving
+   **amortized O(log n) per `Pop`** (and O(1) for `Push`/`Peek`/`Size`).
+
+The full textbook proof tracks a per-node `rank`; this package has no rank
+field to maintain (unlike Fibonacci heaps) — the two-pass structure alone
+produces the same practical bounds, which is the reason this data structure is
+used despite theoretically-unbounded worst cases. Note also that `Push` never
+consolidates anything: the heap stays a single tree at all times, so each
+`Pop` only ever pays for the children the dead root actually had
+(pheap.go:41-86).
 
 Cost per operation across a run of mixed pushes and pops:
 
