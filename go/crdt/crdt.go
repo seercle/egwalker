@@ -516,21 +516,6 @@ func deleteOne[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, pos int) int 
 	return endPos
 }
 
-// batchDeleteRuns groups the run's per-character visible positions into
-// contiguous ranges and applies each as ONE contentTree.Delete call,
-// instead of one single-character Delete per surviving character. The
-// grouping consumes the endPos stream deleteOne emits: consecutive
-// characters whose occupied visible index is the same number are
-// statically adjacent deletions (each prior delete shifted the following
-// run char into the vacated index); a different index closes the chain
-// (a concurrent deletion consumed a slot). -1 entries never open or close
-// a chain: the invisible char never occupied a visible slot. Observed
-// endPos streams (TestDeleteRunEndPosStreams): plain contiguous run →
-// constant endPos (e.g. [1 1 1]); a concurrently-deleted char mid-run →
-// [0 0 -1 0 0] (the -1 keeps the open chain running); a fully
-// concurrently-deleted run → all -1 (no chain ever opens).
-var batchDeleteRuns = true
-
 func apply[C content[C]](doc *crdtDoc, log *opLog[C], snapshot *contentTree[C], opLV lv) {
 	idx := log.opIdxAt(opLV)
 	o := &log.ops[idx]
@@ -543,42 +528,12 @@ func apply[C content[C]](doc *crdtDoc, log *opLog[C], snapshot *contentTree[C], 
 		// already deleted by a concurrent op are skipped (-1) and leave the
 		// snapshot untouched. checkoutFancy replays shared ops with a nil
 		// snapshot (their content is already in the branch).
-		//
-		// When batchDeleteRuns is true the endPos stream is grouped into
-		// contiguous ranges applied as one snapshot.Delete per range; when
-		// false each surviving character gets its own single-character
-		// Delete (the historical per-character behavior).
-		chainStart := -1
-		chainLen := 0
-		flush := func() {
-			if chainLen > 0 && snapshot != nil {
-				snapshot.Delete(chainStart, chainLen)
-			}
-			chainStart, chainLen = -1, 0
-		}
 		for i := 0; i < o.length; i++ {
-			if !batchDeleteRuns {
-				endPos := deleteOne(doc, log, first+lv(i), o.pos)
-				if endPos >= 0 && snapshot != nil {
-					snapshot.Delete(endPos, 1)
-				}
-				continue
-			}
 			endPos := deleteOne(doc, log, first+lv(i), o.pos)
-			if endPos < 0 {
-				continue // invisible: never had a visible slot, keeps the open chain conceptually running
-			}
-			switch {
-			case chainLen == 0:
-				chainStart, chainLen = endPos, 1
-			case endPos == chainStart: // equal consecutive endPos: statically adjacent char, slot vacated by the prior delete
-				chainLen++
-			default: // backward jump or fresh position: flush, open a new chain
-				flush()
-				chainStart, chainLen = endPos, 1
+			if endPos >= 0 && snapshot != nil {
+				snapshot.Delete(endPos, 1)
 			}
 		}
-		flush()
 		return
 	}
 
