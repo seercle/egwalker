@@ -130,6 +130,105 @@ func BenchmarkMapMergeAtScale(b *testing.B) {
 	}
 }
 
+// buildDeleteHeavyReplica builds one replica with an n-op history in which a
+// fixed fraction p of the ops are multi-character delete runs (run lengths
+// cycling 2..64), interleaved with inserts so the rope sees both insert and
+// delete work. Positions are strided/deterministic so the fixture is
+// reproducible.
+func buildDeleteHeavyReplica(n int, p float64) *RuneDocument {
+	src := NewRuneDocument(0)
+	ops := 0
+	nextIns := 0
+	for ops < n {
+		if float64(ops%10_000)/10_000 < p && src.Len() > 80 {
+			runLen := 2 + ops%63
+			if runLen > src.Len() {
+				runLen = src.Len()
+			}
+			pos := (ops * 6151) % (src.Len() - runLen + 1)
+			src.Del(pos, runLen)
+		} else {
+			pos := (nextIns * 7919) % (src.Len() + 1)
+			src.Ins(pos, "x")
+			nextIns++
+		}
+		ops++
+	}
+	return src
+}
+
+// mergeRemoteDeletesOnce builds the delete-heavy n-op src replica untimed and
+// merges it into a fresh replica (timed). Returns both plus src.Len() for the
+// untimed verification.
+func mergeRemoteDeletesOnce(b *testing.B, n int) (src, fresh *RuneDocument) {
+	b.StopTimer()
+	src = buildDeleteHeavyReplica(n, 0.3)
+	b.StartTimer()
+	fresh = NewRuneDocument(1)
+	fresh.MergeFrom(src)
+	return src, fresh
+}
+
+// BenchmarkMergeRemoteDeletesAtScale measures a fresh replica's cost of
+// absorbing remote DELETE-heavy history: the src replica builds n-op
+// histories with a fixed fraction p=0.3 of its ops being multi-char delete
+// runs (alternating run lengths 2..64), then one whole-log mergeFrom into a
+// fresh replica. ns/op is the merge cost; the flag's A/B column compares
+// with batchDeleteRuns=false via BenchmarkMergeRemoteDeletesPerChar.
+//
+//	go test -C go ./crdt -run '^$' -bench 'BenchmarkMergeRemoteDeletes' -benchmem -benchtime=3x
+func BenchmarkMergeRemoteDeletesAtScale(b *testing.B) {
+	for _, n := range []int{10_000, 50_000} {
+		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				src, _ := mergeRemoteDeletesOnce(b, n)
+				_ = src
+			}
+
+			// Untimed verification on a deterministic fixture: the merge
+			// must land the src's full content in the fresh replica.
+			src := buildDeleteHeavyReplica(n, 0.3)
+			fresh := NewRuneDocument(1)
+			fresh.MergeFrom(src)
+			if fresh.Len() != src.Len() {
+				b.Fatalf("merged length %d, want %d", fresh.Len(), src.Len())
+			}
+		})
+	}
+}
+
+// BenchmarkMergeRemoteDeletesPerChar is the A/B companion: the identical
+// fixture with batchDeleteRuns forced false for the timed region only
+// (per-character snapshot deletes, the historical behavior), restored via
+// defer. Benches here run single-threaded, so the package-private var flip
+// is safe.
+func BenchmarkMergeRemoteDeletesPerChar(b *testing.B) {
+	for _, n := range []int{10_000, 50_000} {
+		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
+			b.StopTimer()
+			src := buildDeleteHeavyReplica(n, 0.3)
+			b.ReportAllocs()
+			b.StartTimer()
+
+			old := batchDeleteRuns
+			batchDeleteRuns = false
+			defer func() { batchDeleteRuns = old }()
+
+			for b.Loop() {
+				fresh := NewRuneDocument(1)
+				fresh.MergeFrom(src)
+			}
+
+			fresh := NewRuneDocument(1)
+			fresh.MergeFrom(src)
+			if fresh.Len() != src.Len() {
+				b.Fatalf("merged length %d, want %d", fresh.Len(), src.Len())
+			}
+		})
+	}
+}
+
 // BenchmarkCheckoutScale measures full-history replay cost via checkout(log)
 // (crdt.go:598) at three log sizes. The log is built once per size (untimed);
 // checkout is pure and re-runnable.
