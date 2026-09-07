@@ -193,7 +193,24 @@ func TestDeleteRunEndPosStreams(t *testing.T) {
 			}
 		})
 	}
-	_ = reflect.DeepEqual
+}
+
+// replayedDelTargets replays log through the real checkout loop with a nil
+// snapshot (it never affects deleteOne's del targets) and returns the final
+// doc's delTargets map. Oracle comparator for the "identical delTargets"
+// global constraint.
+func replayedDelTargets(log *opLog[runeText]) map[lv]lv {
+	doc := newStreamDoc()
+	for i := 0; i < len(log.ops); i++ {
+		do1Operation(doc, log, log.opLV[i], nil)
+	}
+	return doc.delTargets
+}
+
+type runeEquivCase struct {
+	name     string
+	buildDst func() *RuneDocument // pre-merge replica (takes the deletes remotely)
+	buildSrc func() *RuneDocument // replica whose del ops dst receives
 }
 
 // TestDeleteRunBatchEquivalence drives the delete-run branch end-to-end
@@ -204,12 +221,7 @@ func TestDeleteRunEndPosStreams(t *testing.T) {
 // length, doc.Check, and version equality. Any deviation anywhere in the
 // batcher, including multi-leaf seam behavior of contentTree.Delete, fails.
 func TestDeleteRunBatchEquivalence(t *testing.T) {
-	cases := []struct {
-		name      string
-		buildDst  func() *RuneDocument // pre-merge replica (takes the deletes remotely)
-		buildSrc  func() *RuneDocument // replica whose del ops dst receives
-		postMerge func(dst, src *RuneDocument)
-	}{
+	cases := []runeEquivCase{
 		{
 			name: "plain contiguous",
 			buildDst: func() *RuneDocument {
@@ -364,20 +376,12 @@ func TestDeleteRunBatchEquivalence(t *testing.T) {
 			},
 		},
 	}
-	runWithFlag := func(flag bool, tc struct {
-		name      string
-		buildDst  func() *RuneDocument
-		buildSrc  func() *RuneDocument
-		postMerge func(dst, src *RuneDocument)
-	}) *RuneDocument {
+	runWithFlag := func(flag bool, tc runeEquivCase) *RuneDocument {
 		old := batchDeleteRuns
 		batchDeleteRuns = flag
 		defer func() { batchDeleteRuns = old }()
 		dst, src := tc.buildDst(), tc.buildSrc()
 		dst.MergeFrom(src)
-		if tc.postMerge != nil {
-			tc.postMerge(dst, src)
-		}
 		dst.Check()
 		if src != nil {
 			src.Check()
@@ -397,6 +401,17 @@ func TestDeleteRunBatchEquivalence(t *testing.T) {
 			}
 			if !reflect.DeepEqual(perChar.Version(), batched.Version()) {
 				t.Fatalf("version diverged: %v vs %v", perChar.Version(), batched.Version())
+			}
+			// Global constraint: identical delTargets between flag modes.
+			// delTargets is per-checkout plumbing (crdtDoc), so both docs'
+			// logs are replayed through the real checkout loop (nil
+			// snapshot; it never affects deleteOne's del targets) and their
+			// final delTargets maps — delete-op LV -> target-LV mapping,
+			// full contents — are compared directly.
+			dtPerChar := replayedDelTargets(perChar.doc.opLog)
+			dtBatched := replayedDelTargets(batched.doc.opLog)
+			if !reflect.DeepEqual(dtPerChar, dtBatched) {
+				t.Fatalf("delTargets diverged:\nper-char:  %v\nbatched:   %v", dtPerChar, dtBatched)
 			}
 		})
 	}
