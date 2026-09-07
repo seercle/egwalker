@@ -17,12 +17,15 @@
   allocation-free `runeText` (`Len` via `utf8.RuneCountInString`, zero-copy
   byte-offset `SplitAt`) removed the `[]rune` conversions; storm allocs/op
   78081→13119 (−83%). See Addendum 3 of the Shape B report.
-- [ ] **Batched remote merge-path deletes** — `apply`'s per-character
-  `snapshot.Delete(endPos, 1)` loop could collapse into range deletes by
-  recording each char's endPos and reconstructing contiguous ranges (equal
-  consecutive endPos = statically adjacent chars; backward jumps = gaps).
-  Needs the correctness argument the Shape B report deferred; zero effect on
-  the single-replica trace (its deletes take the local run-granular path).
+- **Batched remote merge-path deletes — attempted 2026-09-07 and reverted**
+  (commit `90e51f5`): implemented behind an A/B flag with an 8-case
+  equivalence oracle; measured ~8.5% merge win at 50k ops but noise at 10k,
+  ~0 on the trace (deletes there are mostly single-char, so no chains form;
+  also all delete-run chain work is capped by the untouched per-char
+  `deleteOne` staging walk). Numbers didn't justify the added path. The
+  endPos observation from this attempt still holds and stands verified:
+  equal consecutive endPos = statically adjacent chars; keep for any future
+  revisit.
 - [x] **(parked, RLE era) runIdxForSeq backward scan — resolved 2026-09-06
   by the per-agent seq index** — the backward O(#ops) scan in
   `runIdxForSeq` / `resolveParentLV` lookups was replaced by a per-agent
