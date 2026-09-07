@@ -200,20 +200,20 @@ func BenchmarkMergeRemoteDeletesAtScale(b *testing.B) {
 
 // BenchmarkMergeRemoteDeletesPerChar is the A/B companion: the identical
 // fixture with batchDeleteRuns forced false for the timed region only
-// (per-character snapshot deletes, the historical behavior), restored via
-// defer. Benches here run single-threaded, so the package-private var flip
-// is safe.
+// (per-character snapshot deletes, the historical behavior). The flip happens
+// before b.StartTimer and the restore happens explicitly after the loop, with
+// a defer as a crash-safety net. Benches here run single-threaded, so the
+// package-private var flip is safe.
 func BenchmarkMergeRemoteDeletesPerChar(b *testing.B) {
 	for _, n := range []int{10_000, 50_000} {
 		b.Run("ops="+strconv.Itoa(n), func(b *testing.B) {
 			b.StopTimer()
 			src := buildDeleteHeavyReplica(n, 0.3)
 			b.ReportAllocs()
-			b.StartTimer()
-
 			old := batchDeleteRuns
 			batchDeleteRuns = false
 			defer func() { batchDeleteRuns = old }()
+			b.StartTimer()
 
 			for b.Loop() {
 				fresh := NewRuneDocument(1)
@@ -272,6 +272,50 @@ func replayTrace(doc *RuneDocument, raw []byte) error {
 		}
 	}
 	return nil
+}
+
+// BenchmarkTracePerChar is the before-column companion of trace_test.go's
+// BenchmarkTrace: the identical loadTrace fixture and timed replay loop, with
+// batchDeleteRuns forced false for the entire timed region (flip before the
+// first StartTimer, explicit restore after the loop plus a crash-safety
+// defer) — the flag is already false when b.Loop's first StopTimer/StartTimer
+// pair runs, so the claim "forced false for the timed region" is literal.
+// The untimed epilogue is NOT duplicated (no CSV rewrite / duplicate wall-time
+// print), only a fresh reference replay for the same correctness check the
+// original performs.
+func BenchmarkTracePerChar(b *testing.B) {
+	trace, err := loadTrace()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	old := batchDeleteRuns
+	batchDeleteRuns = false
+	defer func() { batchDeleteRuns = old }()
+
+	var document *RuneDocument
+	for b.Loop() {
+		b.StopTimer()
+		document = NewRuneDocument(0)
+		b.StartTimer()
+		for _, edit := range trace.Edits {
+			if edit.IsInsert {
+				document.Ins(edit.Position, edit.Char)
+			} else {
+				document.Del(edit.Position, 1)
+			}
+		}
+	}
+
+	// Restore explicitly after the timed loop; the untimed correctness replay
+	// below runs under the committed (batched=true) behavior, matching the
+	// intended "false for the timed region only".
+	batchDeleteRuns = true
+
+	document = replay(trace, nil)
+	if trace.FinalText != document.GetString() {
+		b.Fatalf("Mismatch, got '%q'", document.GetString())
+	}
 }
 
 // BenchmarkColumnarRoundTrip measures struct-level Marshal+Unmarshal at
