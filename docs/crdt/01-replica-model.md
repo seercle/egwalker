@@ -53,7 +53,7 @@ in these three fields plus the `op` type — the visible document (`branch`) is
 just a *derived view*, and any time the log changes the view is re-derived,
 which is exactly what `Check()` will assert at the end of this page.
 
-On top of the core sit the three exported families (`go/crdt/document.go:125-142`:
+On top of the core sit the three exported families (`go/crdt/document.go:125-142`):
 
 - **`RuneDocument`** — text. Its run type is `runeText` (a string whose
   `Len` counts runes, `go/crdt/content.go:18-20`), rendered through
@@ -202,8 +202,8 @@ out of this page's scope (`docs/crdt/05-binary-and-compaction.md`).
 graph LR
     subgraph replicaA["replica A · agent 0"]
         p0[("∅<br/>parents: none")] -->|O1| p1[("O1 ins“Hi”<br/>{agent0·seq0-1}<br/>lv0-1")] -->|O2| p2[("O2 ins“AB”<br/>{agent0·seq2-3}<br/>lv2-3")]
-        p2 -->|a.Ins(1,·) parents=[3 lv]| cA[("O3 ins“c”<br/>{agent0·seq4}<br/>lv4")]
-        p2 -->|merged X, parents=[3]| cB[("O4 ins“X”<br/>{agent1·seq0}<br/>lv5")]
+        p2 -->|"a.Ins(1,·) parents=[3 lv]"| cA[("O3 ins“c”<br/>{agent0·seq4}<br/>lv4")]
+        p2 -->|"merged X, parents=[3]"| cB[("O4 ins“X”<br/>{agent1·seq0}<br/>lv5")]
     end
     v["frontier after merging X into A: {lv4, lv5} — two tips"]
 ```
@@ -344,7 +344,7 @@ and asserts equality, which is what makes every invariant on this page a
 
 1. **`doc.check`** (`go/crdt/document.go:96-101`) — full `checkout()` replay
    compared against `branch.snapshot`; mismatch panics
-   (`"Document content out of sync"`). This is A full-log invariant:
+   (`"Document content out of sync"`). This is a full-log invariant:
    if anyone corrupts `branch`, every subsequent `Check()` trips.
 2. **`checkCompacted`** (`go/crdt/op_log.go:682-696`) — only when the log has
    an anchor: anchor must be ops[0] and carry coverage, no other anchor ops
@@ -395,11 +395,12 @@ checker that vaults it (`go test -C go ./crdt` for the tests; the fuzz targets
 under `-fuzz` for deeper exploration):
 
 1. **The op log is append-only** — `pushLocalOp` and `pushRemoteOpLV` never
-   mutate an existing op's lv span (an op that re-arrives *extended* is
-   rejected and re-appended wholesale, `go/crdt/op_log.go:411-436`), because
+   mutate an existing op's lv span (an op that re-arrives *extended* keeps its
+   held prefix untouched and gains only the unknown suffix as a fresh op,
+   `go/crdt/op_log.go:411-436`), because
    `branch.frontier`, `parents`, and `idToLV` all reference fixed lvs. The
    only whole-log rewrite is `Compact` (`op_log.go:631-661`).
-2. **Ops are never dropped merges must leave a replica holding a superset** —
+2. **Ops are never dropped: merges must leave a replica holding a superset** —
    `mergeInto` iterates src's ops and lets the version check (`last >=
    seq+length-1`) drop only what dest already fully holds
    (`op_log.go:524-527`); no "loser" op churns away. That is what makes
@@ -431,8 +432,7 @@ Unlike `bxtree`, though, `Check()` here *is* production code, exported as a
 public method — you can call it in production whenever you want a paranoid
 snapshot of "does my branch say what my log implies?". For tests and CI,
 `go test -C go ./...` is the trigger; for the actual merge/pass mechanics
-that the drive (`journal: submit → verify → sandbox_severed_apply` flow of
-the next page's subject) walks, continue to
+that the drive walks — the next page's subject — continue to
 `docs/crdt/03-merge-drive.md`.
 
 The mechanical details of the structures this page named — `op`/`lv` layout,
