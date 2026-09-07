@@ -690,9 +690,11 @@ What to watch in this example:
   char is already invisible *on whichever replica*.
 - **Closing state:** only `Z` — the one character neither delete run
   covers — survives, on both replicas (`a == b` and both versions
-  print `map[0:9 1:7]`). Nothing here relies on the merge order or on a
-  replica winning a race: the same drive, run on whichever side, gives
-  the same content.
+  print `map[0:9 1:5]` — agent 1's last op is its own length-2 del run
+  at seqs 4-5, so `version[1]` is fixed at 5 regardless of how many
+  merges land afterwards; `op_log.go:171`). Nothing here relies on the
+  merge order or on a replica winning a race: the same drive, run on
+  whichever side, gives the same content.
 
 Step table (call + printed versions verbatim; LV spans / parents are
 derived from the push mechanics as `docs/crdt/02-op-log.md`'s table was —
@@ -709,14 +711,14 @@ the cited lines pin each row):
 | 7 | `b.MergeFrom(a)` | b: append `{0,5}` at lv 9-10 — same shape, version `{0:6,1:3}` → "AxyEZ" |
 | 8 | `b.Del(0,2)` | b: del run `{1,4}` len 2, lv 11-12, version `{0:6,1:5}` → "yEZ" (deleted A, x) |
 | 9 | `a.Del(1,3)` | a: del run `{0,7}` len 3, lv 10-12, version `{0:9,1:3}` → "AZ" (deleted x, y, E — the visible 1…3 span) |
-| 10 | `a.MergeFrom(b)` | a: append `{1,4}` at lv 13-14, version `{0:9,1:7}`; replaying b's run: `A` live → deleted; `x` already deleted (a's own step-9 run) → the **-1** path (`crdt.go:501-507`); → "Z" |
-| 11 | `b.MergeFrom(a)` | b: append `{0,7}` at lv 13-15, version `{0:9,1:7}`; replaying a's run: `x` → **-1** (b's own step-8 run); `y` and `E` live → deleted → "Z" |
+| 10 | `a.MergeFrom(b)` | a: append `{1,4}` at lv 13-14, version `{0:9,1:5}` (b's run spans seqs 4-5, `op_log.go:448`); replaying b's run: `A` live → deleted; `x` already deleted (a's own step-9 run) → the **-1** path (`crdt.go:501-507`); → "Z" |
+| 11 | `b.MergeFrom(a)` | b: append `{0,7}` at lv 13-15, version `{0:9,1:5}` — agent 1's max seq stays 5 (its own del run ends there); replaying a's run: `x` → **-1** (b's own step-8 run); `y` and `E` live → deleted → "Z" |
 
 ```mermaid
 flowchart LR
     LA["a after step 10 (item/lv derived)"] --> LA1["items in content order:<br/>A(lv0, deleted) x(lv5, deleted)<br/>y(lv6, deleted) E(lv4, deleted)<br/>Z(lv7, live)<br/>b's run slots lv13, lv14 →<br/>delTargets[13]=lv0, delTargets[14]=lv5"]
     LB["b after step 11 — mirrored"] --> LB1["items: A deleted, x deleted<br/>(both run re-claims recorded here)<br/>y/E deleted, Z live"]
-    LA1 --> OUT["both = 'Z'<br/>version map[0:9 1:7]"]
+    LA1 --> OUT["both = 'Z'<br/>version map[0:9 1:5]"]
     LB1 --> OUT
 ```
 
