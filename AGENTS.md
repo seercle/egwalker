@@ -11,6 +11,13 @@ Research codebase: Go CRDT framework + positional B+Tree (`bxtree`) and pairing 
 - Build / run demo: `go build -C go ./...`, `go run -C go main.go`
 - Plot benchmark CSV (see trace pipeline below): `python scripts/plot-trace.py <csv>`
 
+## Code documentation
+
+- Pages: `docs/index.md` (TOC + reading order) over `docs/pheap/` (1 page), `docs/bxtree/` (`01-bxtree-structure.md`, `02-insert-delete.md`, `03-filtered-summaries.md`), and `docs/crdt/` (`01-replica-model.md` … `06-deltas-and-checkout.md`).
+- Code fences in those pages are **live snippets**: info line ` ```go include <repo-relative-src> L<a>-L<b>[ L<c>-L<d>…] ``` ` anchors verbatim source ranges (1-based inclusive; a single `// …` line only *between* two ranges).
+- Drift check: `python3 scripts/doc-snippets-check.py` re-extracts every anchored fence and fails on any mismatch; `go/doc_drift_test.go` wraps it, so `go test -C go ./...` catches doc drift (skips if `python3` is missing).
+- Re-anchoring after source changes: run the checker, then for each flagged fence fix the `L`-ranges to bracket the moved code again (or re-copy the body if the content itself changed); rerun until it reports snippets in sync.
+
 ## Layout
 
 - `go/bxtree` — positional B+Tree with per-node summaries; self-contained.
