@@ -363,7 +363,7 @@ suite — run everything below with `go test -C go ./pheap`.
 
 These properties are exercised by `TestPairingHeap`, `TestMinHeap`,
 `TestNilHeap`, `TestNewAny`, `TestPeekEmpty`, `TestDuplicateValues`, and
-`TestSingleElement` in `go/pheap/pheap_test.go:23-158`, plus random op-sequence
+`TestSingleElement` in `go/pheap/pheap_test.go:23-157`, plus random op-sequence
 checking in `FuzzHeap` (`go/pheap/fuzz_test.go:19`) — both run as part of
 `go test -C go ./pheap`, and `FuzzHeap` under `-fuzz` explores arbitrary
 push/pop interleavings for invariant breaks.

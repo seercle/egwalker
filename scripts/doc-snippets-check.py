@@ -14,15 +14,67 @@ import re
 import sys
 from pathlib import Path
 
+CITATION_RE = re.compile(r"`(?:[a-zA-Z_/.-]+/)?([a-zA-Z_/.-]+\.(?:go|md|json)):(\d+)(?:-(\d+))?`")
+
+def resolve_cite(path_str: str, md: Path, root: Path, pkg_dirs: dict[str, Path]) -> Path | None:
+    if "/" in path_str:
+        return root / path_str
+    pkg = pkg_dirs.get(md.parent.name)
+    tgt = pkg / path_str if pkg else root / path_str
+    if not tgt.exists():
+        tgt = root / path_str
+    return tgt
+
+def validate_citations(md: Path, text: str, root: Path, linecache: dict[str, tuple[int, str]],
+                       pkg_dirs: dict[str, Path]) -> list[str]:
+    fails = []
+    lines = text.splitlines()
+    in_fence = False
+    for no, line in enumerate(lines, 1):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for m in CITATION_RE.finditer(line):
+            path, a, b = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))
+            src = resolve_cite(path, md, root, pkg_dirs)
+            if not src.exists():
+                fails.append(f"{md}: citation on line {no} {m.group(0)!r} — target {path!r} not found")
+                continue
+            key = str(src)
+            if key not in linecache:
+                src_text = src.read_text(encoding="utf-8")
+                linecache[key] = (len(src_text.splitlines()), src_text)
+            n_lines, _ = linecache[key]
+            if a < 1 or b < a or b > n_lines:
+                fails.append(f"{md}: citation on line {no} {m.group(0)!r} out of bounds for {path} ({n_lines} lines)")
+    return fails
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     md_dirs = [root / "docs"]
+    pkg_dirs: dict[str, Path] = {
+        "pheap": root / "go" / "pheap",
+        "bxtree": root / "go" / "bxtree",
+        "crdt": root / "go" / "crdt",
+    }
     failures = []
     checked = 0
+    total_cites = 0
+    linecache: dict[str, tuple[int, str]] = {}
     for md in sorted(md_dirs[0].rglob("*.md")):
         if ".superpowers" in md.parts or "superpowers" in md.parts:
             continue
         text = md.read_text(encoding="utf-8")
+        in_fence = False
+        for line in text.splitlines():
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+            elif not in_fence:
+                total_cites += len(CITATION_RE.findall(line))
+        for fail in validate_citations(md, text, root, linecache, pkg_dirs):
+            failures.append(fail)
         i = 0
         lines = text.splitlines()
         while i < len(lines):
@@ -73,9 +125,10 @@ def main() -> int:
     if failures:
         for f in failures:
             print("DRIFT:", f)
-        print(f"{checked} snippets checked, {len(failures)} drifting")
+        print(f"{checked} snippets checked, {total_cites} citations checked, "
+              f"{len(failures)} failing")
         return 1
-    print(f"{checked} snippets verified, all in sync")
+    print(f"{checked} snippets verified, {total_cites} citations validated, all in sync")
     return 0
 
 if __name__ == "__main__":
