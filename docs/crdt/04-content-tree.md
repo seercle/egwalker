@@ -491,7 +491,8 @@ the same way with cheap subslices (`content.go:58-66`).
 
 ## Worked example: mid-run remote insert, multi-leaf delete, per-char replay
 
-Driver under `/tmp/opencode/drive4`, module-replace wired to this repo like
+Driver (scratch, not committed here — run the exported-API reproduction to
+get the same lines), module-replace wired to this repo like
 the previous pages' drivers; output verbatim (`Check()` was called on the
 acting replica after every step and both replicas end merged-clean):
 

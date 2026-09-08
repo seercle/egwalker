@@ -646,7 +646,8 @@ details and how this drive is also retraced from batch deltas.
 
 ## Worked example: a local insert run, then two delete runs sharing a character
 
-Driver under `/tmp/opencode/drive3`, module-replace wired to this repo
+Driver (scratch, not committed here — run the exported-API reproduction to
+get the same lines), module-replace wired to this repo
 like `docs/crdt/01-replica-model.md`'s and `docs/crdt/02-op-log.md`'s;
 output verbatim:
 

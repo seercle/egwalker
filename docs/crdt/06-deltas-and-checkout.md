@@ -493,8 +493,8 @@ the document check: `check` *runs the full checkout* and compares
 
 ## Worked example: delta exchange, fast checkout, coverage
 
-Driver at `/tmp/opencode/drive5` (module-replace to this repo, same
-pattern as `docs/crdt/03-merge-drive.md`'s `drive3`); every line below
+Driver (scratch, not committed here; module-replace to this repo, same
+pattern as `docs/crdt/03-merge-drive.md`); every line below
 is verbatim program output, all calls through the exported API
 (`Ins`, `Delta`, `ApplyDelta`, `Version`, `Compact`, `Check`):
 

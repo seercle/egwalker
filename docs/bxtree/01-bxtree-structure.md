@@ -83,8 +83,8 @@ graph TD
     L2["LEAF items=[4 1]<br/>size=2 · summary=2"]
     L3["LEAF items=[5 9 2]<br/>size=3 · summary=3"]
     R -->|"children[0] (parent back-pointer, bxtree.go:203)"| L1
-    R -->|children[1]| L2
-    R -->|children[2]| L3
+    R -->|"children[1]"| L2
+    R -->|"children[2]"| L3
     L1 -.->|"next / prev leaf chain — types.go:18-19, built by split bxtree.go:558-566"| L2
     L2 -.->|next| L3
 ```
@@ -149,7 +149,9 @@ validated *once*, at construction (`go/bxtree/bxtree.go:98-118`: leaf
 inequality `split()` and merge/rebalance rely on to always produce two
 in-bounds halves; `go/bxtree/bxtree.go:91-97` derives that arithmetic).
 Bad configs return `*InvalidNodeSizeError` (`go/bxtree/errors.go:14-30`), not
-a misbehaving tree:
+a misbehaving tree. One asymmetry to note: internal nodes enforce
+`min >= 2` (`go/bxtree/bxtree.go:108-110`), while a leaf's minimum is the
+leaf constant (`min >= 1` above):
 
 ```go include go/bxtree/bxtree.go L24-L35
 // WithInternalNodeSize sets the minimum and maximum number of children for internal nodes.

@@ -214,7 +214,7 @@ Both return `(leaf, pos, acc)` with `acc` = summary of exactly the items
 
 If the task is *"walk only the matching items"*, do it in the caller —
 `All()` walks the doubly-linked leaf chain in O(n) with no tree walking
-(`go/bxtree/bxtree.go:244-261`, page 01 § layout); a value-predicate filter
+(`go/bxtree/bxtree.go:246-262`, page 01 § layout); a value-predicate filter
 is then a plain Go 1.26 range loop on top. The package deliberately ships
 *this* and not a filtered API: `FromItem` maps **one item** — the "filter"
 `FindPath` supports is the accumulated aggregate thresholds, not arbitrary

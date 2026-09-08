@@ -265,8 +265,8 @@ anything (`go/crdt/op_log.go:519-526`).
 
 ## Worked example: two replicas diverge, then converge
 
-Driven by the real API (a scratch `main.go` under `/tmp/opencode` wired to
-this repo's module; prints verbatim below). Two agents, four ops total
+Driven by the real API (a scratch driver not committed here — the output
+below is reproducible from the exported API; it prints verbatim below). Two agents, four ops total
 (counting the `H`/`i` pair that fused into one folded op), run through
 `RuneDocument` `Ins`/`MergeFrom`:
 

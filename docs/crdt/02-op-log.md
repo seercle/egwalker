@@ -632,9 +632,9 @@ flowchart TD
 
 ## Worked example: a fold, two splits, and an extended re-arrival
 
-Driver (scratch `main` under `/tmp/opencode/drive2`, wired to this repo's
-module via a `go.mod` `replace` like `docs/crdt/01-replica-model.md`'s
-drive), verbatim output:
+Driver (a scratch `main` not committed here, wired to this repo's module
+via a `go.mod` `replace`; run the exported-API reproduction to get the same
+lines), verbatim output:
 
 ```
 1  a.Ins(0,"AB")     a = AB version: map[0:1]
