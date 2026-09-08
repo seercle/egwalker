@@ -5,7 +5,7 @@
 opened the drive. This page is the other half of that story: the *visible
 document itself* — the `branch.snapshot` of type `contentTree` that the drive
 feeds and that page 01's local hot path writes directly. It is a run-based
-rope (`go/crdt/content_tree.go:34-40`) built on the repo's own `bxtree`, and
+rope ([[`go/crdt/content_tree.go:34-40`](../../go/crdt/content_tree.go#L34-L40)](../../go/crdt/content_tree.go#L34-L40)) built on the repo's own `bxtree`, and
 it never sees an lv, a frontier, or a concurrency decision — every position
 arriving at its `Insert`/`Delete` has already been resolved by the merge
 drive (`docs/crdt/03-merge-drive.md`) or is the author's own view, which is
@@ -34,7 +34,7 @@ flowchart LR
 
 The tree is generic over one run of content, with the same type-erasure
 trade as the engine core on `docs/crdt/01-replica-model.md` — the constraint
-it actually leans on is `content.go`'s interface (`go/crdt/content.go:13-18`):
+it actually leans on is `content.go`'s interface ([[`go/crdt/content.go:13-18`](../../go/crdt/content.go#L13-L18)](../../go/crdt/content.go#L13-L18)):
 
 ```go include go/crdt/content.go L9-L14
 type content[C any] interface {
@@ -46,17 +46,17 @@ type content[C any] interface {
 ```
 
 Why this matters: only these four verbs enter the rope's algorithms, so the
-same tree serves text (`runeText`, rune-counted, `go/crdt/content.go:18-20`)
-and arrays (`itemRun[T]`, `go/crdt/content.go:55-66`) with element types
+same tree serves text (`runeText`, rune-counted, [[`go/crdt/content.go:18-20`](../../go/crdt/content.go#L18-L20)](../../go/crdt/content.go#L18-L20))
+and arrays (`itemRun[T]`, [[`go/crdt/content.go:55-66`](../../go/crdt/content.go#L55-L66)](../../go/crdt/content.go#L55-L66)) with element types
 erased; map runs never reach it (map ops carry no positions and no deleted
-content, `go/crdt/content.go:83-100`). The trio `(Len, SplitAt, Concat)` is
+content, [[`go/crdt/content.go:83-100`](../../go/crdt/content.go#L83-L100)](../../go/crdt/content.go#L83-L100)). The trio `(Len, SplitAt, Concat)` is
 everything the index math below does; `Collapsible` belongs to the op-log
-page's fold fast path (`docs/crdt/02-op-log.md`, `go/crdt/content.go:75-81`),
+page's fold fast path (`docs/crdt/02-op-log.md`, [[`go/crdt/content.go:75-81`](../../go/crdt/content.go#L75-L81)](../../go/crdt/content.go#L75-L81)),
 not to the rope.
 
 The tree itself is one embedded `bxtree` whose items are *rope leaves*
-(`go/crdt/content_tree.go:34-40`, built once per branch by `newContentTree`,
-`content_tree.go:50-59`), with each leaf carrying its cached count (`content_tree.go:12-22`):
+([[`go/crdt/content_tree.go:34-40`](../../go/crdt/content_tree.go#L34-L40)](../../go/crdt/content_tree.go#L34-L40), built once per branch by `newContentTree`,
+[[`content_tree.go:50-59`](../../go/crdt/content_tree.go#L50-L59)](../../go/crdt/content_tree.go#L50-L59)), with each leaf carrying its cached count ([[`content_tree.go:12-22`](../../go/crdt/content_tree.go#L12-L22)](../../go/crdt/content_tree.go#L12-L22)):
 
 ```go include go/crdt/content_tree.go L19-L32
 type ropeLeaf[C content[C]] struct {
@@ -77,20 +77,20 @@ func (ropeSummarizer[C]) Sub(a, b int) int           { return a - b }
 
 Why this matters: the summary is the whole difference between "a B+Tree of
 runs" and "a positional rope". Characters — not leaves — are the addressing
-unit (`Len()` is literally the root's summary, `content_tree.go:61-67`), and
+unit (`Len()` is literally the root's summary, [[`content_tree.go:61-67`](../../go/crdt/content_tree.go#L61-L67)](../../go/crdt/content_tree.go#L61-L67)), and
 each leaf's count is maintained *arithmetically*: SplitAt's halves have known
-lengths at the split point (`content_tree.go:16-18`), so the only scan ever
-paid is one `run.Len()` at insert time (`content_tree.go:12-15`). Two knobs
+lengths at the split point ([[`content_tree.go:16-18`](../../go/crdt/content_tree.go#L16-L18)](../../go/crdt/content_tree.go#L16-L18)), so the only scan ever
+paid is one `run.Len()` at insert time ([[`content_tree.go:12-15`](../../go/crdt/content_tree.go#L12-L15)](../../go/crdt/content_tree.go#L12-L15)). Two knobs
 complete the shape: `ropeLeafCap = 256`
-(`content_tree.go:5-10`) bounds how many characters a single folded leaf
+([[`content_tree.go:5-10`](../../go/crdt/content_tree.go#L5-L10)](../../go/crdt/content_tree.go#L5-L10)) bounds how many characters a single folded leaf
 carries (bounding `Concat` cost and leaf fragmentation), and the bxtree's
 own leaf-node occupancy is narrowed to `[4, 8]` after a measured sweep
-(`content_tree.go:42-48`).
+([[`content_tree.go:42-48`](../../go/crdt/content_tree.go#L42-L48)](../../go/crdt/content_tree.go#L42-L48)).
 
 ## `locate`: the find descent in character space
 
 Every positional decision in the rope bottoms out in one function
-(`go/crdt/content_tree.go:76-85`):
+([[`go/crdt/content_tree.go:76-85`](../../go/crdt/content_tree.go#L76-L85)](../../go/crdt/content_tree.go#L76-L85)):
 
 ```go include go/crdt/content_tree.go L72-L85
 // locate returns the item index of the leaf containing content position pos,
@@ -111,15 +111,15 @@ func (ct *contentTree[C]) locate(pos int) (idx int, leaf ropeLeaf[C], offset int
 
 Why this matters: `locate` is the rope's entire search story (`Insert` needs
 the leaf containing `pos`, `Delete` needs the leaves containing both range
-edges). Its contract (`content_tree.go:72-75`): descend against summed
+edges). Its contract ([[`content_tree.go:72-75`](../../go/crdt/content_tree.go#L72-L75)](../../go/crdt/content_tree.go#L72-L75)): descend against summed
 character counts (`bxtree.FindPath` — the same descent mechanics as
 `docs/bxtree/02-insert-delete.md`'s find, with the rope's `int` summary as
 the comparator) and return **three coordinates at once** — the global item
 index `idx`, the leaf itself, and `offset` inside that leaf's content. The
 offset is pure subtraction because `acc` is the summary *before* the found
-leaf (`content_tree.go:84`), and it panics rather than clamps
-(`content_tree.go:80-82`) — callers validate positions (`Delete` proves it,
-`content_tree.go:209-212`); the drive-side analog returning its own two-axis
+leaf ([[`content_tree.go:84`](../../go/crdt/content_tree.go#L84)](../../go/crdt/content_tree.go#L84)), and it panics rather than clamps
+([[`content_tree.go:80-82`](../../go/crdt/content_tree.go#L80-L82)](../../go/crdt/content_tree.go#L80-L82)) — callers validate positions (`Delete` proves it,
+[[`content_tree.go:209-212`](../../go/crdt/content_tree.go#L209-L212)](../../go/crdt/content_tree.go#L209-L212)); the drive-side analog returning its own two-axis
 resolve is `findByCurrentPos` (`docs/crdt/03-merge-drive.md`, § the insert
 path).
 
@@ -133,14 +133,14 @@ flowchart TD
 
 ## Insert: folding at boundaries, splitting mid-run
 
-`Insert` (`go/crdt/content_tree.go:134-189`) has three shapes. The easy two
-are `pos == 0` and `pos == n` (`content_tree.go:150-167`): fold into the
+`Insert` ([[`go/crdt/content_tree.go:134-189`](../../go/crdt/content_tree.go#L134-L189)](../../go/crdt/content_tree.go#L134-L189)) has three shapes. The easy two
+are `pos == 0` and `pos == n` ([[`content_tree.go:150-167`](../../go/crdt/content_tree.go#L150-L167)](../../go/crdt/content_tree.go#L150-L167)): fold into the
 first/last leaf when the result fits `ropeLeafCap`
-(`content_tree.go:152-153`, `:161-162`) — those fold checks are why 5000
+([[`content_tree.go:152-153`](../../go/crdt/content_tree.go#L152-L153)](../../go/crdt/content_tree.go#L152-L153), `:161-162`) — those fold checks are why 5000
 single-character appends still leave fewer than 100 leaves
-(`go/crdt/content_tree_test.go:152-163`) — otherwise append a fresh leaf.
+([[`go/crdt/content_tree_test.go:152-163`](../../go/crdt/content_tree_test.go#L152-L163)](../../go/crdt/content_tree_test.go#L152-L163)) — otherwise append a fresh leaf.
 The interesting one is interior insertion, which *lookahead* resolves by
-first locating the landing leaf (`go/crdt/content_tree.go:169-189`):
+first locating the landing leaf ([[`go/crdt/content_tree.go:169-189`](../../go/crdt/content_tree.go#L169-L189)](../../go/crdt/content_tree.go#L169-L189)):
 
 ```go include go/crdt/content_tree.go L169-L189
 	// Interior: pos in (0, n). Locate the leaf containing character pos.
@@ -169,11 +169,11 @@ first locating the landing leaf (`go/crdt/content_tree.go:169-189`):
 Why this matters: when an op lands *mid-run* (`offset > 0`), `locate` has
 already paid the descent, and `SplitAt`'s "after the k-th character"
 contract makes the half lengths arithmetic (`offset`, `leaf.n-offset`,
-`content_tree.go:181-182`) — the leaf is cut precisely at the landing
+[[`content_tree.go:181-182`](../../go/crdt/content_tree.go#L181-L182)](../../go/crdt/content_tree.go#L181-L182)) — the leaf is cut precisely at the landing
 character, after which either the new run fuses with the left half
-(`offset+rn <= ropeLeafCap`, `content_tree.go:184-187`) or three leaves
-result (`content_tree.go:188`). All of it funnels into the rope's single
-write primitive, `replaceLeaf` (`go/crdt/content_tree.go:86-104`):
+(`offset+rn <= ropeLeafCap`, [[`content_tree.go:184-187`](../../go/crdt/content_tree.go#L184-L187)](../../go/crdt/content_tree.go#L184-L187)) or three leaves
+result ([[`content_tree.go:188`](../../go/crdt/content_tree.go#L188)](../../go/crdt/content_tree.go#L188)). All of it funnels into the rope's single
+write primitive, `replaceLeaf` ([[`go/crdt/content_tree.go:86-104`](../../go/crdt/content_tree.go#L86-L104)](../../go/crdt/content_tree.go#L86-L104)):
 
 ```go include go/crdt/content_tree.go L86-L104
 
@@ -198,12 +198,12 @@ func (ct *contentTree[C]) replaceLeaf(idx int, parts ...ropeLeaf[C]) {
 ```
 
 Why this matters: every rope mutation becomes "one leaf out, up to three
-back" (`content_tree.go:86-104`) — empty parts are skipped (the
+back" ([[`content_tree.go:86-104`](../../go/crdt/content_tree.go#L86-L104)](../../go/crdt/content_tree.go#L86-L104)) — empty parts are skipped (the
 never-empty-leaf rule below), order is preserved, and the bxtree's split and
 borrow machinery (`go/bxtree/bxtree.go:427-429,618-627`, documented in
 `docs/bxtree/02-insert-delete.md`) absorbs all tree-shape work. The
 counterpart at a delete seam is `mergeWithLeft`
-(`go/crdt/content_tree.go:105-132`) — pull the leaf at `idx` into its left
+([[`go/crdt/content_tree.go:105-132`](../../go/crdt/content_tree.go#L105-L132)](../../go/crdt/content_tree.go#L105-L132)) — pull the leaf at `idx` into its left
 neighbour when the pair fits the cap, undoing the fragmentation an
 exposed boundary would otherwise accumulate:
 
@@ -256,10 +256,10 @@ flowchart TD
 
 ## `Delete(pos, length)`: one leaf, many leaves, seams
 
-`Delete`'s doc comment (`go/crdt/content_tree.go:191-204`) names the case
+`Delete`'s doc comment ([[`go/crdt/content_tree.go:191-204`](../../go/crdt/content_tree.go#L191-L204)](../../go/crdt/content_tree.go#L191-L204)) names the case
 taxonomy; the head handles the cheap exits — invalid/zero-length no-op,
-whole-document wipe (`content_tree.go:205-220`) — and then locates *both*
-edges of the range (`go/crdt/content_tree.go:222-247`):
+whole-document wipe ([[`content_tree.go:205-220`](../../go/crdt/content_tree.go#L205-L220)](../../go/crdt/content_tree.go#L205-L220)) — and then locates *both*
+edges of the range ([[`go/crdt/content_tree.go:222-247`](../../go/crdt/content_tree.go#L222-L247)](../../go/crdt/content_tree.go#L222-L247)):
 
 ```go include go/crdt/content_tree.go L222-L247
 	iL, L, oL := ct.locate(pos)
@@ -293,18 +293,18 @@ edges of the range (`go/crdt/content_tree.go:222-247`):
 Why this matters: the single-leaf branch never *splits in order to delete* —
 it computes the survivor directly from one immutable run: `before` is
 `SplitAt(oL)` and `after` is the `SplitAt(length)` of the remainder
-(`content_tree.go:234-235`). The three sub-cases differ only in what seam
+([[`content_tree.go:234-235`](../../go/crdt/content_tree.go#L234-L235)](../../go/crdt/content_tree.go#L234-L235)). The three sub-cases differ only in what seam
 they create: a delete starting at the leaf's start leaves a seam to coalesce
 (`:240`), a delete reaching the leaf's end keeps the prefix as-is (`:242`),
 an interior delete splices `before.Concat(after)` back into one leaf and
 creates no seam at all (`:244`). Note the reuse rule for the right edge:
 `length == 1` makes `posEnd - 1 == pos`, so the second `locate` is skipped
-entirely (`content_tree.go:222-225`).
+entirely ([[`content_tree.go:222-225`](../../go/crdt/content_tree.go#L222-L225)](../../go/crdt/content_tree.go#L222-L225)).
 
 Multi-leaf is the opposite philosophy: rather than densifying one big write,
 trim both boundary leaves so the whole span sits on leaf boundaries, excise
 the interior in one bulk call, then coalesce the exposed seam
-(`go/crdt/content_tree.go:249-270`):
+([[`go/crdt/content_tree.go:249-270`](../../go/crdt/content_tree.go#L249-L270)](../../go/crdt/content_tree.go#L249-L270)):
 
 ```go include go/crdt/content_tree.go L249-L270
 	// Multi-leaf. First make the range start on a leaf boundary.
@@ -334,14 +334,14 @@ the interior in one bulk call, then coalesce the exposed seam
 Why this matters, step by step: the *left* edge is normalized by splitting
 its leaf so the range begins on a leaf boundary — the `inRange` tail leaf
 that starts at `pos` is itself destined for the excise
-(`content_tree.go:250-254`); the *right* edge is then **re-located**, because
+([[`content_tree.go:250-254`](../../go/crdt/content_tree.go#L250-L254)](../../go/crdt/content_tree.go#L250-L254)); the *right* edge is then **re-located**, because
 the left split shifted item indices and the only honest bookmark is the
-character coordinate (`content_tree.go:256-258`); the right leaf is kept
-whole when the range ends inside it (`content_tree.go:259-264`, keeping its
+character coordinate ([[`content_tree.go:256-258`](../../go/crdt/content_tree.go#L256-L258)](../../go/crdt/content_tree.go#L256-L258)); the right leaf is kept
+whole when the range ends inside it ([[`content_tree.go:259-264`](../../go/crdt/content_tree.go#L259-L264)](../../go/crdt/content_tree.go#L259-L264), keeping its
 after-range suffix) or included wholesale when it ends exactly at the leaf's
 end; then one `DeleteRange` removes every interior leaf
-(`content_tree.go:266-268`); and `mergeWithLeft` fuses the leaves the
-excision just exposed (`content_tree.go:269`) so a delete cannot leave a
+([[`content_tree.go:266-268`](../../go/crdt/content_tree.go#L266-L268)](../../go/crdt/content_tree.go#L266-L268)); and `mergeWithLeft` fuses the leaves the
+excision just exposed ([[`content_tree.go:269`](../../go/crdt/content_tree.go#L269)](../../go/crdt/content_tree.go#L269)) so a delete cannot leave a
 permanently-fragmented seam. The diagram series (same walk the worked
 example below runs on real content):
 
@@ -380,7 +380,7 @@ func (d *doc[C]) Del(pos, delLen int) {
 ```
 
 And the remote path's per-character rope edits, from `apply`'s delete branch
-(`go/crdt/crdt.go:524-538`; the full drive walk is
+([[`go/crdt/crdt.go:524-538`](../../go/crdt/crdt.go#L524-L538)](../../go/crdt/crdt.go#L524-L538); the full drive walk is
 `docs/crdt/03-merge-drive.md` § the delete path):
 
 ```go include go/crdt/crdt.go L531-L536
@@ -396,23 +396,23 @@ The trade, in one paragraph:
 
 - **Local edits take whole-run calls.** `d.Del` applies the author's own
   range in one call — `snapshot.Delete(pos, delLen)`
-  (`document.go:55`) → `contentTree.Delete(pos, length)`
-  (`content_tree.go:205`) — and `InsRun`'s `syncRun` does the same for
-  inserts (`document.go:34`). This is the rope's *cheapest* shape: a range
+  ([[`document.go:55`](../../go/crdt/document.go#L55)](../../go/crdt/document.go#L55)) → `contentTree.Delete(pos, length)`
+  ([[`content_tree.go:205`](../../go/crdt/content_tree.go#L205)](../../go/crdt/content_tree.go#L205)) — and `InsRun`'s `syncRun` does the same for
+  inserts ([[`document.go:34`](../../go/crdt/document.go#L34)](../../go/crdt/document.go#L34)). This is the rope's *cheapest* shape: a range
   delete costs at most two `locate`s plus one `DeleteRange`
   (`content_tree.go:222-227,266`), and single-document wipes skip even that
-  (`content_tree.go:215-220`).
+  ([[`content_tree.go:215-220`](../../go/crdt/content_tree.go#L215-L220)](../../go/crdt/content_tree.go#L215-L220)).
 - **Remote deletes cannot batch the same way.** The drive targets
   characters by identity (`delTargets`, `docs/crdt/03-merge-drive.md`),
   characters can already have been deleted by a concurrent run, and
-  `deleteOne` returns `-1` for exactly those (`crdt.go:501-507`); the
+  `deleteOne` returns `-1` for exactly those ([[`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)](../../go/crdt/crdt.go#L501-L507)); the
   rope update can therefore only trust the drive's *per-character* resolve
   — each success removes one visible cell via `snapshot.Delete(endPos, 1)`
-  (`crdt.go:532-534`). Same content, slower-looking route: the per-char
+  ([[`crdt.go:532-534`](../../go/crdt/crdt.go#L532-L534)](../../go/crdt/crdt.go#L532-L534)). Same content, slower-looking route: the per-char
   concession is the drive's, never the rope's own.
 - **Inserts are whole-run on both paths.** Once the drive has integrated an
   op and resolved `endPos`, the snapshot still gets the entire run in one
-  call (`crdt.go:390-392`), just as the local path does. Position resolution
+  call ([[`crdt.go:390-392`](../../go/crdt/crdt.go#L390-L392)](../../go/crdt/crdt.go#L390-L392)), just as the local path does. Position resolution
   of *items* is per-character (`docs/crdt/03-merge-drive.md`), but the rope
   only ever sees `(pos, whole run)` or `(pos, length)`.
 
@@ -430,14 +430,14 @@ structures with separate jobs, bridged only at `apply`'s two exits:
 ```
 
 Why this matters: the drive owns every CRDT concern — `crdtItem`'s permanent
-`lv`/`originLeft`/`originRight`/`deleted` fields (`go/crdt/types.go:82-90`),
-tombstones that stay as items forever (`crdt.go:509-516` sets `deleted=true`
+`lv`/`originLeft`/`originRight`/`deleted` fields ([[`go/crdt/types.go:82-90`](../../go/crdt/types.go#L82-L90)](../../go/crdt/types.go#L82-L90)),
+tombstones that stay as items forever ([[`crdt.go:509-516`](../../go/crdt/crdt.go#L509-L516)](../../go/crdt/crdt.go#L509-L516) sets `deleted=true`
 and never resets it — `docs/crdt/03-merge-drive.md` § invariants), staging
 counters, `tryMergeAt` fusion. The rope holds none of that: no lv, no
 deleted flag, no tombstone slots — a character's remote deletion removes the
-visible cell from the rope (`crdt.go:534-536`) while the *item* remains in
+visible cell from the rope ([[`crdt.go:534-536`](../../go/crdt/crdt.go#L534-L536)](../../go/crdt/crdt.go#L534-L536)) while the *item* remains in
 the item tree. The contentTree is thus a pure *content view*: renderable by
-a plain leaf walk (`content_tree.go:272-280`), identical on every replica
+a plain leaf walk ([[`content_tree.go:272-280`](../../go/crdt/content_tree.go#L272-L280)](../../go/crdt/content_tree.go#L272-L280)), identical on every replica
 because the drive above it is deterministic.
 
 ## Leaf-content cutting: `SplitAt` is the rope's atomization
@@ -447,7 +447,7 @@ reference between them (`docs/crdt/03-merge-drive.md`, `ensureAtomized`).
 The rope has the mirror-image discipline: leaves are immutable, so no edit
 ever mutates a leaf's content — instead the *content value* is cut on
 boundaries. For `runeText` that means cutting on rune boundaries in a
-byte-backed string (`go/crdt/content.go:22-49`):
+byte-backed string ([[`go/crdt/content.go:22-49`](../../go/crdt/content.go#L22-L49)](../../go/crdt/content.go#L22-L49)):
 
 ```go include go/crdt/content.go L22-L49
 // SplitAt splits after the k-th rune. runeText is byte-backed, so the split
@@ -481,13 +481,13 @@ func (t runeText) SplitAt(k int) (runeText, runeText) {
 ```
 
 Why this matters: `SplitAt` is the *only* way any piece of content gets
-smaller — `Insert`'s interior path (`content_tree.go:183-188`) and `Delete`'s
-single-leaf survivors (`content_tree.go:234-235`) and edge trims
+smaller — `Insert`'s interior path ([[`content_tree.go:183-188`](../../go/crdt/content_tree.go#L183-L188)](../../go/crdt/content_tree.go#L183-L188)) and `Delete`'s
+single-leaf survivors ([[`content_tree.go:234-235`](../../go/crdt/content_tree.go#L234-L235)](../../go/crdt/content_tree.go#L234-L235)) and edge trims
 (`content_tree.go:252,262`) all cut through it, so rune-boundary correctness
 for multibyte text is inherited by every rope operation from this one
-function (`content_tree_test.go:225-243` pins it; the multibyte storm
-attacks it, `content_tree_test.go:171-221`). Slice-backed `itemRun[T]` cuts
-the same way with cheap subslices (`content.go:58-66`).
+function ([[`content_tree_test.go:225-243`](../../go/crdt/content_tree_test.go#L225-L243)](../../go/crdt/content_tree_test.go#L225-L243) pins it; the multibyte storm
+attacks it, [[`content_tree_test.go:171-221`](../../go/crdt/content_tree_test.go#L171-L221)](../../go/crdt/content_tree_test.go#L171-L221)). Slice-backed `itemRun[T]` cuts
+the same way with cheap subslices ([[`content.go:58-66`](../../go/crdt/content.go#L58-L66)](../../go/crdt/content.go#L58-L66)).
 
 ## Worked example: mid-run remote insert, multi-leaf delete, per-char replay
 
@@ -508,18 +508,18 @@ acting replica after every step and both replicas end merged-clean):
 
 Leaf states below are derived from the cited lines and were cross-checked
 against the rope's actual leaf sequence (an in-package render via
-`ForEachContent`, `content_tree.go:272-280` — the driver outside the package
+`ForEachContent`, [[`content_tree.go:272-280`](../../go/crdt/content_tree.go#L272-L280)](../../go/crdt/content_tree.go#L272-L280) — the driver outside the package
 can only see rendered strings, which is what the transcript above prints
 verbatim):
 
 | # | Call | Rope leaves after | Cited mechanics |
 |---|------|-------------------|-----------------|
-| 1 | `a.Ins(0,"ABCDE")` | a: `[ABCDE]` — 1 leaf | empty tree → `InsertRange(0, run)` (`content_tree.go:145-148`) |
-| 2 | `b.MergeFrom(a)` | b: `[ABCDE]` — 1 leaf | remote insert is whole-run too: `snapshot.Insert(endPos, "ABCDE")`, `endPos == 0` (`crdt.go:390-392`) |
-| 3 | `a.Ins(2,"xy")` | a: `[ABxy] [CDE]` — 2 leaves | local whole-run `Insert(2, "xy")` (`document.go:34`); interior mid-run: `locate(2)` → offset 2 in leaf `ABCDE`; `SplitAt(2)` → `a="AB"`, `b="CDE"`; `offset+rn = 4 ≤ 256` → `replaceLeaf(0, "ABxy", "CDE")` (`content_tree.go:170,183-185`) |
-| 4 | `b.MergeFrom(a)` | b: `[ABxy] [CDE]` — 2 leaves | same rope math on the remote side: `findByCurrentPos(2)` first splits the item `ABCDE` at the boundary (`crdt.go:415-420`), `integrate` places the `xy` item, then `snapshot.Insert(2, "xy")` re-runs the identical `replaceLeaf` step (`content_tree.go:169-189`) |
-| 5 | `b.Del(3,3)` | b: `[ABxE]` — 1 leaf | local whole-run `Delete(3,3)` (`document.go:55`) spanning leaves `[ABxy]`/`[CDE]` — the multi-leaf series traced below |
-| 6 | `a.MergeFrom(b)` | a: `[ABxE]` — 1 leaf | remote per-char: b's length-3 delete run (lv 6-8, `document.go:54` pushed by `localDelete`) replays as three `DeleteOne` → `Delete(endPos,1)` calls (`crdt.go:531-536`) — one per single-leaf sub-case, traced below |
+| 1 | `a.Ins(0,"ABCDE")` | a: `[ABCDE]` — 1 leaf | empty tree → `InsertRange(0, run)` ([[`content_tree.go:145-148`](../../go/crdt/content_tree.go#L145-L148)](../../go/crdt/content_tree.go#L145-L148)) |
+| 2 | `b.MergeFrom(a)` | b: `[ABCDE]` — 1 leaf | remote insert is whole-run too: `snapshot.Insert(endPos, "ABCDE")`, `endPos == 0` ([[`crdt.go:390-392`](../../go/crdt/crdt.go#L390-L392)](../../go/crdt/crdt.go#L390-L392)) |
+| 3 | `a.Ins(2,"xy")` | a: `[ABxy] [CDE]` — 2 leaves | local whole-run `Insert(2, "xy")` ([[`document.go:34`](../../go/crdt/document.go#L34)](../../go/crdt/document.go#L34)); interior mid-run: `locate(2)` → offset 2 in leaf `ABCDE`; `SplitAt(2)` → `a="AB"`, `b="CDE"`; `offset+rn = 4 ≤ 256` → `replaceLeaf(0, "ABxy", "CDE")` (`content_tree.go:170,183-185`) |
+| 4 | `b.MergeFrom(a)` | b: `[ABxy] [CDE]` — 2 leaves | same rope math on the remote side: `findByCurrentPos(2)` first splits the item `ABCDE` at the boundary ([[`crdt.go:415-420`](../../go/crdt/crdt.go#L415-L420)](../../go/crdt/crdt.go#L415-L420)), `integrate` places the `xy` item, then `snapshot.Insert(2, "xy")` re-runs the identical `replaceLeaf` step ([[`content_tree.go:169-189`](../../go/crdt/content_tree.go#L169-L189)](../../go/crdt/content_tree.go#L169-L189)) |
+| 5 | `b.Del(3,3)` | b: `[ABxE]` — 1 leaf | local whole-run `Delete(3,3)` ([[`document.go:55`](../../go/crdt/document.go#L55)](../../go/crdt/document.go#L55)) spanning leaves `[ABxy]`/`[CDE]` — the multi-leaf series traced below |
+| 6 | `a.MergeFrom(b)` | a: `[ABxE]` — 1 leaf | remote per-char: b's length-3 delete run (lv 6-8, [[`document.go:54`](../../go/crdt/document.go#L54)](../../go/crdt/document.go#L54) pushed by `localDelete`) replays as three `DeleteOne` → `Delete(endPos,1)` calls ([[`crdt.go:531-536`](../../go/crdt/crdt.go#L531-L536)](../../go/crdt/crdt.go#L531-L536)) — one per single-leaf sub-case, traced below |
 | 7 | `b.MergeFrom(a)` | b: unchanged | both already hold all ops (`docs/crdt/01-replica-model.md` § invariants 2) — no rope work |
 
 Step 5, the multi-leaf series on b's rope (leaves quoted per state):
@@ -556,34 +556,34 @@ rope's index math.
 
 1. **The rope always equals the naive model** — the direct content tests
    `TestRopeMatchesNaive` and `TestRopeArrayMatchesNaive`
-   (`go/crdt/content_tree_test.go:20-78`, `:82-142`) replay every case's ops
+   ([[`go/crdt/content_tree_test.go:20-78`](../../go/crdt/content_tree_test.go#L20-L78)](../../go/crdt/content_tree_test.go#L20-L78), `:82-142`) replay every case's ops
    against a naive `[]rune`/slice model and assert both `Len()` and full
    content after *every* step; end-to-end, the same promise is `Check()`'s
-   full-replay-vs-branch comparison (`document.go:96-101`, page 01 § Check).
-2. **The tree never stores an empty leaf** (`content_tree.go:36-37`) —
-   `replaceLeaf` filters `n == 0` parts (`content_tree.go:89-95`), folds and
+   full-replay-vs-branch comparison ([[`document.go:96-101`](../../go/crdt/document.go#L96-L101)](../../go/crdt/document.go#L96-L101), page 01 § Check).
+2. **The tree never stores an empty leaf** ([[`content_tree.go:36-37`](../../go/crdt/content_tree.go#L36-L37)](../../go/crdt/content_tree.go#L36-L37)) —
+   `replaceLeaf` filters `n == 0` parts ([[`content_tree.go:89-95`](../../go/crdt/content_tree.go#L89-L95)](../../go/crdt/content_tree.go#L89-L95)), folds and
    coalesces only into leaves that stay non-empty, and `Delete`'s
    whole-document path removes leaves rather than emptying them
-   (`content_tree.go:215-220`).
+   ([[`content_tree.go:215-220`](../../go/crdt/content_tree.go#L215-L220)](../../go/crdt/content_tree.go#L215-L220)).
 3. **Edit points do not accumulate fragmentation** — boundary folds
-   (`content_tree.go:150-167`) and consumer-side seam coalescing
-   (`mergeWithLeft`, `content_tree.go:105-132`, called from the seamed
+   ([[`content_tree.go:150-167`](../../go/crdt/content_tree.go#L150-L167)](../../go/crdt/content_tree.go#L150-L167)) and consumer-side seam coalescing
+   (`mergeWithLeft`, [[`content_tree.go:105-132`](../../go/crdt/content_tree.go#L105-L132)](../../go/crdt/content_tree.go#L105-L132), called from the seamed
    sub-cases and after every excision) keep the leaf count near
    `~Len/ropeLeafCap`: append-only 5000-char building stays under 100
-   leaves (`content_tree_test.go:152-163`) and a 200-delete multibyte storm
-   stays at ≤ `insRuns` (`content_tree_test.go:171-221`);
+   leaves ([[`content_tree_test.go:152-163`](../../go/crdt/content_tree_test.go#L152-L163)](../../go/crdt/content_tree_test.go#L152-L163)) and a 200-delete multibyte storm
+   stays at ≤ `insRuns` ([[`content_tree_test.go:171-221`](../../go/crdt/content_tree_test.go#L171-L221)](../../go/crdt/content_tree_test.go#L171-L221));
    `BenchmarkRopeDeleteStorm` reports `leaves-after-storm` so a regression
-   is directly visible (`content_tree_test.go:282-302`).
+   is directly visible ([[`content_tree_test.go:282-302`](../../go/crdt/content_tree_test.go#L282-L302)](../../go/crdt/content_tree_test.go#L282-L302)).
 4. **Positions are in content units and rune-safe** — `runeText.Len` counts
-   runes (`content.go:20`), `SplitAt` never splits inside a multibyte rune
-   (`content.go:30-49`), and the multibyte storm plus `TestRuneTextSplitAt`
+   runes ([[`content.go:20`](../../go/crdt/content.go#L20)](../../go/crdt/content.go#L20)), `SplitAt` never splits inside a multibyte rune
+   ([[`content.go:30-49`](../../go/crdt/content.go#L30-L49)](../../go/crdt/content.go#L30-L49)), and the multibyte storm plus `TestRuneTextSplitAt`
    hammer exactly that boundary (`content_tree_test.go:171-221,225-243`).
 5. **Structure changes never corrupt positioning** — half lengths come from
    arithmetic at the split point, not rescans (`content_tree.go:16-18,
    :181-182`), and `Delete` re-locates its right edge after the left split
-   shifted indices (`content_tree.go:256-258`); the `ropeLeafNodeSize` knee
+   shifted indices ([[`content_tree.go:256-258`](../../go/crdt/content_tree.go#L256-L258)](../../go/crdt/content_tree.go#L256-L258)); the `ropeLeafNodeSize` knee
    that makes the descent cheap is pinned by `BenchmarkRopeLeafSizeSweep`
-   (`content_tree.go:42-48`, `content_tree_test.go:368-394`).
+   ([[`content_tree.go:42-48`](../../go/crdt/content_tree.go#L42-L48)](../../go/crdt/content_tree.go#L42-L48), [[`content_tree_test.go:368-394`](../../go/crdt/content_tree_test.go#L368-L394)](../../go/crdt/content_tree_test.go#L368-L394)).
 
 Verification:
 

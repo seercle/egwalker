@@ -14,7 +14,7 @@ keep.
   the merge drive twice (the incremental form is the delta frame, whose wire
   dialect is the topic of `docs/crdt/06-deltas-and-checkout.md` — this page
   only touches the delta format's model, never its mechanics).
-- **Compaction** (`opLog.Compact`, `go/crdt/op_log.go:622-661`) — when every
+- **Compaction** (`opLog.Compact`, [[`go/crdt/op_log.go:622-661`](../../go/crdt/op_log.go#L622-L661)](../../go/crdt/op_log.go#L622-L661)) — when every
   peer has caught up, the history collapses onto one anchor op. The result
   is a GC: what it *strips* (the tree layer's `delTargets`, the per-op
   caches, the sequence index), what it *persists* (`version`, the coverage
@@ -29,9 +29,9 @@ worked example with the real bytes; Compact end to end; invariants.
 A document is only as durable as its ability to leave the process: two
 replicas converge by exchanging op data, and `MergeFrom` needs the other
 side's ops in *some* transferable form. The full-state path is a byte blob:
-`MarshalBinary` encodes the log's columnar form (`go/crdt/binary.go:102-108`)
+`MarshalBinary` encodes the log's columnar form ([[`go/crdt/binary.go:102-108`](../../go/crdt/binary.go#L102-L108)](../../go/crdt/binary.go#L102-L108))
 and `UnmarshalBinary` rebuilds an equivalent log on the receiving side
-(`go/crdt/binary.go:412-419`). The frame grammar, verbatim from the header
+([[`go/crdt/binary.go:412-419`](../../go/crdt/binary.go#L412-L419)](../../go/crdt/binary.go#L412-L419)). The frame grammar, verbatim from the header
 comment (the magic and abuse bound are the constants a wire peer actually
 meets first):
 
@@ -78,14 +78,14 @@ Four things to read off that:
 
 - **"EGW1" magic + uvarint version** (`binaryMagic`/`binaryVersion`,
   `go/crdt/binary.go:40,78`) open every frame; v2 (11 columns) is what
-  writers emit, v1 (10 columns) remains decodable (`go/crdt/binary.go:16-21`).
-- **All integers are varints, signed ones zigzag** (`go/crdt/binary.go:12-13`)
+  writers emit, v1 (10 columns) remains decodable ([[`go/crdt/binary.go:16-21`](../../go/crdt/binary.go#L16-L21)](../../go/crdt/binary.go#L16-L21)).
+- **All integers are varints, signed ones zigzag** ([[`go/crdt/binary.go:12-13`](../../go/crdt/binary.go#L12-L13)](../../go/crdt/binary.go#L12-L13))
   — negative values really occur, because `anchorAgent` is `-1` (the
-  sentinel `go/crdt/types.go:30-33`) and agent deltas start from 0.
+  sentinel [[`go/crdt/types.go:30-33`](../../go/crdt/types.go#L30-L33)](../../go/crdt/types.go#L30-L33)) and agent deltas start from 0.
 - **Each column is `uvarint bodyLen || body`** (`appendBinaryColumn`,
-  `go/crdt/binary.go:284-288`), so a decoder can skip unknown columns and
+  [[`go/crdt/binary.go:284-288`](../../go/crdt/binary.go#L284-L288)](../../go/crdt/binary.go#L284-L288)), so a decoder can skip unknown columns and
   never has to guess where one ends.
-- **zstd compresses the whole frame at once** (`go/crdt/binary.go:219`,
+- **zstd compresses the whole frame at once** ([[`go/crdt/binary.go:219`](../../go/crdt/binary.go#L219)](../../go/crdt/binary.go#L219),
   shared codec pair `:54-73`); there is no checksum — an integrity failure
   surfaces as a decode error (§ decode path).
 
@@ -110,7 +110,7 @@ graph LR
 ## The two-layer encoder: columns first, frame second
 
 The columnar layer is generic and zstd-free: `opLog.Marshal` turns the log
-into a `ColumnarData` (`go/crdt/serialization.go:7-23`) — one row per run
+into a `ColumnarData` ([[`go/crdt/serialization.go:7-23`](../../go/crdt/serialization.go#L7-L23)](../../go/crdt/serialization.go#L7-L23)) — one row per run
 op, with the repetitive columns squeezed first. Why run lengths matter: the
 fold path (`docs/crdt/02-op-log.md`) means a typing burst is *one* log entry
 holding *n* characters, so a per-op layout would repeat "ins / same agent"
@@ -136,7 +136,7 @@ type ColumnarData[C content[C]] struct {
 }
 ```
 
-The per-op sweeps in `Marshal` (`go/crdt/serialization.go:46-87`). Types RLE
+The per-op sweeps in `Marshal` ([[`go/crdt/serialization.go:46-87`](../../go/crdt/serialization.go#L46-L87)](../../go/crdt/serialization.go#L46-L87)). Types RLE
 into `Types` + `TypeRuns` pairs; agent runs additionally carry the run's
 starting seq (because `Seqs` is per agent-run, later ops of the same run
 advance by the previous op's length — the decoder's job, `:129-141`), and
@@ -200,13 +200,13 @@ positions travel as deltas against the previous op:
 Why content and parents ride verbatim while everything numeric is squeezed:
 content blobs go through the codec (§ below) and `Parents` is the only
 column that is irregular per op — counts first, then all lvs — so it keeps
-its own two-part layout (`go/crdt/serialization.go:83-87`).
+its own two-part layout ([[`go/crdt/serialization.go:83-87`](../../go/crdt/serialization.go#L83-L87)](../../go/crdt/serialization.go#L83-L87)).
 
-`Unmarshal` (`go/crdt/serialization.go:98-178`) is the mirror sweep, and
+`Unmarshal` ([[`go/crdt/serialization.go:98-178`](../../go/crdt/serialization.go#L98-L178)](../../go/crdt/serialization.go#L98-L178)) is the mirror sweep, and
 worth reading because it *rebuilds every derived structure from the four
 surviving columns*: the `opLV` first-lv table, `idToLV` end-lv map, the
 per-agent `seqIndex`, and the version vector all fall out of lengths +
-agents + seqs (`go/crdt/serialization.go:155-175`) — nothing derived needs
+agents + seqs ([[`go/crdt/serialization.go:155-175`](../../go/crdt/serialization.go#L155-L175)](../../go/crdt/serialization.go#L155-L175)) — nothing derived needs
 its own column:
 
 ```go include go/crdt/serialization.go L155-L175
@@ -235,7 +235,7 @@ its own column:
 
 Two rebuild details worth naming. First, an agent run's seqs advance by the
 *previous op's length*, not by one, because a run op occupies `length` seq
-numbers (`go/crdt/serialization.go:129-141`). Second, `Unmarshal` is the
+numbers ([[`go/crdt/serialization.go:129-141`](../../go/crdt/serialization.go#L129-L141)](../../go/crdt/serialization.go#L129-L141)). Second, `Unmarshal` is the
 deserialization path's spine: the binary layer decodes columns and hands
 them here, and anything preserved across compaction's rebuilds leans on the
 same sweep (`docs/crdt/02-op-log.md` states the invariants the rebuilt log
@@ -246,10 +246,10 @@ must re-satisfy).
 The frame decodes *everything* itself except one thing — content values.
 Those travel as per-op opaque length-prefixed blobs behind a codec interface
 (`go/crdt/codec.go`) so each concrete content type owns its byte format; the
-encoder path is the Content column loop (`go/crdt/binary.go:170-180`), and
+encoder path is the Content column loop ([[`go/crdt/binary.go:170-180`](../../go/crdt/binary.go#L170-L180)](../../go/crdt/binary.go#L170-L180)), and
 its decode mirror is `:618-650`. Why opaque: content semantics drift
 independently of frame structure, so codecs version their own payloads and
-the frame never has to look inside (`go/crdt/codec.go:3-7`):
+the frame never has to look inside ([[`go/crdt/codec.go:3-7`](../../go/crdt/codec.go#L3-L7)](../../go/crdt/codec.go#L3-L7)):
 
 ```go include go/crdt/codec.go L8-L19
 type ContentCodec[C content[C]] interface {
@@ -267,9 +267,9 @@ func (RuneTextCodec) Decode(b []byte) (runeText, error) { return runeText(b), ni
 ```
 
 Runes are the trivial case (the string *is* the bytes, UTF-8 or not,
-`go/crdt/codec.go:16-19`). The generic families gob the whole run slice,
+[[`go/crdt/codec.go:16-19`](../../go/crdt/codec.go#L16-L19)](../../go/crdt/codec.go#L16-L19)). The generic families gob the whole run slice,
 because their content carries arbitrary Go values — including `Mergeable`
-recursive documents kept as value snapshots (`go/crdt/document.go:240-245`;
+recursive documents kept as value snapshots ([[`go/crdt/document.go:240-245`](../../go/crdt/document.go#L240-L245)](../../go/crdt/document.go#L240-L245);
 pointer-carrying document types stay merge-only, that note's last line):
 
 ```go include go/crdt/document.go L262-L284
@@ -300,8 +300,8 @@ func (ItemRunCodec[T]) Decode(b []byte) (itemRun[T], error) {
 
 ## The decode path: trust nothing before it checks
 
-`UnmarshalBinary` (`go/crdt/binary.go:420-444`) reads through one
-battle-tested driver type, `binaryReader` (`go/crdt/binary.go:291-365`), and
+`UnmarshalBinary` ([[`go/crdt/binary.go:420-444`](../../go/crdt/binary.go#L420-L444)](../../go/crdt/binary.go#L420-L444)) reads through one
+battle-tested driver type, `binaryReader` ([[`go/crdt/binary.go:291-365`](../../go/crdt/binary.go#L291-L365)](../../go/crdt/binary.go#L291-L365)), and
 the flow is: decompress → magic → version → eleven columns, each validated
 against the invariants the columnar form relies on. Its shape:
 
@@ -405,15 +405,15 @@ agent-run sums must equal each other:
 
 Why this matters: every count is validated against a bound that hostile
 input cannot inflate — `count()` requires one byte per entry
-(`go/crdt/binary.go:348-357`), `readRunLens` caps the running op-count sum at
-`maxOps` (`go/crdt/binary.go:385-410`, itself sized from the frame at
+([[`go/crdt/binary.go:348-357`](../../go/crdt/binary.go#L348-L357)](../../go/crdt/binary.go#L348-L357)), `readRunLens` caps the running op-count sum at
+`maxOps` ([[`go/crdt/binary.go:385-410`](../../go/crdt/binary.go#L385-L410)](../../go/crdt/binary.go#L385-L410), itself sized from the frame at
 `:440`), and Parents counts can never claim more lvs than bytes remain
 (`:666-679`). The history behind that bar is the comment on
-`maxBinaryDecoded` (`go/crdt/binary.go:44-47`): fuzzing found a 26-byte blob
+`maxBinaryDecoded` ([[`go/crdt/binary.go:44-47`](../../go/crdt/binary.go#L44-L47)](../../go/crdt/binary.go#L44-L47)): fuzzing found a 26-byte blob
 that triggered a 4 GB transient pre-allocation before failing. The hostile
-surface is covered by `FuzzBinaryFrame` (`go/crdt/fuzz_test.go:394`) and
-`TestBinaryRejectsGarbage` (`go/crdt/binary_test.go:281`); when a body is not
-consumed to its end, `exact()` fails loudly (`go/crdt/binary.go:360-365`,
+surface is covered by `FuzzBinaryFrame` ([[`go/crdt/fuzz_test.go:394`](../../go/crdt/fuzz_test.go#L394)](../../go/crdt/fuzz_test.go#L394)) and
+`TestBinaryRejectsGarbage` ([[`go/crdt/binary_test.go:281`](../../go/crdt/binary_test.go#L281)](../../go/crdt/binary_test.go#L281)); when a body is not
+consumed to its end, `exact()` fails loudly ([[`go/crdt/binary.go:360-365`](../../go/crdt/binary.go#L360-L365)](../../go/crdt/binary.go#L360-L365),
 final check at `:808-810`):
 
 ```go include go/crdt/binary.go L804-L810
@@ -433,11 +433,11 @@ decode errors, not as silent data.
 
 Driver: a scratch test inside the package (`zz_docexample_5e_test.go`, calling
 `MarshalBinary`/`UnmarshalBinary` directly and then `runeDocFromLog`
-(`go/crdt/binary_test.go:38-45`) to rebuild a fresh document around the
+([[`go/crdt/binary_test.go:38-45`](../../go/crdt/binary_test.go#L38-L45)](../../go/crdt/binary_test.go#L38-L45)) to rebuild a fresh document around the
 decoded log). Why a test driver and not an external `main`: the whole-state
 path takes unexported types (`MarshalBinary(log *opLog[C], ...)`) — it is
 package-internal by design; the exported document API stops at delta frames
-(`RuneDocument.Delta`, `go/crdt/document.go:186-188`, the subject of
+(`RuneDocument.Delta`, [[`go/crdt/document.go:186-188`](../../go/crdt/document.go#L186-L188)](../../go/crdt/document.go#L186-L188), the subject of
 `docs/crdt/06-deltas-and-checkout.md`). Scenario: replica `a` (agent 1)
 writes "Hello"; replica `b` merges from `a` and deletes two runes at
 position 1; `a` merges back. Verbatim driver output:
@@ -481,17 +481,17 @@ POST-VERSION map[1:4 2:1]
 ```
 
 Both directions passed `Check()` after the round trip. The pre-compact log
-columns marshal as (`opLog.Marshal`, `go/crdt/serialization.go:25-96`): op 0
+columns marshal as (`opLog.Marshal`, [[`go/crdt/serialization.go:25-96`](../../go/crdt/serialization.go#L25-L96)](../../go/crdt/serialization.go#L25-L96)): op 0
 is the ins run `{1,0}` "Hello" (lv 0–4), op 1 is the del run `{2,0}` (lv 5–6,
 deleting "el"); frontier `[6]` is op 1's end lv (`endLV`, first 5 + length 2
-− 1 = 6; `go/crdt/op_log.go:110-112`). The byte-level column decode of the
+− 1 = 6; [[`go/crdt/op_log.go:110-112`](../../go/crdt/op_log.go#L110-L112)](../../go/crdt/op_log.go#L110-L112)). The byte-level column decode of the
 51-byte frame
 (hex shown above; `PRE-HEX` is the *decompressed* frame, the blob is 64 B
 zstd — the frame header taxes tiny inputs):
 
 | column | body hex (bytes) | meaning — derived per `MarshalBinary` column rules |
 |---|---|---|
-| header | `45 47 57 31 02` | "EGW1", uvarint version 2 (`go/crdt/binary.go:112-113`) |
+| header | `45 47 57 31 02` | "EGW1", uvarint version 2 ([[`go/crdt/binary.go:112-113`](../../go/crdt/binary.go#L112-L113)](../../go/crdt/binary.go#L112-L113)) |
 | Types | `02 00 01` | count 2; `00`=ins, `01`=del (`:118-125`, codes `:81-89`) |
 | TypeRuns | `02 01 01` | two runs of 1 — both ops are their own type run |
 | Agents | `02 02 04` | count 2; zigzag `02`=+1 → agent 1, `04`=+2 → agent 2 (`:136-138`) |
@@ -499,25 +499,25 @@ zstd — the frame header taxes tiny inputs):
 | Seqs | `02 00 00` | run start seqs 0 and 0 |
 | Positions | `02 00 02` | pos 0, then delta zigzag `02`=+1 → pos 1 |
 | Lengths | `02 05 02` | runs span 5 and 2 characters |
-| Content | `02 05 "Hello" 00` | two blobs: 5-byte "Hello", 0-byte (del carries zero content; `Lengths` is authoritative, `go/crdt/serialization.go:10-11`) |
+| Content | `02 05 "Hello" 00` | two blobs: 5-byte "Hello", 0-byte (del carries zero content; `Lengths` is authoritative, [[`go/crdt/serialization.go:10-11`](../../go/crdt/serialization.go#L10-L11)](../../go/crdt/serialization.go#L10-L11)) |
 | Parents | `02 00 01 04` | op counts `[0, 1]`, then op 1's lv `4` (the ins run's end lv) |
 | Frontier | `01 06` | one tip: end lv 6 |
-| Coverage | *(empty)* | uncompacted log — zero-length body (`go/crdt/binary.go:22-25`) |
+| Coverage | *(empty)* | uncompacted log — zero-length body ([[`go/crdt/binary.go:22-25`](../../go/crdt/binary.go#L22-L25)](../../go/crdt/binary.go#L22-L25)) |
 
 Decoding that blob into a fresh replica yields the same content and version
 (`c` printed `"Hlo"` and `map[1:4 2:1]`, `Check()` passing) — the throwaway
-round trip in `TestBinaryRoundTrip` (`go/crdt/binary_test.go:46-70`) asserts
+round trip in `TestBinaryRoundTrip` ([[`go/crdt/binary_test.go:46-70`](../../go/crdt/binary_test.go#L46-L70)](../../go/crdt/binary_test.go#L46-L70)) asserts
 the same equality (`DeepEqual` against the sender's log).
 
 ## Compaction: the garbage collection pass
 
 `Compact` is the pass that throws history *away*.
 The precondition is that the document is fully synchronized (a single-tip
-frontier, `go/crdt/op_log.go:639-641`; a peer compacted at a different point
-is the `nonAlignedAnchorMsg` topology boundary, `go/crdt/op_log.go:340-341`);
+frontier, [[`go/crdt/op_log.go:639-641`](../../go/crdt/op_log.go#L639-L641)](../../go/crdt/op_log.go#L639-L641); a peer compacted at a different point
+is the `nonAlignedAnchorMsg` topology boundary, [[`go/crdt/op_log.go:340-341`](../../go/crdt/op_log.go#L340-L341)](../../go/crdt/op_log.go#L340-L341));
 then the whole log is replaced by one anchor
 op holding the content snapshot, agent `anchorAgent = -1`
-(`go/crdt/types.go:30-33`):
+([[`go/crdt/types.go:30-33`](../../go/crdt/types.go#L30-L33)](../../go/crdt/types.go#L30-L33)):
 
 ```go include go/crdt/op_log.go L622-L661
 // Compact collapses the entire log into a single anchor op holding the current
@@ -566,7 +566,7 @@ Mechanics: a `newOpLog` is built with a single `pushLocalOp` (parents copy
 the frontier — empty, because the fresh log holds only the anchor), the
 `version` snapshot is cloned into *both* `fresh.ops[0].coverage` and
 `fresh.anchorCoverage` (kept-anchor layout: the anchor rides in the log,
-`go/crdt/op_log.go:656-658`), and everything else never survives:
+[[`go/crdt/op_log.go:656-658`](../../go/crdt/op_log.go#L656-L658)](../../go/crdt/op_log.go#L656-L658)), and everything else never survives:
 
 ```go include go/crdt/op_log.go L651-L675
 	fresh := newOpLog[C]()
@@ -614,7 +614,7 @@ graph LR
 Reading that picture against the code:
 
 - **Stripped and *lost forever*: every ordinary op.** `replaceWith`
-  (`go/crdt/op_log.go:663-675`) swaps in `ops`, `opLV`, `totalLV`,
+  ([[`go/crdt/op_log.go:663-675`](../../go/crdt/op_log.go#L663-L675)](../../go/crdt/op_log.go#L663-L675)) swaps in `ops`, `opLV`, `totalLV`,
   `frontier`, `idToLV`, and `seqIndex` from the fresh one-op log — there is
   no tombstone, no deletion marker (invisible deletions fold away without
   trace, the whole point for GC:
@@ -626,9 +626,9 @@ Reading that picture against the code:
   allocates an empty `crdtDoc`, so `delTargets`/`sortedItems`/`items` never
   persist across compaction; they
   exist again only because the new log's ops are replayed into it,
-  `go/crdt/crdt.go:598-617` (one `do1Operation` per op, `:613-615`).
+  [[`go/crdt/crdt.go:598-617`](../../go/crdt/crdt.go#L598-L617)](../../go/crdt/crdt.go#L598-L617) (one `do1Operation` per op, `:613-615`).
   The family render caches (like `RuneDocument`'s text cache) are invalidated
-  rather than copied (`go/crdt/document.go:209-215`).
+  rather than copied ([[`go/crdt/document.go:209-215`](../../go/crdt/document.go#L209-L215)](../../go/crdt/document.go#L209-L215)).
 
 ```go include go/crdt/document.go L103-L119
 // Compact collapses the op log into a single anchor op holding the current
@@ -661,24 +661,24 @@ func (doc *RuneDocument) Compact() {
 ```
 
 - **Persists untouched: the version vector.** `replaceWith` deliberately
-  does *not* copy `version` (`go/crdt/op_log.go:663-666`) — skip-delivery
-  (`ingestOp`, `go/crdt/op_log.go:518-527`) depends on the pre-compaction
+  does *not* copy `version` ([[`go/crdt/op_log.go:663-666`](../../go/crdt/op_log.go#L663-L666)](../../go/crdt/op_log.go#L663-L666)) — skip-delivery
+  (`ingestOp`, [[`go/crdt/op_log.go:518-527`](../../go/crdt/op_log.go#L518-L527)](../../go/crdt/op_log.go#L518-L527)) depends on the pre-compaction
   high-water marks, and `TestCompactPreservesVersion` pins it
-  (`go/crdt/compact_test.go:121`).
+  ([[`go/crdt/compact_test.go:121`](../../go/crdt/compact_test.go#L121)](../../go/crdt/compact_test.go#L121)).
 - **Persists as new data: the coverage table.** `fresh.anchorCoverage` is a
-  clone of compaction-time `version` (`go/crdt/op_log.go:658`) — identical
+  clone of compaction-time `version` ([[`go/crdt/op_log.go:658`](../../go/crdt/op_log.go#L658)](../../go/crdt/op_log.go#L658)) — identical
   to the anchor op's own `coverage` clone at `:656`. Its job: a future
   `(agent, seq)` parent reference into the folded history resolves to the
   anchor's end lv instead of panicking (`coveredByAnchor` interception,
-  `go/crdt/op_log.go:595-607`; the resolution story is
+  [[`go/crdt/op_log.go:595-607`](../../go/crdt/op_log.go#L595-L607)](../../go/crdt/op_log.go#L595-L607); the resolution story is
   `docs/crdt/02-op-log.md`, which is why § there previews this page).
 - **An empty-content document compacts too**: `Compact` with `Len() == 0`
   skips the anchor op but still records `anchorCoverage`, the
-  tombstone-only case (`go/crdt/op_log.go:652-660`), tested in
-  `TestCompactTombstoneOnly` (`go/crdt/compact_test.go:95`) and re-compact
+  tombstone-only case ([[`go/crdt/op_log.go:652-660`](../../go/crdt/op_log.go#L652-L660)](../../go/crdt/op_log.go#L652-L660)), tested in
+  `TestCompactTombstoneOnly` ([[`go/crdt/compact_test.go:95`](../../go/crdt/compact_test.go#L95)](../../go/crdt/compact_test.go#L95)) and re-compact
   idempotence in `TestCompactIdempotent`/`TestCompactZeroOpIdempotent`
   (`go/crdt/compact_test.go:61, :466`; the zero-op no-op branch is
-  `go/crdt/op_log.go:632-638`).
+  [[`go/crdt/op_log.go:632-638`](../../go/crdt/op_log.go#L632-L638)](../../go/crdt/op_log.go#L632-L638)).
 
 That is what the Coverage column exists to carry across the wire — without
 it, a decoded compacted log would have *no record* that its per-op columns
@@ -687,8 +687,8 @@ cover a history whose individual ops are gone.
 ### The compacted frame: the Coverage column
 
 The column is never omitted: v2 always writes it, and an *empty body*
-unambiguously means uncompacted (`go/crdt/binary.go:22-25`). The writer
-branch (`go/crdt/binary.go:201-217`):
+unambiguously means uncompacted ([[`go/crdt/binary.go:22-25`](../../go/crdt/binary.go#L22-L25)](../../go/crdt/binary.go#L22-L25)). The writer
+branch ([[`go/crdt/binary.go:201-217`](../../go/crdt/binary.go#L201-L217)](../../go/crdt/binary.go#L201-L217)):
 
 ```go include go/crdt/binary.go L201-L217
 	// Column 11: Coverage — the anchor coverage table of a compacted log.
@@ -710,18 +710,18 @@ branch (`go/crdt/binary.go:201-217`):
 	frame = appendBinaryColumn(frame, body)
 ```
 
-Two layouts exist, switched by `anchorless` (`go/crdt/binary.go:206-215`):
+Two layouts exist, switched by `anchorless` ([[`go/crdt/binary.go:206-215`](../../go/crdt/binary.go#L206-L215)](../../go/crdt/binary.go#L206-L215)):
 
 - **Anchor kept** (rowCount == op count): row 0 carries the coverage
   table on the anchor op's per-op row; every later row is empty
-  (`go/crdt/binary.go:29-32`).
+  ([[`go/crdt/binary.go:29-32`](../../go/crdt/binary.go#L29-L32)](../../go/crdt/binary.go#L29-L32)).
 - **Anchorless** (zero-op or edited-empty-anchor log): there is no anchor op
   to ride in, so rowCount = op count + 1 and row 0 is the bare table
-  (`go/crdt/binary.go:33-36`).
+  ([[`go/crdt/binary.go:33-36`](../../go/crdt/binary.go#L33-L36)](../../go/crdt/binary.go#L33-L36)).
 
 The table itself is delta-encoded agent ids with zigzag, one entry per
 agent in ascending order (`encodeCoverageTable`,
-`go/crdt/binary.go:228-245`), and `parseCoverageTable` is its inverse
+[[`go/crdt/binary.go:228-245`](../../go/crdt/binary.go#L228-L245)](../../go/crdt/binary.go#L228-L245)), and `parseCoverageTable` is its inverse
 (`:247-282`):
 
 ```go include go/crdt/binary.go L228-L245
@@ -745,14 +745,14 @@ func encodeCoverageTable(body []byte, m remoteVersion) []byte {
 }
 ```
 
-The decode end (`go/crdt/binary.go:733-806`) validates the row shape — count
+The decode end ([[`go/crdt/binary.go:733-806`](../../go/crdt/binary.go#L733-L806)](../../go/crdt/binary.go#L733-L806)) validates the row shape — count
 must be exactly op count or op count+1 (`:749-751`), only row 0 may be
 non-empty (`:800-804`), an anchor op must actually carry coverage
 (`:767-780`) — and on a well-formed frame wraps up by restoring
 `anchorCoverage`, re-attaching the anchor op's coverage, folding the table
 into `version` (adjacent entries the per-op columns could not re-derive),
 and scrubbing the anchor sentinel both tables must never leak
-(`go/crdt/binary.go:812-843`):
+([[`go/crdt/binary.go:812-843`](../../go/crdt/binary.go#L812-L843)](../../go/crdt/binary.go#L812-L843)):
 
 ```go include go/crdt/binary.go L824-L843
 	if anchorCoverage != nil {
@@ -783,35 +783,35 @@ table — zigzag `02`=+1 → agent 1 seq `04`, zigzag `02`=+1 from prev 1 →
 agent 2 seq `01`: `{1:4, 2:1}`, matching the printed `anchorCoverage`.)
 
 Round-trip integrity of the compacted form is exercised by
-`TestBinaryRoundTripCompacted` (`go/crdt/binary_test.go:91-150`,
+`TestBinaryRoundTripCompacted` ([[`go/crdt/binary_test.go:91-150`](../../go/crdt/binary_test.go#L91-L150)](../../go/crdt/binary_test.go#L91-L150),
 `isCompacted()` preserved) and the anchorless variant (`:152`), and v1
-frames still decode — as uncompacted logs only (`binary_test.go:214-232`,
-the `version >= 2` gate at `go/crdt/binary.go:738`).
+frames still decode — as uncompacted logs only ([[`binary_test.go:214-232`](../../go/crdt/binary_test.go#L214-L232)](../../go/crdt/binary_test.go#L214-L232),
+the `version >= 2` gate at [[`go/crdt/binary.go:738`](../../go/crdt/binary.go#L738)](../../go/crdt/binary.go#L738)).
 
 ### What a compacted log merges like
 
 One subtlety worth one sentence each (details are page 03/06 turf): incoming
 anchor records follow skip/adopt-or-panic rules in `ingestOp`
-(`go/crdt/op_log.go:469-517`) — a compacted peer's state can bootstrap an
+([[`go/crdt/op_log.go:469-517`](../../go/crdt/op_log.go#L469-L517)](../../go/crdt/op_log.go#L469-L517)) — a compacted peer's state can bootstrap an
 empty replica but cannot merge into a partially-converged one; and a
 compact log stays *mergeable as a peer*: `ingestOp` raises `version` to the
 coverage on adoption so skip-delivery keeps dropping re-deliveries
-(`go/crdt/op_log.go:491-499`, mirrored for zero-record frames at
-`go/crdt/op_log.go:575-584`). The delta-frame side of the same contract is
+([[`go/crdt/op_log.go:491-499`](../../go/crdt/op_log.go#L491-L499)](../../go/crdt/op_log.go#L491-L499), mirrored for zero-record frames at
+[[`go/crdt/op_log.go:575-584`](../../go/crdt/op_log.go#L575-L584)](../../go/crdt/op_log.go#L575-L584)). The delta-frame side of the same contract is
 `docs/crdt/06-deltas-and-checkout.md`.
 
 ## Invariants
 
 1. **A frame round-trips to a structurally identical log** — decoded logs
-   keep empty-but-non-nil `parents` slices (`go/crdt/binary.go:685-689`),
+   keep empty-but-non-nil `parents` slices ([[`go/crdt/binary.go:685-689`](../../go/crdt/binary.go#L685-L689)](../../go/crdt/binary.go#L685-L689)),
    and the combined gate keeps `go test -C go ./...` checking
    `TestSerializationLossless`/`TestBinaryRoundTrip*`.
 2. **Coverage never exceeds version, anchor sentinel never survives
    decode/adoption/encode** — enforced by the fold-then-scrub in
-   `UnmarshalBinary` (`go/crdt/binary.go:824-843`), by `ingestOp`'s adoption
-   (`go/crdt/op_log.go:492-499`), and re-checked for any compacted log in
-   `checkCompacted` (`go/crdt/op_log.go:677-696`), which `RuneDocument.Check`
-   runs first (`go/crdt/document.go:218-222`):
+   `UnmarshalBinary` ([[`go/crdt/binary.go:824-843`](../../go/crdt/binary.go#L824-L843)](../../go/crdt/binary.go#L824-L843)), by `ingestOp`'s adoption
+   ([[`go/crdt/op_log.go:492-499`](../../go/crdt/op_log.go#L492-L499)](../../go/crdt/op_log.go#L492-L499)), and re-checked for any compacted log in
+   `checkCompacted` ([[`go/crdt/op_log.go:677-696`](../../go/crdt/op_log.go#L677-L696)](../../go/crdt/op_log.go#L677-L696)), which `RuneDocument.Check`
+   runs first ([[`go/crdt/document.go:218-222`](../../go/crdt/document.go#L218-L222)](../../go/crdt/document.go#L218-L222)):
 
 ```go include go/crdt/op_log.go L677-L696
 // checkCompacted validates the compacted-log invariants: when the log carries
@@ -837,15 +837,15 @@ func checkCompacted[C content[C]](log *opLog[C]) {
 ```
 
 3. **Decode trusts only what it can bound** — every count is cross-checked
-   (§ decode path); the 64 MiB cap (`go/crdt/binary.go:42-47`) and the
+   (§ decode path); the 64 MiB cap ([[`go/crdt/binary.go:42-47`](../../go/crdt/binary.go#L42-L47)](../../go/crdt/binary.go#L42-L47)) and the
    ≥-1-byte-per-entry bounds (`:348-357`, `:666-683`) keep hostile frames
-   linear in their own size, with `FuzzBinaryFrame` (`go/crdt/fuzz_test.go:394`)
+   linear in their own size, with `FuzzBinaryFrame` ([[`go/crdt/fuzz_test.go:394`](../../go/crdt/fuzz_test.go#L394)](../../go/crdt/fuzz_test.go#L394))
    as the continuous pressure.
 4. **Compact is safe only on full sync** — the single-tip frontier check
-   (`go/crdt/op_log.go:639-641`) plus reserved-agent scan (`:642-650`),
-   surfaced as a panic by the document layer (`go/crdt/document.go:111-113`),
+   ([[`go/crdt/op_log.go:639-641`](../../go/crdt/op_log.go#L639-L641)](../../go/crdt/op_log.go#L639-L641)) plus reserved-agent scan (`:642-650`),
+   surfaced as a panic by the document layer ([[`go/crdt/document.go:111-113`](../../go/crdt/document.go#L111-L113)](../../go/crdt/document.go#L111-L113)),
    and re-verified post-Compact by `RuneDocument.Compact` calling `Check()`
-   (`document.go:211-215`).
+   ([[`document.go:211-215`](../../go/crdt/document.go#L211-L215)](../../go/crdt/document.go#L211-L215)).
 
 ```
 python3 scripts/doc-snippets-check.py          # snippet drift check

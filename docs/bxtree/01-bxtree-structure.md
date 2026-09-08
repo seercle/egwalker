@@ -11,22 +11,22 @@ is the primary key for edits, not identity.
 
 The second idea is the B+tree part with summaries: every node carries a
 `summary` field that folds a user-supplied aggregate over its whole subtree
-(`go/bxtree/types.go:16`, maintained by the `Summarizer` interface,
-`go/bxtree/types.go:43-50`). The tree updates these aggregates automatically on
+([[`go/bxtree/types.go:16`](../../go/bxtree/types.go#L16)](../../go/bxtree/types.go#L16), maintained by the `Summarizer` interface,
+[[`go/bxtree/types.go:43-50`](../../go/bxtree/types.go#L43-L50)](../../go/bxtree/types.go#L43-L50)). The tree updates these aggregates automatically on
 every mutation, so "sum everything before item i" or "find the first position
 where an accumulated sum passes k" is a walk from the root, not a scan.
 
 The concrete types are two generics: `BxTree[T, S]` (payload `T`, summary `S`)
 holding the root, the ends of the leaf chain, and the occupancy bounds
-(`go/bxtree/types.go:54-64`); and `Node[T, S]`, the single node type that plays
-both leaf and branch (`go/bxtree/types.go:12-21`).
+([[`go/bxtree/types.go:54-64`](../../go/bxtree/types.go#L54-L64)](../../go/bxtree/types.go#L54-L64)); and `Node[T, S]`, the single node type that plays
+both leaf and branch ([[`go/bxtree/types.go:12-21`](../../go/bxtree/types.go#L12-L21)](../../go/bxtree/types.go#L12-L21)).
 
 ## The node: one struct, two shapes
 
 There is no separate leaf type. A `Node` is a leaf when `isLeaf` is true and
 its `items` slice holds payload; otherwise it is a branch holding `children`.
 Every node always carries `parent`, `size`, and `summary`
-(`go/bxtree/types.go:12-21`):
+([[`go/bxtree/types.go:12-21`](../../go/bxtree/types.go#L12-L21)](../../go/bxtree/types.go#L12-L21)):
 
 ```go include go/bxtree/types.go L10-L21
 // Node represents a node in the BxTree. It can be either a leaf node containing items
@@ -49,12 +49,12 @@ Note what is *absent*, because it changes how you read everything else:
   search keys against separators. Here there is nothing to compare: descent
   uses positional arithmetic only (see [§ Descent](#finding-item-i-descent-not-key-search)).
 - **No per-item counts.** `size` is stored per node and maintained by the
-  mutation code (`addUpward`, `go/bxtree/bxtree.go:878-890`). For a leaf,
+  mutation code (`addUpward`, [[`go/bxtree/bxtree.go:878-890`](../../go/bxtree/bxtree.go#L878-L890)](../../go/bxtree/bxtree.go#L878-L890)). For a leaf,
   `size` always equals `len(items)`.
 
-Occupancy bounds come as constants (`go/bxtree/types.go:3-8`) and are
+Occupancy bounds come as constants ([[`go/bxtree/types.go:3-8`](../../go/bxtree/types.go#L3-L8)](../../go/bxtree/types.go#L3-L8)) and are
 configurable per tree (`WithLeafNodeSize` / `WithInternalNodeSize`,
-`go/bxtree/bxtree.go:30-48`):
+[[`go/bxtree/bxtree.go:30-48`](../../go/bxtree/bxtree.go#L30-L48)](../../go/bxtree/bxtree.go#L30-L48)):
 
 ```go include go/bxtree/types.go L3-L8
 const (
@@ -93,24 +93,24 @@ The two invariants the diagram *is*:
 
 1. **`size` = `Σ children.size`** (leaves: `size` = `len(items)`) — the root's
    `size` (7) is the tree's total item count; `Size()` just reads
-   `tree.root.size` (`go/bxtree/bxtree.go:234-243`).
+   `tree.root.size` ([[`go/bxtree/bxtree.go:234-243`](../../go/bxtree/bxtree.go#L234-L243)](../../go/bxtree/bxtree.go#L234-L243)).
 2. **`summary` = user aggregate over the subtree** — for the count summarizer
    above, `Add` is `+`, so root `summary` = 2+2+3 = 7, same as `size` here,
    but with a sum-only summarizer they look different: `summary` is whatever
    `S` you fold, `size` is always item count.
 
 The tree-level fields you see in the diagram come from
-`BxTree.root` / `BxTree.first` / `BxTree.last` (`go/bxtree/types.go:55-57`) —
+`BxTree.root` / `BxTree.first` / `BxTree.last` ([[`go/bxtree/types.go:55-57`](../../go/bxtree/types.go#L55-L57)](../../go/bxtree/types.go#L55-L57)) —
 the `first`/`last` pair plus each leaf's `next`/`prev` form the doubly-linked
 leaf chain that `All()` and `Reverse()` iterate in O(n) with no tree walking
-(`go/bxtree/bxtree.go:246-279`).
+([[`go/bxtree/bxtree.go:246-279`](../../go/bxtree/bxtree.go#L246-L279)](../../go/bxtree/bxtree.go#L246-L279)).
 
 ### Worked example: 7 inserts, 3 leaves (simulator output, verbatim)
 
 Tree built by repeated `InsertAt` (append) with leaf `[2,3]` and internal
 `[2,3]`, count summarizer; `size` and `summary` printed per node. Steps 4 and
 6 are the ones where a leaf overflows `leafMaxSize=3` and `split()`
-(`go/bxtree/bxtree.go:517-616`) cuts it in half — the split mechanics themselves
+([[`go/bxtree/bxtree.go:517-616`](../../go/bxtree/bxtree.go#L517-L616)](../../go/bxtree/bxtree.go#L517-L616)) cuts it in half — the split mechanics themselves
 are stepped through page by page in
 `docs/bxtree/02-insert-delete.md`; here we only show the states:
 
@@ -144,13 +144,13 @@ actual package output produced by a tiny driver built against `go/bxtree`.
 Every leaf or branch keeps between a configured `min` and `max` occupants,
 with one exemption: **the root** may fall below its own minimum (a
 freshly-built short tree can even have a below-min root). The envelope is
-validated *once*, at construction (`go/bxtree/bxtree.go:98-118`: leaf
+validated *once*, at construction ([[`go/bxtree/bxtree.go:98-118`](../../go/bxtree/bxtree.go#L98-L118)](../../go/bxtree/bxtree.go#L98-L118): leaf
 `min >= 1`, both kinds `max >= min`, and `max >= 2*min-1`, which is the
 inequality `split()` and merge/rebalance rely on to always produce two
-in-bounds halves; `go/bxtree/bxtree.go:91-97` derives that arithmetic).
-Bad configs return `*InvalidNodeSizeError` (`go/bxtree/errors.go:14-30`), not
+in-bounds halves; [[`go/bxtree/bxtree.go:91-97`](../../go/bxtree/bxtree.go#L91-L97)](../../go/bxtree/bxtree.go#L91-L97) derives that arithmetic).
+Bad configs return `*InvalidNodeSizeError` ([[`go/bxtree/errors.go:14-30`](../../go/bxtree/errors.go#L14-L30)](../../go/bxtree/errors.go#L14-L30)), not
 a misbehaving tree. One asymmetry to note: internal nodes enforce
-`min >= 2` (`go/bxtree/bxtree.go:108-110`), while a leaf's minimum is the
+`min >= 2` ([[`go/bxtree/bxtree.go:108-110`](../../go/bxtree/bxtree.go#L108-L110)](../../go/bxtree/bxtree.go#L108-L110)), while a leaf's minimum is the
 leaf constant (`min >= 1` above):
 
 ```go include go/bxtree/bxtree.go L24-L35
@@ -173,18 +173,18 @@ overflowed `max+1` node into halves each ≥ `min` (bxtree.go:544 does
 `mid = len(items)/2`, and `max+1 >= 2*min` guarantees both halves reach the
 minimum), and merge never produces an overfull node — a merge is only chosen
 for a pair whose combined size is `<= 2*min-1 <= max` (merge/rebalance
-decision at `bxtree.go:733`, comment `:729-732`).
+decision at [[`bxtree.go:733`](../../go/bxtree/bxtree.go#L733)](../../go/bxtree/bxtree.go#L733), comment `:729-732`).
 
 There is **no sentinel node** anywhere in this package — emptiness is
-`tree.root == nil` (`insert`'s first-leaf branch, `go/bxtree/bxtree.go:448-468`
+`tree.root == nil` (`insert`'s first-leaf branch, [[`go/bxtree/bxtree.go:448-468`](../../go/bxtree/bxtree.go#L448-L468)](../../go/bxtree/bxtree.go#L448-L468)
 creates the root leaf; the `delete` loop tears it down when `root.size == 0`,
-`go/bxtree/bxtree.go:666-669`). If you were expecting a `Check()`-style
+[[`go/bxtree/bxtree.go:666-669`](../../go/bxtree/bxtree.go#L666-L669)](../../go/bxtree/bxtree.go#L666-L669)). If you were expecting a `Check()`-style
 function, see [§ Invariants](#invariants) below: the package's invariant
 checker lives as test helpers, not as production code.
 
 ## Finding item *i*: descent, not key search
 
-`GetAt(i)` / `GetAtNode(i)` (`go/bxtree/bxtree.go:333-351`) both route through
+`GetAt(i)` / `GetAtNode(i)` ([[`go/bxtree/bxtree.go:333-351`](../../go/bxtree/bxtree.go#L333-L351)](../../go/bxtree/bxtree.go#L333-L351)) both route through
 `getAt`, which is the whole positional story in one function. Position is
 resolved by *counting down* the index through child sizes:
 
@@ -224,16 +224,16 @@ func (tree *BxTree[T, S]) getAt(index int) (*Node[T, S], int, error) {
 
 Three decisions worth naming:
 
-- **Two fast paths first** (`bxtree.go:360-365`): asking for an index inside
+- **Two fast paths first** ([[`bxtree.go:360-365`](../../go/bxtree/bxtree.go#L360-L365)](../../go/bxtree/bxtree.go#L360-L365)): asking for an index inside
   `first` or inside `last` skips the tree entirely. Text edits cluster near
   the beginning and end of documents (typing!), so these cover a large share
   of real traffic in O(1).
-- **Linear scan within a node, this is a documented trade** (`bxtree.go:370-377`):
+- **Linear scan within a node, this is a documented trade** ([[`bxtree.go:370-377`](../../go/bxtree/bxtree.go#L370-L377)](../../go/bxtree/bxtree.go#L370-L377)):
   `getAt` walks `children` left-to-right, subtracting sizes. With
   `DefaultInternalMaxSize = 32` that is at most 32 comparisons per level —
   cheap and branch-predictable. There is no binary search here; the loop is
   a plain `for range` over the child slice.
-- **`found` guards the invariant**, not the user (`bxtree.go:378-380`): if the
+- **`found` guards the invariant**, not the user ([[`bxtree.go:378-380`](../../go/bxtree/bxtree.go#L378-L380)](../../go/bxtree/bxtree.go#L378-L380)): if the
   sizes ever failed to cover the index, the panic fires — malformed trees
   surface as a crash *here*, not as silent wrong-data.
 
@@ -245,9 +245,9 @@ descends from the root:
 
 | Step | Node | Action |
 |---|---|---|
-| 1 | root `children=[3 1] [4 1] [5 9 2]` | child 0 has `size=2`, `2 < 2` is false → `index -= 2` → 0 (`bxtree.go:376-377`) |
-| 2 | child 1 `[4 1]` | `0 < 2` → descend, first match (`bxtree.go:371-373`) |
-| 3 | leaf `[4 1]` | return `pos = 0`, i.e. item `4` (`bxtree.go:381-382`) |
+| 1 | root `children=[3 1] [4 1] [5 9 2]` | child 0 has `size=2`, `2 < 2` is false → `index -= 2` → 0 ([[`bxtree.go:376-377`](../../go/bxtree/bxtree.go#L376-L377)](../../go/bxtree/bxtree.go#L376-L377)) |
+| 2 | child 1 `[4 1]` | `0 < 2` → descend, first match ([[`bxtree.go:371-373`](../../go/bxtree/bxtree.go#L371-L373)](../../go/bxtree/bxtree.go#L371-L373)) |
+| 3 | leaf `[4 1]` | return `pos = 0`, i.e. item `4` ([[`bxtree.go:381-382`](../../go/bxtree/bxtree.go#L381-L382)](../../go/bxtree/bxtree.go#L381-L382)) |
 
 The real API agrees:
 
@@ -260,15 +260,15 @@ GetAtNode(2) -> leaf [4 1] pos=0
 ```
 
 And `getAt(5)` takes the fast path straight to `last=[5 9 2]` at `pos = 5 - 4`
-(`bxtree.go:363-365`); both traces come from the simulator drive where a copy
+([[`bxtree.go:363-365`](../../go/bxtree/bxtree.go#L363-L365)](../../go/bxtree/bxtree.go#L363-L365)); both traces come from the simulator drive where a copy
 of the loop was run alongside the real calls — `GetAtNode(0..6)` all agree with
 the trace.
 
-`FindPath` (`go/bxtree/bxtree.go:1007-1063`) is the *summary-driven* cousin of
+`FindPath` ([[`go/bxtree/bxtree.go:1007-1063`](../../go/bxtree/bxtree.go#L1007-L1063)](../../go/bxtree/bxtree.go#L1007-L1063)) is the *summary-driven* cousin of
 the same descent: instead of counting an index down, it walks children while a
 caller predicate over `(accumulated summary, current summary)` is false
-(`bxtree.go:1026-1043`), then scans the leaf with `FromItem` per item
-(`bxtree.go:1050-1061`). It is how "jump to the first position where the
+([[`bxtree.go:1026-1043`](../../go/bxtree/bxtree.go#L1026-L1043)](../../go/bxtree/bxtree.go#L1026-L1043)), then scans the leaf with `FromItem` per item
+([[`bxtree.go:1050-1061`](../../go/bxtree/bxtree.go#L1050-L1061)](../../go/bxtree/bxtree.go#L1050-L1061)). It is how "jump to the first position where the
 aggregate up to it crosses k" costs a root-to-leaf walk:
 
 ```go include go/bxtree/bxtree.go L1026-L1043
@@ -295,7 +295,7 @@ aggregate up to it crosses k" costs a root-to-leaf walk:
 ## Summaries: how aggregates live in the tree
 
 A leaf's own summary is a fold of `FromItem` over its items
-(`go/bxtree/bxtree.go:50-61`):
+([[`go/bxtree/bxtree.go:50-61`](../../go/bxtree/bxtree.go#L50-L61)](../../go/bxtree/bxtree.go#L50-L61)):
 
 ```go include go/bxtree/bxtree.go L50-L61
 func (tree *BxTree[T, S]) summarizeItems(items []T) S {
@@ -314,7 +314,7 @@ func (tree *BxTree[T, S]) summarizeItems(items []T) S {
 
 From there, everything flows upward by adding child summaries. When an internal
 node is built (e.g. during `NewFromSlice`'s bottom-up construction,
-`go/bxtree/bxtree.go:188-216`) the fold is per child:
+[[`go/bxtree/bxtree.go:188-216`](../../go/bxtree/bxtree.go#L188-L216)](../../go/bxtree/bxtree.go#L188-L216)) the fold is per child:
 
 ```go include go/bxtree/bxtree.go L202-L214
 			for j, child := range nd.children {
@@ -334,9 +334,9 @@ node is built (e.g. during `NewFromSlice`'s bottom-up construction,
 
 The trick that makes the summary *cheap* is that mutations advance it
 **differentially**: `insert` computes the delta summary of just the new items
-(`deltaSummary`, `bxtree.go:478-481` and `:502-505`), and `addUpward` pushes
+(`deltaSummary`, [[`bxtree.go:478-481`](../../go/bxtree/bxtree.go#L478-L481)](../../go/bxtree/bxtree.go#L478-L481) and `:502-505`), and `addUpward` pushes
 that one delta along the whole ancestor chain — no re-fold from scratch
-(`go/bxtree/bxtree.go:878-890`):
+([[`go/bxtree/bxtree.go:878-890`](../../go/bxtree/bxtree.go#L878-L890)](../../go/bxtree/bxtree.go#L878-L890)):
 
 ```go include go/bxtree/bxtree.go L878-L890
 func (n *Node[T, S]) addUpward(deltaSize int, deltaSummary S, tree *BxTree[T, S]) {
@@ -355,14 +355,14 @@ func (n *Node[T, S]) addUpward(deltaSize int, deltaSummary S, tree *BxTree[T, S]
 ```
 
 The same `addUpward(-n, -delta)` pattern subtracts on deletion
-(`bxtree.go:660`, using `Sub`, `go/bxtree/types.go:48-49`), and node-splitting
+([[`bxtree.go:660`](../../go/bxtree/bxtree.go#L660)](../../go/bxtree/bxtree.go#L660), using `Sub`, [[`go/bxtree/types.go:48-49`](../../go/bxtree/types.go#L48-L49)](../../go/bxtree/types.go#L48-L49)), and node-splitting
 keeps summaries correct by recomputing the shrinking node with `Sub` while the
-new half gets a fresh fold (`bxtree.go:548-552`). Delete/rebalance details
+new half gets a fresh fold ([[`bxtree.go:548-552`](../../go/bxtree/bxtree.go#L548-L552)](../../go/bxtree/bxtree.go#L548-L552)). Delete/rebalance details
 belong to the next page (`docs/bxtree/02-insert-delete.md`), which shows each
 of those maintenance sites in step diagrams.
 
 Summarizer state at a glance — one interface, three obligations
-(`go/bxtree/types.go:39-50`):
+([[`go/bxtree/types.go:39-50`](../../go/bxtree/types.go#L39-L50)](../../go/bxtree/types.go#L39-L50)):
 
 ```go include go/bxtree/types.go L39-L50
 // Summarizer defines the interface for maintaining tree-wide summaries.
@@ -380,16 +380,16 @@ type Summarizer[T any, S any] interface {
 ```
 
 A no-summarizer tree is fully usable — `New` defaults `summarizer` to nil
-(`go/bxtree/types.go:63`); `FuzzBxTree` exercises exactly that configuration
-(`go/bxtree/fuzz_test.go:36-40`). `size` is always maintained regardless;
+([[`go/bxtree/types.go:63`](../../go/bxtree/types.go#L63)](../../go/bxtree/types.go#L63)); `FuzzBxTree` exercises exactly that configuration
+([[`go/bxtree/fuzz_test.go:36-40`](../../go/bxtree/fuzz_test.go#L36-L40)](../../go/bxtree/fuzz_test.go#L36-L40)). `size` is always maintained regardless;
 `summary` is simply not maintained (`addUpward` skips it behind
-`tree.summarizer != nil`, `bxtree.go:885-887`), and summary-driven callers
-like `FindPath` then panic by design (`bxtree.go:1018-1020`).
+`tree.summarizer != nil`, [[`bxtree.go:885-887`](../../go/bxtree/bxtree.go#L885-L887)](../../go/bxtree/bxtree.go#L885-L887)), and summary-driven callers
+like `FindPath` then panic by design ([[`bxtree.go:1018-1020`](../../go/bxtree/bxtree.go#L1018-L1020)](../../go/bxtree/bxtree.go#L1018-L1020)).
 
 Worked example with an aggregate that *differs from size* — the simulator built
 a 10-item tree with a **sum** summarizer and `leaf [2,4]` / `internal [2,3]`;
-`NewFromSlice` (`go/bxtree/bxtree.go:126-232`) distributes 10 items across
-leaves of sizes 4/3/3 via `splitSizes` (`bxtree.go:141-153`) and folds
+`NewFromSlice` ([[`go/bxtree/bxtree.go:126-232`](../../go/bxtree/bxtree.go#L126-L232)](../../go/bxtree/bxtree.go#L126-L232)) distributes 10 items across
+leaves of sizes 4/3/3 via `splitSizes` ([[`bxtree.go:141-153`](../../go/bxtree/bxtree.go#L141-L153)](../../go/bxtree/bxtree.go#L141-L153)) and folds
 bottom-up:
 
 ```
@@ -402,55 +402,55 @@ INTERNAL children=3 size=10 summary=550
 Same invariant, different fold: `550 = 100 + 180 + 270`, and `size = 4 + 3 + 3
 = 10` is kept separately from `summary`. Range queries get prefix aggregates
 directly from the summaries: `Node.SummaryBefore` sums every left-sibling's
-summary up the spine (`go/bxtree/bxtree.go:939-963`), and `Node.Index()`
-does the same arithmetic on `size` (`go/bxtree/bxtree.go:981-998`).
+summary up the spine ([[`go/bxtree/bxtree.go:939-963`](../../go/bxtree/bxtree.go#L939-L963)](../../go/bxtree/bxtree.go#L939-L963)), and `Node.Index()`
+does the same arithmetic on `size` ([[`go/bxtree/bxtree.go:981-998`](../../go/bxtree/bxtree.go#L981-L998)](../../go/bxtree/bxtree.go#L981-L998)).
 
 ## Invariants
 
 This package has **no `Check()` function**; the equivalent is the test-only
-`verifyNode`/`verifyTree` pair (`go/bxtree/helpers_test.go:58-189`), which
+`verifyNode`/`verifyTree` pair ([[`go/bxtree/helpers_test.go:58-189`](../../go/bxtree/helpers_test.go#L58-L189)](../../go/bxtree/helpers_test.go#L58-L189)), which
 every structural test in the package asserts after each mutation. Each listed
 invariant cites its checker and where the mutation code maintains it:
 
 1. **Subtree `size` is exact** — leaf: `size == len(items)`; branch:
    `size == Σ children.size`. Maintained by `addUpward`
-   (`go/bxtree/bxtree.go:883-889`), by split's re-fold
-   (`bxtree.go:574-603`), and by redistribute's `recompute` closure
-   (`bxtree.go:813-830`). Checked at `helpers_test.go:160-162`.
+   ([[`go/bxtree/bxtree.go:883-889`](../../go/bxtree/bxtree.go#L883-L889)](../../go/bxtree/bxtree.go#L883-L889)), by split's re-fold
+   ([[`bxtree.go:574-603`](../../go/bxtree/bxtree.go#L574-L603)](../../go/bxtree/bxtree.go#L574-L603)), and by redistribute's `recompute` closure
+   ([[`bxtree.go:813-830`](../../go/bxtree/bxtree.go#L813-L830)](../../go/bxtree/bxtree.go#L813-L830)). Checked at [[`helpers_test.go:160-162`](../../go/bxtree/helpers_test.go#L160-L162)](../../go/bxtree/helpers_test.go#L160-L162).
 2. **Subtree `summary` folds exactly as the node would if rebuilt** —
    leaf `summary == FromItem-fold of items`, branch `== Add-fold of child
-   summaries`. Maintained in `addUpward` (`bxtree.go:886-887`) and by
+   summaries`. Maintained in `addUpward` ([[`bxtree.go:886-887`](../../go/bxtree/bxtree.go#L886-L887)](../../go/bxtree/bxtree.go#L886-L887)) and by
    explicit recomputation after structural changes (`UpdateSummary`,
-   `bxtree.go:910-927`). Checked at `helpers_test.go:164-166`.
+   [[`bxtree.go:910-927`](../../go/bxtree/bxtree.go#L910-L927)](../../go/bxtree/bxtree.go#L910-L927)). Checked at [[`helpers_test.go:164-166`](../../go/bxtree/helpers_test.go#L164-L166)](../../go/bxtree/helpers_test.go#L164-L166).
 3. **Occupancy within `[min, max]` for every non-root node** — the root may
    hold fewer (a 1-item root is legal, even 0 before the first insert).
    Bounds *configuration* is validated against `max >= 2*min-1` upfront
-   (`bxtree.go:99-116`), and every non-root node is re-checked as a helper
-   assertion at `helpers_test.go:168-186` (mini-B+tree version at
-   `helpers_test.go:193-224`).
+   ([[`bxtree.go:99-116`](../../go/bxtree/bxtree.go#L99-L116)](../../go/bxtree/bxtree.go#L99-L116)), and every non-root node is re-checked as a helper
+   assertion at [[`helpers_test.go:168-186`](../../go/bxtree/helpers_test.go#L168-L186)](../../go/bxtree/helpers_test.go#L168-L186) (mini-B+tree version at
+   [[`helpers_test.go:193-224`](../../go/bxtree/helpers_test.go#L193-L224)](../../go/bxtree/helpers_test.go#L193-L224)).
 4. **The leaf chain is a linear, complete list** — `first → next … last`
    visits every leaf exactly once and its items sum to `Size()`;
    `next`/`prev`/`last` updates happen inside `split` and `merge` only
-   (`bxtree.go:558-566`, `:853-858`). Checked at `helpers_test.go:99-122`.
+   ([[`bxtree.go:558-566`](../../go/bxtree/bxtree.go#L558-L566)](../../go/bxtree/bxtree.go#L558-L566), `:853-858`). Checked at [[`helpers_test.go:99-122`](../../go/bxtree/helpers_test.go#L99-L122)](../../go/bxtree/helpers_test.go#L99-L122).
 5. **Stored content equals the expected content**, order preserved — the
-   ForEach/`GetAt` walkthrough at `helpers_test.go:66-92` pins this.
+   ForEach/`GetAt` walkthrough at [[`helpers_test.go:66-92`](../../go/bxtree/helpers_test.go#L66-L92)](../../go/bxtree/helpers_test.go#L66-L92) pins this.
 6. **Parent back-pointers agree with the actual child lists** —
-   `checkNodeBounds` (`helpers_test.go:216-221`) walks parent/child edges
+   `checkNodeBounds` ([[`helpers_test.go:216-221`](../../go/bxtree/helpers_test.go#L216-L221)](../../go/bxtree/helpers_test.go#L216-L221)) walks parent/child edges
    of the built tree; `rebalance`'s `redistribute*` reassigns
-   `child.parent` (`bxtree.go:809-811`).
+   `child.parent` ([[`bxtree.go:809-811`](../../go/bxtree/bxtree.go#L809-L811)](../../go/bxtree/bxtree.go#L809-L811)).
 7. **`size` and `summary` include any delta as soon as a mutation returns** —
    there is no lazy rebuild anywhere in the package: each
    `InsertAt` / `DeleteAt` call reconciles summaries *before touching
    the array*, e.g. the deletion-path call ordering in `delete`
-   (`bxtree.go:653-662`) computes the delta summary first (using `Sub`,
-   `bxtree.go:654-659`), then `addUpward`, then edits `items`. `Size()`
-   (`bxtree.go:234-243`) staying equal to `root.size` is thus an assumption
+   ([[`bxtree.go:653-662`](../../go/bxtree/bxtree.go#L653-L662)](../../go/bxtree/bxtree.go#L653-L662)) computes the delta summary first (using `Sub`,
+   [[`bxtree.go:654-659`](../../go/bxtree/bxtree.go#L654-L659)](../../go/bxtree/bxtree.go#L654-L659)), then `addUpward`, then edits `items`. `Size()`
+   ([[`bxtree.go:234-243`](../../go/bxtree/bxtree.go#L234-L243)](../../go/bxtree/bxtree.go#L234-L243)) staying equal to `root.size` is thus an assumption
    every caller may rely on.
 
 Verification story: the targeted tests in `go/bxtree/bxtree_test.go` (plus
 `new_from_slice_test.go`, `rebalance_occupancy_test.go`, `summary_ops_test.go`)
 assert `verifyTree` after every operation; `FuzzBxTree`
-(`go/bxtree/fuzz_test.go:10-40`) generates thousands of insert/delete
+([[`go/bxtree/fuzz_test.go:10-40`](../../go/bxtree/fuzz_test.go#L10-L40)](../../go/bxtree/fuzz_test.go#L10-L40)) generates thousands of insert/delete
 interleavings over random byte streams and runs the same verification after
 each step, with and without a summarizer. Plain `go test -C go ./bxtree` runs
 the seed corpus; `go test -C go ./bxtree -fuzz=FuzzBxTree -fuzztime=30s`

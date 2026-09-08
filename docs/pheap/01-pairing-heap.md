@@ -2,16 +2,16 @@
 
 `pheap` is a self-adjusting priority queue: a single (!) heap-ordered tree whose
 root holds the highest-priority element, plus a list of rooted sub-trees hanging
-off that root (`go/pheap/pheap.go:1-6`). Unlike a binary heap it stores no array and
+off that root ([[`go/pheap/pheap.go:1-6`](../../go/pheap/pheap.go#L1-L6)](../../go/pheap/pheap.go#L1-L6)). Unlike a binary heap it stores no array and
 no explicit balance metadata — the only "rebalancing" operation is **pairing**:
 when the root is removed, its children are melded together pairwise in a
-two-pass tournament (`go/pheap/pheap.go:40-86`). That laziness is why `Push`,
+two-pass tournament ([[`go/pheap/pheap.go:40-86`](../../go/pheap/pheap.go#L40-L86)](../../go/pheap/pheap.go#L40-L86)). That laziness is why `Push`,
 melding, and peeking are O(1) pointer surgery, and why delete-min is the only
 operation that ever touches the forest.
 
-The heap is generic (`PairingHeap[T any]`, `go/pheap/types.go:12-16`) and
+The heap is generic (`PairingHeap[T any]`, [[`go/pheap/types.go:12-16`](../../go/pheap/types.go#L12-L16)](../../go/pheap/types.go#L12-L16)) and
 priority is whatever your `less` function says: `a < b` gives a max-heap
-(the default, `go/pheap/pheap.go:92`), `a > b` gives a min-heap. In this
+(the default, [[`go/pheap/pheap.go:92`](../../go/pheap/pheap.go#L92)](../../go/pheap/pheap.go#L92)), `a > b` gives a min-heap. In this
 document we use a **max-heap of numbers**, matching the default.
 
 ## Layout: one tree, three pointers
@@ -363,7 +363,7 @@ suite — run everything below with `go test -C go ./pheap`.
 
 These properties are exercised by `TestPairingHeap`, `TestMinHeap`,
 `TestNilHeap`, `TestNewAny`, `TestPeekEmpty`, `TestDuplicateValues`, and
-`TestSingleElement` in `go/pheap/pheap_test.go:23-157`, plus random op-sequence
-checking in `FuzzHeap` (`go/pheap/fuzz_test.go:19`) — both run as part of
+`TestSingleElement` in [[`go/pheap/pheap_test.go:23-157`](../../go/pheap/pheap_test.go#L23-L157)](../../go/pheap/pheap_test.go#L23-L157), plus random op-sequence
+checking in `FuzzHeap` ([[`go/pheap/fuzz_test.go:19`](../../go/pheap/fuzz_test.go#L19)](../../go/pheap/fuzz_test.go#L19)) — both run as part of
 `go test -C go ./pheap`, and `FuzzHeap` under `-fuzz` explores arbitrary
 push/pop interleavings for invariant breaks.

@@ -4,17 +4,17 @@ Plain scope statement first, so you read the rest of this page with the right
 expectations: **`go/bxtree` has no per-item filtered traversal API.** No function in the package takes a
 predicate over items and walks or returns the matching subset (grep the file:
 the only `predicate` parameter anywhere is `FindPath`'s
-`go/bxtree/bxtree.go:1007`). What the package *does* provide is a
+[[`go/bxtree/bxtree.go:1007`](../../go/bxtree/bxtree.go#L1007)](../../go/bxtree/bxtree.go#L1007)). What the package *does* provide is a
 predicate-based traversal over **summaries**, plus the summary read-side
 helpers a caller can use to build a filtered walk by hand:
 
 | API | Answers | Code |
 |---|---|---|
-| `FindPath(predicate)` | "the first item whose accumulated summary satisfies a `(acc, cur)` predicate" — O(height + items in one leaf) | `go/bxtree/bxtree.go:1007-1063` |
-| `Node.SummaryBefore(tree)` | total summary of every item before this leaf | `go/bxtree/bxtree.go:938-963` |
-| `Node.Index()` | absolute index of the leaf's first item | `go/bxtree/bxtree.go:980-998` |
-| `Node.UpdateSummary` / `Node.UpdateSummaryUpward` | re-accumulate this node's summary (and its ancestors') from scratch | `go/bxtree/bxtree.go:909-936` |
-| `All()` / `Reverse()` | full iteration, the substrate for a caller-written filter | `go/bxtree/bxtree.go:244-279` |
+| `FindPath(predicate)` | "the first item whose accumulated summary satisfies a `(acc, cur)` predicate" — O(height + items in one leaf) | [[`go/bxtree/bxtree.go:1007-1063`](../../go/bxtree/bxtree.go#L1007-L1063)](../../go/bxtree/bxtree.go#L1007-L1063) |
+| `Node.SummaryBefore(tree)` | total summary of every item before this leaf | [[`go/bxtree/bxtree.go:938-963`](../../go/bxtree/bxtree.go#L938-L963)](../../go/bxtree/bxtree.go#L938-L963) |
+| `Node.Index()` | absolute index of the leaf's first item | [[`go/bxtree/bxtree.go:980-998`](../../go/bxtree/bxtree.go#L980-L998)](../../go/bxtree/bxtree.go#L980-L998) |
+| `Node.UpdateSummary` / `Node.UpdateSummaryUpward` | re-accumulate this node's summary (and its ancestors') from scratch | [[`go/bxtree/bxtree.go:909-936`](../../go/bxtree/bxtree.go#L909-L936)](../../go/bxtree/bxtree.go#L909-L936) |
+| `All()` / `Reverse()` | full iteration, the substrate for a caller-written filter | [[`go/bxtree/bxtree.go:244-279`](../../go/bxtree/bxtree.go#L244-L279)](../../go/bxtree/bxtree.go#L244-L279) |
 
 If you came here looking for "give me every item passing a predicate":
 that is `All()` plus your own predicate in Go (see
@@ -26,11 +26,11 @@ root-to-leaf walk.
 ## The substrate: what a summary is, in one paragraph
 
 Every node carries a `summary` field folded over its subtree, maintained by
-the `Summarizer[T, S]` interface (`go/bxtree/types.go:39-50`): `FromItem`
+the `Summarizer[T, S]` interface ([[`go/bxtree/types.go:39-50`](../../go/bxtree/types.go#L39-L50)](../../go/bxtree/types.go#L39-L50)): `FromItem`
 turns one item into its summary contribution, `Add` combines summaries, `Sub`
 subtracts (page 02's delete path negates with `Sub(zero, delta)`
-(`go/bxtree/bxtree.go:658`)). A leaf's summary is the `FromItem`-fold of its
-items (`go/bxtree/bxtree.go:50-61`); a branch's is the `Add`-fold of its
+([[`go/bxtree/bxtree.go:658`](../../go/bxtree/bxtree.go#L658)](../../go/bxtree/bxtree.go#L658))). A leaf's summary is the `FromItem`-fold of its
+items ([[`go/bxtree/bxtree.go:50-61`](../../go/bxtree/bxtree.go#L50-L61)](../../go/bxtree/bxtree.go#L50-L61)); a branch's is the `Add`-fold of its
 children's summaries. Mutations maintain all of it differentially — the
 mechanics and every maintenance site are page 02's
 [§ Summary maintenance](02-insert-delete.md#summary-maintenance-after-every-mutation).
@@ -56,25 +56,25 @@ fields now say different things, which is the point.
 ## FindPath: the predicate flow
 
 `FindPath(predicate func(acc S, cur S) bool) (*Node, int, S)`
-(`go/bxtree/bxtree.go:1007`) walks the tree with the predicate over
+([[`go/bxtree/bxtree.go:1007`](../../go/bxtree/bxtree.go#L1007)](../../go/bxtree/bxtree.go#L1007)) walks the tree with the predicate over
 **(accumulated summary before the child, the child's summary)**. Semantics,
 exactly:
 
 - `acc` is the summary of every item visited so far — it *excludes* the
   candidate (`acc = child.summary` for the first child, else
-  `Add(acc, child.summary)`, `bxtree.go:1030-1042`).
+  `Add(acc, child.summary)`, [[`bxtree.go:1030-1042`](../../go/bxtree/bxtree.go#L1030-L1042)](../../go/bxtree/bxtree.go#L1030-L1042)).
 - In a branch: the *first child* whose `predicate(acc, child.summary)` is true
-  is descended into (`bxtree.go:1036-1039`); if no child satisfies, the code
-  panics (`bxtree.go:1044-1046`) — a caller predicate must be consistent with
+  is descended into ([[`bxtree.go:1036-1039`](../../go/bxtree/bxtree.go#L1036-L1039)](../../go/bxtree/bxtree.go#L1036-L1039)); if no child satisfies, the code
+  panics ([[`bxtree.go:1044-1046`](../../go/bxtree/bxtree.go#L1044-L1046)](../../go/bxtree/bxtree.go#L1044-L1046)) — a caller predicate must be consistent with
   the tree's summary 0-anchoring (see below).
 - In a leaf: per *item*, the predicate gets `(acc, FromItem(item))`
-  (`bxtree.go:1050-1053`). The first satisfying item wins: return
+  ([[`bxtree.go:1050-1053`](../../go/bxtree/bxtree.go#L1050-L1053)](../../go/bxtree/bxtree.go#L1050-L1053)). The first satisfying item wins: return
   `(leaf, pos, acc)` where `acc` is the summary accumulated *just before* that
   item.
 - If nothing matches in the leaf, `FindPath` returns `(nil, -1, acc)` — the
-  accumulated total (`bxtree.go:1063`).
-- `tree.root == nil` → `(nil, -1, zero)` (`bxtree.go:1014-1016`); missing
-  summarizer or nil predicate → panic (`bxtree.go:1018-1020`).
+  accumulated total ([[`bxtree.go:1063`](../../go/bxtree/bxtree.go#L1063)](../../go/bxtree/bxtree.go#L1063)).
+- `tree.root == nil` → `(nil, -1, zero)` ([[`bxtree.go:1014-1016`](../../go/bxtree/bxtree.go#L1014-L1016)](../../go/bxtree/bxtree.go#L1014-L1016)); missing
+  summarizer or nil predicate → panic ([[`bxtree.go:1018-1020`](../../go/bxtree/bxtree.go#L1018-L1020)](../../go/bxtree/bxtree.go#L1018-L1020)).
 
 ```mermaid
 flowchart TD
@@ -102,7 +102,7 @@ flowchart TD
 ```
 
 The descent loop in source — the state (`acc`, `first`) and the descent
-decision, `go/bxtree/bxtree.go:1022-1047`:
+decision, [[`go/bxtree/bxtree.go:1022-1047`](../../go/bxtree/bxtree.go#L1022-L1047)](../../go/bxtree/bxtree.go#L1022-L1047):
 
 ```go include go/bxtree/bxtree.go L1022-L1047
 	var acc S
@@ -136,7 +136,7 @@ decision, `go/bxtree/bxtree.go:1022-1047`:
 Why it matters: the two phases (branch loop / leaf scan) share one
 `acc`/`first` state, so the first item that satisfies the predicate is found
 in one root-to-leaf walk plus one in-leaf scan — O(depth + leaf items), not
-O(n). The `!found` panic (`bxtree.go:1045-1046`) is an *assertion on the
+O(n). The `!found` panic ([[`bxtree.go:1045-1046`](../../go/bxtree/bxtree.go#L1045-L1046)](../../go/bxtree/bxtree.go#L1045-L1046)) is an *assertion on the
 predicate*, not on the tree: if the predicate returns false for every child of
 some branch node the walk cannot continue and the panic fires. It is the
 caller's responsibility to call `FindPath` on trees whose accumulated
@@ -199,7 +199,7 @@ Both runs line up with the kept/dropped counts:
 
 Both return `(leaf, pos, acc)` with `acc` = summary of exactly the items
 *before* the match — the caller can place the match absolutely with
-`Node.Index()` + `pos` (`go/bxtree/bxtree.go:981-998`).
+`Node.Index()` + `pos` ([[`go/bxtree/bxtree.go:981-998`](../../go/bxtree/bxtree.go#L981-L998)](../../go/bxtree/bxtree.go#L981-L998)).
 
 ### The two drives, as a table
 
@@ -214,7 +214,7 @@ Both return `(leaf, pos, acc)` with `acc` = summary of exactly the items
 
 If the task is *"walk only the matching items"*, do it in the caller —
 `All()` walks the doubly-linked leaf chain in O(n) with no tree walking
-(`go/bxtree/bxtree.go:246-262`, page 01 § layout); a value-predicate filter
+([[`go/bxtree/bxtree.go:246-262`](../../go/bxtree/bxtree.go#L246-L262)](../../go/bxtree/bxtree.go#L246-L262), page 01 § layout); a value-predicate filter
 is then a plain Go 1.26 range loop on top. The package deliberately ships
 *this* and not a filtered API: `FromItem` maps **one item** — the "filter"
 `FindPath` supports is the accumulated aggregate thresholds, not arbitrary
@@ -223,7 +223,7 @@ per-item retention semantics on the item stream.
 ## The read-side helpers, in code
 
 `UpdateSummary` / `UpdateSummaryUpward` rebuild exact summaries from children
-/ items — this is `go/bxtree/bxtree.go:909-927`:
+/ items — this is [[`go/bxtree/bxtree.go:909-927`](../../go/bxtree/bxtree.go#L909-L927)](../../go/bxtree/bxtree.go#L909-L927):
 
 ```go include go/bxtree/bxtree.go L909-L927
 // UpdateSummary recomputes the summary for this node based on its children or items.
@@ -254,9 +254,9 @@ exposes it to external callers who mutate summaries intentionally (e.g.
 external bookkeeping that modifies one item's contribution).
 
 `UpdateSummaryUpward` applies the same recompute walking from a leaf up to
-the root (`go/bxtree/bxtree.go:929-936` — plain `UpdateSummary` at every ancestor).
+the root ([[`go/bxtree/bxtree.go:929-936`](../../go/bxtree/bxtree.go#L929-L936)](../../go/bxtree/bxtree.go#L929-L936) — plain `UpdateSummary` at every ancestor).
 `SummaryBefore` walks the *left-sibling* sums — its definition plus spine walk,
-`go/bxtree/bxtree.go:939-963`:
+[[`go/bxtree/bxtree.go:939-963`](../../go/bxtree/bxtree.go#L939-L963)](../../go/bxtree/bxtree.go#L939-L963):
 
 ```go include go/bxtree/bxtree.go L943-L962
 	var s S
@@ -283,11 +283,11 @@ the root (`go/bxtree/bxtree.go:929-936` — plain `UpdateSummary` at every ances
 
 Why it matters: this is the prefix aggregate for a node — for the count
 summarizer, `SummaryBefore + len(items)` is the item's absolute index past
-the leaf's end (`go/bxtree/bxtree.go:962`). `Node.Index()`
-(`go/bxtree/bxtree.go:980-998`) is the same arithmetic counted on `size`, so
+the leaf's end ([[`go/bxtree/bxtree.go:962`](../../go/bxtree/bxtree.go#L962)](../../go/bxtree/bxtree.go#L962)). `Node.Index()`
+([[`go/bxtree/bxtree.go:980-998`](../../go/bxtree/bxtree.go#L980-L998)](../../go/bxtree/bxtree.go#L980-L998)) is the same arithmetic counted on `size`, so
 for a count-summarizer tree `SummaryBefore(tree) == n.Index()` is *the same
 invariant written twice*, and the package's summary ops test drives exactly
-that (`go/bxtree/summary_ops_test.go:28-38`):
+that ([[`go/bxtree/summary_ops_test.go:28-38`](../../go/bxtree/summary_ops_test.go#L28-L38)](../../go/bxtree/summary_ops_test.go#L28-L38)):
 
 ```go include go/bxtree/summary_ops_test.go L29-L37
 	tree := buildCountTree(300) // multiple leaves and internal levels
@@ -308,7 +308,7 @@ spine walk or `GetAt`/`Index` bookkeeping.
 
 ## FindPath edge cases, as the package tests them
 
-`go/bxtree/summary_ops_test.go:76-105` pins the cases a caller should trust:
+[[`go/bxtree/summary_ops_test.go:76-105`](../../go/bxtree/summary_ops_test.go#L76-L105)](../../go/bxtree/summary_ops_test.go#L76-L105) pins the cases a caller should trust:
 
 ```go include go/bxtree/summary_ops_test.go L82-L89
 	// Predicate that becomes true at 30 (acc before it is 30).
@@ -325,7 +325,7 @@ Why it matters: the sum summarizer holds items `10 20 30 40`; the `> 45`
 predicate crosses exactly at item `30` — i.e. the returned triple
 `(leaf, pos=2, acc=30)` is *the first singular 30* — `acc` is the accumulated
 value **before** the item again. The same test also pins the always-true
-predicate case (`go/bxtree/summary_ops_test.go:91-98` — stops at the first
+predicate case ([[`go/bxtree/summary_ops_test.go:91-98`](../../go/bxtree/summary_ops_test.go#L91-L98)](../../go/bxtree/summary_ops_test.go#L91-L98) — stops at the first
 item with `acc == 0`) and the empty tree (`(nil, -1, zero)`, `101-104`);
 
 ## Invariants and verification
@@ -334,18 +334,18 @@ Summaries in this package maintain two written-twice invariants, both asserted
 by the test helpers (no runtime `Check()` in the package — page 01 and
 page 02's invariants sections):
 
-- `verifyNode` (`go/bxtree/helpers_test.go:164-166` within
-  `go/bxtree/helpers_test.go:125-189`) — summary correctness: a leaf's
+- `verifyNode` ([[`go/bxtree/helpers_test.go:164-166`](../../go/bxtree/helpers_test.go#L164-L166)](../../go/bxtree/helpers_test.go#L164-L166) within
+  [[`go/bxtree/helpers_test.go:125-189`](../../go/bxtree/helpers_test.go#L125-L189)](../../go/bxtree/helpers_test.go#L125-L189)) — summary correctness: a leaf's
   `summary` equals the `FromItem`-fold of its items; a branch's equals the
   `Add`-fold of its children's summaries (the *same fold* a rebuild would
   compute).
-- `verifyNode` + `checkNodeBounds` (`go/bxtree/helpers_test.go:168-186`,
-  `go/bxtree/helpers_test.go:193-224`) — occupancy & parent/child edge
+- `verifyNode` + `checkNodeBounds` ([[`go/bxtree/helpers_test.go:168-186`](../../go/bxtree/helpers_test.go#L168-L186)](../../go/bxtree/helpers_test.go#L168-L186),
+  [[`go/bxtree/helpers_test.go:193-224`](../../go/bxtree/helpers_test.go#L193-L224)](../../go/bxtree/helpers_test.go#L193-L224)) — occupancy & parent/child edge
   shape.
 
-The driver: `FuzzBxTree` (`go/bxtree/fuzz_test.go:10-101`) generates
+The driver: `FuzzBxTree` ([[`go/bxtree/fuzz_test.go:10-101`](../../go/bxtree/fuzz_test.go#L10-L101)](../../go/bxtree/fuzz_test.go#L10-L101)) generates
 insert/delete interleavings with and without a summarizer
-(`go/bxtree/fuzz_test.go:24-42`), mirroring the content, and asserts the whole
+([[`go/bxtree/fuzz_test.go:24-42`](../../go/bxtree/fuzz_test.go#L24-L42)](../../go/bxtree/fuzz_test.go#L24-L42)), mirroring the content, and asserts the whole
 walker after each op; the summary-specific tests add the `FindPath` +
 `UpdateSummary` + `SummaryBefore` coverage pinned above:
 
