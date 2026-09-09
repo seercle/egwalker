@@ -732,13 +732,15 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 		lo, hi = tree.internalMinSize, tree.internalMaxSize
 	}
 
-	// Prefer the richer neighbour (more items/children), so a redistribution
-	// raises the underfull node as much as possible.
+	// Prefer the poorer neighbour (fewest items/children), so an underfull
+	// node merges with (or borrows from) the sibling that needs help most.
+	// This keeps the richer sibling intact and minimises churn. On a tie the
+	// left sibling wins.
 	var nb *Node[T, S]
 	if idx > 0 {
 		nb = parent.children[idx-1]
 	}
-	if idx+1 < len(parent.children) && (nb == nil || count(parent.children[idx+1]) > count(nb)) {
+	if idx+1 < len(parent.children) && (nb == nil || count(parent.children[idx+1]) < count(nb)) {
 		nb = parent.children[idx+1]
 	}
 
@@ -759,7 +761,7 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 		return
 	}
 
-	// Merge the underfull node with its richer neighbour. The left node
+	// Merge the underfull node with its poorer neighbour. The left node
 	// survives (it absorbs the right one), preserving the leaf chain.
 	if idx > 0 && nb.getParentIndex() < idx {
 		tree.merge(nb, n)
@@ -768,7 +770,7 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 	}
 }
 
-// redistributeLeaves moves `move` items from leaf nb (the richer neighbour)
+// redistributeLeaves moves `move` items from leaf nb (the selected neighbour)
 // into leaf n (the underfull node), keeping both siblings within the tree's
 // [min, max] envelope. Items move across the shared boundary only, so global
 // order is preserved. The leaf chain is untouched: both leaves survive.
@@ -801,7 +803,7 @@ func (tree *BxTree[T, S]) redistributeLeaves(n, nb *Node[T, S], move int) {
 }
 
 // redistributeChildren moves `move` child subtrees from internal node nb (the
-// richer neighbour) into internal node n (the underfull node), keeping both
+// selected neighbour) into internal node n (the underfull node), keeping both
 // within the tree's [min, max] envelope. Children cross the shared boundary
 // only, so key order is preserved.
 func (tree *BxTree[T, S]) redistributeChildren(n, nb *Node[T, S], move int) {

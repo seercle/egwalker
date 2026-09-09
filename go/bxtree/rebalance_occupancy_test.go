@@ -175,3 +175,125 @@ func TestRebalanceLeafRedistributes(t *testing.T) {
 	}
 	verifyTree(t, tree, append(leftItems, rightItems...))
 }
+
+// rebalanceSelectorRun builds a three-leaf tree (fat left, thin right) around
+// an underfull middle leaf and calls rebalance on it, then checks the outcome
+// against the expectation that rebalance() partners the middle leaf with its
+// thinner sibling.
+type rebalanceSelectorCase struct {
+	name string
+
+	leftItems, middleItems, rightItems []int
+
+	// Expected post-rebalance leaves. A nil wantMiddle means the middle leaf
+	// was absorbed into an (always left) neighbour and no longer holds items.
+	wantLeft, wantMiddle, wantRight []int
+	wantRootChildren                int
+}
+
+func rebalanceSelectorRun(t *testing.T, tc rebalanceSelectorCase) {
+	t.Helper()
+	tree := mustNew(t,
+		WithSummarizer[int, int](countSummarizer{}),
+		WithLeafNodeSize[int, int](2, 4),
+		WithInternalNodeSize[int, int](2, 4),
+	)
+
+	mkLeaf := func(items []int) *Node[int, int] {
+		n := &Node[int, int]{isLeaf: true, items: items, size: len(items)}
+		n.summary = tree.summarizeItems(items)
+		return n
+	}
+	left, middle, right := mkLeaf(tc.leftItems), mkLeaf(tc.middleItems), mkLeaf(tc.rightItems)
+
+	total := left.size + middle.size + right.size
+	root := &Node[int, int]{isLeaf: false, size: total}
+	root.summary = tree.summarizer.Add(tree.summarizer.Add(left.summary, middle.summary), right.summary)
+	for _, n := range []*Node[int, int]{left, middle, right} {
+		n.parent = root
+	}
+	root.children = []*Node[int, int]{left, middle, right}
+
+	tree.root = root
+	tree.first = left
+	tree.last = right
+	left.next, middle.next = middle, right
+	middle.prev, right.prev = left, middle
+
+	tree.rebalance(middle)
+
+	if len(root.children) != tc.wantRootChildren {
+		t.Fatalf("root has %d children, want %d", len(root.children), tc.wantRootChildren)
+	}
+	if len(left.items) != len(tc.wantLeft) {
+		t.Fatalf("left leaf has %d items (%v), want %v", len(left.items), left.items, tc.wantLeft)
+	}
+	for i, v := range tc.wantLeft {
+		if left.items[i] != v {
+			t.Fatalf("left leaf[%d]=%d, want %d", i, left.items[i], v)
+		}
+	}
+	switch {
+	case tc.wantMiddle == nil:
+		// Middle was absorbed into its left neighbour; only its content
+		// matters, which the chain + verifyTree checks cover.
+	case len(middle.items) != len(tc.wantMiddle):
+		t.Fatalf("middle leaf has %d items (%v), want %v", len(middle.items), middle.items, tc.wantMiddle)
+	default:
+		for i, v := range tc.wantMiddle {
+			if middle.items[i] != v {
+				t.Fatalf("middle leaf[%d]=%d, want %d", i, middle.items[i], v)
+			}
+		}
+	}
+
+	// Leaf-chain integrity: walk first..last and confirm content order.
+	var chain []int
+	for n := tree.first; n != nil; n = n.next {
+		chain = append(chain, n.items...)
+	}
+	want := append(append(append([]int(nil), tc.wantLeft...), tc.wantMiddle...), tc.wantRight...)
+	if len(chain) != len(want) {
+		t.Fatalf("leaf chain has %d items (%v), want %v", len(chain), chain, want)
+	}
+	for i := range want {
+		if chain[i] != want[i] {
+			t.Fatalf("leaf chain[%d]=%d, want %d", i, chain[i], want[i])
+		}
+	}
+	verifyTree(t, tree, want)
+}
+
+// TestRebalancePicksPoorerSibling pins the neighbour-selection policy: when an
+// underfull leaf has a fat left sibling and a thin right sibling, rebalance
+// must partner with the poorer (fewest items) sibling, leaving the fat leaf
+// untouched. With leaf min 2 / max 4, middle (1 item) + right (1 item) cannot
+// reach 2*min, so the pair merges: the left node survives, so middle absorbs
+// its right sibling.
+func TestRebalancePicksPoorerSibling(t *testing.T) {
+	rebalanceSelectorRun(t, rebalanceSelectorCase{
+		name:             "poorer right sibling is the merge partner",
+		leftItems:        rangeInts(0, 4),
+		middleItems:      []int{10},
+		rightItems:       []int{20},
+		wantLeft:         rangeInts(0, 4),
+		wantMiddle:       []int{10, 20},
+		wantRight:        nil,
+		wantRootChildren: 2,
+	})
+}
+
+// TestRebalanceSiblingTiePrefersLeft pins the tie-break: equal-count siblings
+// must resolve to the left one.
+func TestRebalanceSiblingTiePrefersLeft(t *testing.T) {
+	rebalanceSelectorRun(t, rebalanceSelectorCase{
+		name:             "tie resolves to left sibling",
+		leftItems:        rangeInts(0, 2),
+		middleItems:      []int{10},
+		rightItems:       rangeInts(20, 2),
+		wantLeft:         []int{0, 1, 10},
+		wantMiddle:       nil,
+		wantRight:        rangeInts(20, 2),
+		wantRootChildren: 2,
+	})
+}
