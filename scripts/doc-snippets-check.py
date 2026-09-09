@@ -25,6 +25,12 @@ def resolve_cite(path_str: str, md: Path, root: Path, pkg_dirs: dict[str, Path])
         tgt = root / path_str
     return tgt
 
+# Nested link-part drift: a citation link whose label citation is itself still
+# followed by `](` (double-wrapped link), e.g. `` [`x.go:1`](a)](b) ``, with or
+# without the doubled opening bracket left behind ([[`x.go:1`](a)](b)).
+NESTED_LINK_RE = re.compile(
+    r"\[`[^`]+`\]\([^)]+\)\]\(")
+
 def validate_citations(md: Path, text: str, root: Path, linecache: dict[str, tuple[int, str]],
                        pkg_dirs: dict[str, Path]) -> list[str]:
     fails = []
@@ -35,6 +41,10 @@ def validate_citations(md: Path, text: str, root: Path, linecache: dict[str, tup
             in_fence = not in_fence
             continue
         if in_fence:
+            continue
+        if NESTED_LINK_RE.search(line):
+            fails.append(f"{md}: line {no} — citation wrapped in double link syntax "
+                         f"(`[`cite`](url1)](url2)`); not a single markdown link")
             continue
         for m in CITATION_RE.finditer(line):
             path, a, b = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))

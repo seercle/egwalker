@@ -2,12 +2,12 @@
 
 `docs/crdt/01-replica-model.md` treated the op log as a black box that
 "remembers everything". This page opens that box: the raw history lives in
-`go/crdt/op_log.go` (plus the op/id types in [[`go/crdt/types.go:16-67`](../../go/crdt/types.go#L16-L67)](../../go/crdt/types.go#L16-L67)), and
+`go/crdt/op_log.go` (plus the op/id types in [`go/crdt/types.go:16-67`](../../go/crdt/types.go#L16-L67)), and
 everything in it is addressed by one number the page title names:
 
 - **`lv`** (*log version*) — a dense index into *this replica's* log,
   covering every character every held op spans. It is minted from log
-  length (`totalLV`, [[`go/crdt/types.go:50`](../../go/crdt/types.go#L50)](../../go/crdt/types.go#L50)), never from a clock; two
+  length (`totalLV`, [`go/crdt/types.go:50`](../../go/crdt/types.go#L50)), never from a clock; two
   replicas can both mint an `lv4` and it names a *different op* on each
   (the worked example shows it live).
 - **`id` `(agent, seq)`** — the peer that minted the op and its own gap-free
@@ -23,7 +23,7 @@ once.
 
 ## The two coordinate systems: `lv` and `(agent, seq)`
 
-Here are the types the whole mechanism builds on ([[`go/crdt/types.go:16-33`](../../go/crdt/types.go#L16-L33)](../../go/crdt/types.go#L16-L33)):
+Here are the types the whole mechanism builds on ([`go/crdt/types.go:16-33`](../../go/crdt/types.go#L16-L33)):
 
 ```go include go/crdt/types.go L16-L33
 type lv int
@@ -50,34 +50,34 @@ Three things to notice because the rest of the page leans on them:
 
 - `lv` and `id` are deliberately separate address spaces. Seq numbers are
   owned by their agent and gap-free (`pushRemoteOpLV`'s gap panic,
-  [[`go/crdt/op_log.go:406-409`](../../go/crdt/op_log.go#L406-L409)](../../go/crdt/op_log.go#L406-L409)); lvs are owned by this replica's log and
+  [`go/crdt/op_log.go:406-409`](../../go/crdt/op_log.go#L406-L409)); lvs are owned by this replica's log and
   change shape only by append or split, never renumber.
 - `anchorAgent = -1` is reserved for compaction snapshots
-  ([[`go/crdt/types.go:30-33`](../../go/crdt/types.go#L30-L33)](../../go/crdt/types.go#L30-L33)). Parent references resolving into a folded
+  ([`go/crdt/types.go:30-33`](../../go/crdt/types.go#L30-L33)). Parent references resolving into a folded
   history are the subject of `docs/crdt/05-binary-and-compaction.md`; this
   page only threads the interception hook (`coveredByAnchor`,
-  [[`go/crdt/op_log.go:601-607`](../../go/crdt/op_log.go#L601-L607)](../../go/crdt/op_log.go#L601-L607)).
+  [`go/crdt/op_log.go:601-607`](../../go/crdt/op_log.go#L601-L607)).
 - An op's `parents []lv` exist only *after* translation:
   `pushLocalOp` copies the current frontier into them
-  ([[`op_log.go:162-163`](../../go/crdt/op_log.go#L162-L163)](../../go/crdt/op_log.go#L162-L163)), `pushRemoteOpLV` takes destination-resolved lvs
-  ([[`op_log.go:437-440`](../../go/crdt/op_log.go#L437-L440)](../../go/crdt/op_log.go#L437-L440)), and the `(agent, seq)` id space is never a parent
+  ([`op_log.go:162-163`](../../go/crdt/op_log.go#L162-L163)), `pushRemoteOpLV` takes destination-resolved lvs
+  ([`op_log.go:437-440`](../../go/crdt/op_log.go#L437-L440)), and the `(agent, seq)` id space is never a parent
   directly — `resolveParentLV` (§ below) is the only translator.
 
 One caveat that trips readers: `idToLV` maps an id not to its first lv but
 to its *end* lv (`go/crdt/op_log.go:168,446`) — because what parent edges
 and wire deltas reference are end seqs, and `splitRunOp` re-points the two
-halves' entries when a run is cut ([[`go/crdt/op_log.go:311-312`](../../go/crdt/op_log.go#L311-L312)](../../go/crdt/op_log.go#L311-L312)).
+halves' entries when a run is cut ([`go/crdt/op_log.go:311-312`](../../go/crdt/op_log.go#L311-L312)).
 
 ## `first`: why a run's first LV matters
 
 Every op occupies a contiguous slice of `[0, totalLV)` — insert runs and
 delete runs both, so the *first-LV table* leaves no gaps
-([[`go/crdt/op_log.go:96-97`](../../go/crdt/op_log.go#L96-L97)](../../go/crdt/op_log.go#L96-L97)). A run's start is its **first LV**: minted as
-`first := log.totalLV` ([[`go/crdt/op_log.go:164`](../../go/crdt/op_log.go#L164)](../../go/crdt/op_log.go#L164) locally, `:442` remotely)
+([`go/crdt/op_log.go:96-97`](../../go/crdt/op_log.go#L96-L97)). A run's start is its **first LV**: minted as
+`first := log.totalLV` ([`go/crdt/op_log.go:164`](../../go/crdt/op_log.go#L164) locally, `:442` remotely)
 and appended to `opLV`, the parallel table that makes the log addressable
-([[`go/crdt/types.go:49`](../../go/crdt/types.go#L49)](../../go/crdt/types.go#L49)). Why it matters: nearly every per-character
+([`go/crdt/types.go:49`](../../go/crdt/types.go#L49)). Why it matters: nearly every per-character
 resolution goes through it — the binary search for the run owning a
-character lv ([[`go/crdt/op_log.go:94-104`](../../go/crdt/op_log.go#L94-L104)](../../go/crdt/op_log.go#L94-L104)), then seq arithmetic on top:
+character lv ([`go/crdt/op_log.go:94-104`](../../go/crdt/op_log.go#L94-L104)), then seq arithmetic on top:
 
 ```go include go/crdt/op_log.go L88-L104
 // covers reports whether the character lv x lies inside some run op's span.
@@ -115,7 +115,7 @@ func (log *opLog[C]) endLV(i int) lv {
 So the mental picture of the log is not "a list of ops" but a partition:
 `opLV` enumerates the runs in lv order, each `length` sizes its slice, and
 every lv falls into exactly one op — which is why `opIdxAt` may panic on a
-miss instead of guessing ([[`go/crdt/op_log.go:100-102`](../../go/crdt/op_log.go#L100-L102)](../../go/crdt/op_log.go#L100-L102)). The picture for a
+miss instead of guessing ([`go/crdt/op_log.go:100-102`](../../go/crdt/op_log.go#L100-L102)). The picture for a
 4-op log (from the worked example's replica `c`):
 
 ```mermaid
@@ -131,19 +131,19 @@ graph LR
 
 Two numbers live at both ends of each op and get confused: `first`
 (`opLV[i]`) and `endLV(i) = first + length − 1`
-([[`go/crdt/op_log.go:117-120`](../../go/crdt/op_log.go#L117-L120)](../../go/crdt/op_log.go#L117-L120)). The frontier, parents, and `idToLV` all store
+([`go/crdt/op_log.go:117-120`](../../go/crdt/op_log.go#L117-L120)). The frontier, parents, and `idToLV` all store
 **end** lvs; `opLV` and the seq index resolve through **first** lvs. The seq
 index is where `first` outlives everything else — keep reading.
 
 ## The version forest and what "advancing the frontier" means
 
 `parents` make `ops` a forest, not a queue: a walk down the parent edges
-(`isAncestor`, [[`go/crdt/op_log.go:196-225`](../../go/crdt/op_log.go#L196-L225)](../../go/crdt/op_log.go#L196-L225), already shown in
+(`isAncestor`, [`go/crdt/op_log.go:196-225`](../../go/crdt/op_log.go#L196-L225), already shown in
 `docs/crdt/01-replica-model.md` under the version tree) *is* the
 happened-before relation — nothing estimates it from LV order, lvs of
 concurrent ops simply do not compare. The log keeps the tips of that forest
 in `frontier` — the end lvs of the ops nothing descends from — and every
-remote append shifts it with `advanceFrontier` ([[`go/crdt/op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)](../../go/crdt/op_log.go#L234-L248)):
+remote append shifts it with `advanceFrontier` ([`go/crdt/op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)):
 
 ```go include go/crdt/op_log.go L234-L248
 func advanceFrontier(frontier []lv, cur_lv lv, parents []lv) []lv {
@@ -169,8 +169,8 @@ from (they are the op's `parents`), keeps the former tips it does not
 descend from, and stays sorted. A single-entry frontier is a replica that
 has never seen divergence; a multi-tip one is exactly its memory of
 concurrency. On the remote path `advanceFrontier` is the only place that
-set changes ([[`go/crdt/op_log.go:447`](../../go/crdt/op_log.go#L447)](../../go/crdt/op_log.go#L447)); local pushes reset it wholesale to
-the new tail ([[`go/crdt/op_log.go:169`](../../go/crdt/op_log.go#L169)](../../go/crdt/op_log.go#L169), `:152` on the fold path):
+set changes ([`go/crdt/op_log.go:447`](../../go/crdt/op_log.go#L447)); local pushes reset it wholesale to
+the new tail ([`go/crdt/op_log.go:169`](../../go/crdt/op_log.go#L169), `:152` on the fold path):
 
 ```mermaid
 graph LR
@@ -191,7 +191,7 @@ incoming op, which is what made a first-sync merge O(N·k) and put
 (`docs/superpowers/plans/2026-09-05-mergeinto-skip-held-ops.md:26`). It sat
 parked (`TODO.md:29`) until the per-agent index replaced it.
 
-The index as it exists now ([[`go/crdt/op_log.go:12-32`](../../go/crdt/op_log.go#L12-L32)](../../go/crdt/op_log.go#L12-L32)):
+The index as it exists now ([`go/crdt/op_log.go:12-32`](../../go/crdt/op_log.go#L12-L32)):
 
 ```go include go/crdt/op_log.go L12-L32
 type agentSeqIndex struct {
@@ -218,12 +218,12 @@ func (log *opLog[C]) indexAppend(agent int, start int, head lv) {
 ```
 
 Two properties keep it coherent, and both fail as panics rather than silent
-repairs ([[`go/crdt/op_log.go:27-29`](../../go/crdt/op_log.go#L27-L29)](../../go/crdt/op_log.go#L27-L29)): appends arrive seq-ascending per agent
+repairs ([`go/crdt/op_log.go:27-29`](../../go/crdt/op_log.go#L27-L29)): appends arrive seq-ascending per agent
 (local pushes mint `version[agent]+1`; remote ones panic on a gap), and
 `splitRunOp` *sorted-inserts* its suffix entry instead of appending
-([[`go/crdt/op_log.go:314-329`](../../go/crdt/op_log.go#L314-L329)](../../go/crdt/op_log.go#L314-L329)), so ascending order survives splits too.
+([`go/crdt/op_log.go:314-329`](../../go/crdt/op_log.go#L314-L329)), so ascending order survives splits too.
 
-The lookup itself ([[`go/crdt/op_log.go:34-53`](../../go/crdt/op_log.go#L34-L53)](../../go/crdt/op_log.go#L34-L53)):
+The lookup itself ([`go/crdt/op_log.go:34-53`](../../go/crdt/op_log.go#L34-L53)):
 
 ```go include go/crdt/op_log.go L34-L53
 // seqIndexOf binary-searches the per-agent index for the op whose seq range
@@ -267,7 +267,7 @@ flowchart TD
     C1 -->"no"| NO["not found → runIdxForSeq panics (op_log.go:270-274)"]
 ```
 
-`runIdxForSeq` itself is a thin wrapper on that ([[`go/crdt/op_log.go:266-275`](../../go/crdt/op_log.go#L266-L275)](../../go/crdt/op_log.go#L266-L275)),
+`runIdxForSeq` itself is a thin wrapper on that ([`go/crdt/op_log.go:266-275`](../../go/crdt/op_log.go#L266-L275)),
 with `opEndLVForSeq` beside it — the call chain is
 `mergeInto`/`applyDelta` → `resolveParentLV`/`opEndLVForSeq` →
 `runIdxForSeq`:
@@ -302,7 +302,7 @@ func (log *opLog[C]) runIdxForSeq(agent, seq int) int {
 ```
 
 And what the replaced body looked like — kept verbatim as the arbitration
-oracle ([[`go/crdt/seq_index_test.go:7-18`](../../go/crdt/seq_index_test.go#L7-L18)](../../go/crdt/seq_index_test.go#L7-L18)); every `(agent, seq)` the log can
+oracle ([`go/crdt/seq_index_test.go:7-18`](../../go/crdt/seq_index_test.go#L7-L18)); every `(agent, seq)` the log can
 resolve must agree with it:
 
 ```go include go/crdt/seq_index_test.go L7-L18
@@ -322,7 +322,7 @@ func seqIndexLinear[C content[C]](log *opLog[C], agent, seq int) int {
 
 Old path vs new: the backward scan is O(#ops) per lookup (worst case walks
 the entire log; nothing sorted to exploit); the index lookup is a binary
-search over that agent's ops (O(log k), [[`go/crdt/op_log.go:43`](../../go/crdt/op_log.go#L43)](../../go/crdt/op_log.go#L43)) plus an
+search over that agent's ops (O(log k), [`go/crdt/op_log.go:43`](../../go/crdt/op_log.go#L43)) plus an
 `opIdxAt` lookup (O(log n)). Measured same-session at trace scale
 (`TODO.md:33-38`): `MergeAtScale` 1k **24.4 ms → 4.7 ms** (5.2×), 10k
 296.5 → 65.0 ms, 50k 1157.7 → 565.3 ms, index ~5 B per replica-op at
@@ -333,7 +333,7 @@ search over that agent's ops (O(log k), [[`go/crdt/op_log.go:43`](../../go/crdt/
 A parent edge crossing the wire names `(agent, seq)` in *sender* space; the
 same causal character has to become a destination lv, and the two logs may
 disagree about run boundaries (one holds text fused that the other split
-after a re-arrival sync). `resolveParentLV` ([[`go/crdt/op_log.go:343-368`](../../go/crdt/op_log.go#L343-L368)](../../go/crdt/op_log.go#L343-L368))
+after a re-arrival sync). `resolveParentLV` ([`go/crdt/op_log.go:343-368`](../../go/crdt/op_log.go#L343-L368))
 resolves *by character*, not by id — and when the referenced character
 lands inside a run held fused, it **splits that op** rather than
 approximating a boundary:
@@ -367,7 +367,7 @@ func (log *opLog[C]) resolveParentLV(agent, seq int) lv {
 }
 ```
 
-The split machinery itself ([[`go/crdt/op_log.go:277-312`](../../go/crdt/op_log.go#L277-L312)](../../go/crdt/op_log.go#L277-L312)) preserves lv spans
+The split machinery itself ([`go/crdt/op_log.go:277-312`](../../go/crdt/op_log.go#L277-L312)) preserves lv spans
 exactly, which is why no `opLV`/`parents`/`frontier` shift anywhere:
 
 ```go include go/crdt/op_log.go L282-L312
@@ -426,7 +426,7 @@ graph LR
 ```
 
 Nothing was invented: the suffix inherits its parents from the split site
-(`parents = [prefixEnd]`, [[`op_log.go:296`](../../go/crdt/op_log.go#L296)](../../go/crdt/op_log.go#L296)), the id's seq derives from the
+(`parents = [prefixEnd]`, [`op_log.go:296`](../../go/crdt/op_log.go#L296)), the id's seq derives from the
 offset, and totalLV is unchanged — only a *boundary* moved. That is what
 lets replicas with divergent run boundaries still agree on ancestry, which
 the merge drive depends on (`docs/crdt/03-merge-drive.md`). The reverse
@@ -435,20 +435,20 @@ adaptation — an op re-arrives extended — is the *other* split, below.
 ## The two op insertion paths and what never renumbers
 
 An op enters a log at exactly two sites, with different rules:
-`pushLocalOp` ([[`go/crdt/op_log.go:126-173`](../../go/crdt/op_log.go#L126-L173)](../../go/crdt/op_log.go#L126-L173)) may *fold* new characters into
+`pushLocalOp` ([`go/crdt/op_log.go:126-173`](../../go/crdt/op_log.go#L126-L173)) may *fold* new characters into
 the tail run it already owns; `pushRemoteOpLV`
-([[`go/crdt/op_log.go:386-450`](../../go/crdt/op_log.go#L386-L450)](../../go/crdt/op_log.go#L386-L450)) may only *append* — a held op's lv span is
+([`go/crdt/op_log.go:386-450`](../../go/crdt/op_log.go#L386-L450)) may only *append* — a held op's lv span is
 immutable once applied, because ids, frontiers, and parents already
 reference it.
 
 ### Local: `pushLocalOp`, the fold fast path
 
-`id` and `length` are assigned first ([[`op_log.go:126-134`](../../go/crdt/op_log.go#L126-L134)](../../go/crdt/op_log.go#L126-L134)), then the fold
+`id` and `length` are assigned first ([`op_log.go:126-134`](../../go/crdt/op_log.go#L126-L134)), then the fold
 condition decides fold-vs-mint: the tail op must be the sole causal head,
 an insert by the same agent, with the next seq exactly
 `last.seq + last.length`, the pos exactly `last.pos + last.length`, and
-neither content holding Mergeable elements ([[`op_log.go:141-146`](../../go/crdt/op_log.go#L141-L146)](../../go/crdt/op_log.go#L141-L146)). Fold
-extends content in place ([[`op_log.go:148-159`](../../go/crdt/op_log.go#L148-L159)](../../go/crdt/op_log.go#L148-L159)); mint appends a fresh op
+neither content holding Mergeable elements ([`op_log.go:141-146`](../../go/crdt/op_log.go#L141-L146)). Fold
+extends content in place ([`op_log.go:148-159`](../../go/crdt/op_log.go#L148-L159)); mint appends a fresh op
 with the frontier as parents; both end at the same bookkeeping trailer:
 
 ```go include go/crdt/op_log.go L122-L135
@@ -512,15 +512,15 @@ func (log *opLog[C]) pushLocalOp(agent int, o op[C]) lv {
 Why this matters: typing bursts stay O(1) per call and mint *one* op, and
 the fold path deliberately does **not** add a seq index entry — the entry
 recorded when that tail run was first minted already covers the extended
-span ([[`op_log.go:156-158`](../../go/crdt/op_log.go#L156-L158)](../../go/crdt/op_log.go#L156-L158)), so `indexAppend` runs only on the mint path
-([[`op_log.go:171`](../../go/crdt/op_log.go#L171)](../../go/crdt/op_log.go#L171)).
+span ([`op_log.go:156-158`](../../go/crdt/op_log.go#L156-L158)), so `indexAppend` runs only on the mint path
+([`op_log.go:171`](../../go/crdt/op_log.go#L171)).
 
 ### Remote: `pushRemoteOpLV`, held-prefix splitting on re-arrival
 
 The remote path starts from the version vector, not the log tip: ops the
 destination fully holds are dropped before anything is resolved
-([[`go/crdt/op_log.go:396-404`](../../go/crdt/op_log.go#L396-L404)](../../go/crdt/op_log.go#L396-L404); `ingestOp` pre-checks the same thing before
-wasting translation work, [[`go/crdt/op_log.go:518-527`](../../go/crdt/op_log.go#L518-L527)](../../go/crdt/op_log.go#L518-L527)), which is why a
+([`go/crdt/op_log.go:396-404`](../../go/crdt/op_log.go#L396-L404); `ingestOp` pre-checks the same thing before
+wasting translation work, [`go/crdt/op_log.go:518-527`](../../go/crdt/op_log.go#L518-L527)), which is why a
 converged merge-back is a no-op on the log:
 
 ```go include go/crdt/op_log.go L386-L409
@@ -589,10 +589,10 @@ as a NEW op:
 ```
 
 Why this matters: the prefix op stays byte-identical to everything that
-already references it (`pushRemoteOpLV`'s comment, [[`op_log.go:411-417`](../../go/crdt/op_log.go#L411-L417)](../../go/crdt/op_log.go#L411-L417)),
+already references it (`pushRemoteOpLV`'s comment, [`op_log.go:411-417`](../../go/crdt/op_log.go#L411-L417)),
 and the suffix gets `{agent, last_known_seq + 1}` with a parent edge to
 `opEndLVForSeq` of the last known seq — the held side's end lv
-([[`op_log.go:428-436`](../../go/crdt/op_log.go#L428-L436)](../../go/crdt/op_log.go#L428-L436)). "Held prefix + appended suffix" is exactly how two
+([`op_log.go:428-436`](../../go/crdt/op_log.go#L428-L436)). "Held prefix + appended suffix" is exactly how two
 replicas end up holding the same causal content under *different op
 boundaries*, the divergence `resolveParentLV`/`splitRunOp` reconciles at
 the next merge (`docs/crdt/03-merge-drive.md`). Whatever lands — fresh
@@ -613,7 +613,7 @@ suffix or whole op — goes through the same trailer:
 Note the two trailer differences vs the local path: the frontier is
 *advanced* (`:447`), so a divergent merge can leave several tips, and
 `indexAppend` runs on every append (`:449`) because a remote op never
-folds. A sibling entrance, `pushRemoteOp` ([[`go/crdt/op_log.go:378-384`](../../go/crdt/op_log.go#L378-L384)](../../go/crdt/op_log.go#L378-L384)),
+folds. A sibling entrance, `pushRemoteOp` ([`go/crdt/op_log.go:378-384`](../../go/crdt/op_log.go#L378-L384)),
 takes *untranslated* parent ids and resolves them through `idToLV` —
 production merges prefer `pushRemoteOpLV` with lvs resolved up front —
 the full branch surface as code:
@@ -653,13 +653,13 @@ Check() OK
 ```
 
 What to watch: step 3 **folds** (same agent, next seq 2, adjacent pos 2,
-[[`op_log.go:141-146`](../../go/crdt/op_log.go#L141-L146)](../../go/crdt/op_log.go#L141-L146)) so `a` holds one op for "ABC" while `b` still holds
+[`op_log.go:141-146`](../../go/crdt/op_log.go#L141-L146)) so `a` holds one op for "ABC" while `b` still holds
 "AB" — the run-boundary divergence that makes steps 6/7 split runs through
 `resolveParentLV`. Step 8 **folds again** — this time into b's own agent-1
 op (the "XY" id `{1,0}` grows in place on b only). Steps 9 and 10 are the
 **extended re-arrival**: `b`'s op re-sent as "XY" is a strict prefix we
 hold as "X", so each receiving log carves the unknown suffix "Y" into a
-NEW op (`pushRemoteOpLV`'s re-arrival branch, [[`op_log.go:417-436`](../../go/crdt/op_log.go#L417-L436)](../../go/crdt/op_log.go#L417-L436)) instead
+NEW op (`pushRemoteOpLV`'s re-arrival branch, [`op_log.go:417-436`](../../go/crdt/op_log.go#L417-L436)) instead
 of stretching its held copy. The log states below are derived from the
 `push*` bookkeeping semantics; the driver prints `GetString()`/`Version()`
 directly, and every per-op row is inferred from the cited source lines (the
@@ -667,15 +667,15 @@ note at the end of this section explains what pins them):
 
 | # | Wire call | Log state after |
 |---|-----------|-----------------|
-| 1 | `a.Ins(0, "AB")` | a: op `{0,0}` lv 0–1, parents `[]` — only op so far, single tip ([[`op_log.go:164-169`](../../go/crdt/op_log.go#L164-L169)](../../go/crdt/op_log.go#L164-L169)) |
+| 1 | `a.Ins(0, "AB")` | a: op `{0,0}` lv 0–1, parents `[]` — only op so far, single tip ([`op_log.go:164-169`](../../go/crdt/op_log.go#L164-L169)) |
 | 2 | `b.MergeFrom(a)` | b: op `{0,0}` lv 0–1 — same shape as a's copy |
-| 3 | `a.Ins(2, "C")` | a: **fold** into `{0,0}` — content "ABC", lv 0–2, seq 0–2; still one op ([[`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)](../../go/crdt/op_log.go#L148-L155)) |
-| 4 | `b.Ins(2, "X")` | b: op `{1,0}` lv 2, parents `[1]` — tail run agent 0 ≠ local agent 1, so *no fold* ([[`op_log.go:143`](../../go/crdt/op_log.go#L143)](../../go/crdt/op_log.go#L143)) |
+| 3 | `a.Ins(2, "C")` | a: **fold** into `{0,0}` — content "ABC", lv 0–2, seq 0–2; still one op ([`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)) |
+| 4 | `b.Ins(2, "X")` | b: op `{1,0}` lv 2, parents `[1]` — tail run agent 0 ≠ local agent 1, so *no fold* ([`op_log.go:143`](../../go/crdt/op_log.go#L143)) |
 | 5 | `c.MergeFrom(a)` | c: op `{0,0}` lv 0–2 — the whole (still-fused) op |
-| 6 | `c.MergeFrom(b)` | c: **splitRunOp** (X's parent = "AB" end seq 1 lands interior to the fused run) → `{0,2}` "C" at lv 2, `{1,0}` "X" at lv 3, each parents `[1]` ([[`op_log.go:355-368`](../../go/crdt/op_log.go#L355-L368)](../../go/crdt/op_log.go#L355-L368), `:307-311`) — frontier `{2,3}` |
+| 6 | `c.MergeFrom(b)` | c: **splitRunOp** (X's parent = "AB" end seq 1 lands interior to the fused run) → `{0,2}` "C" at lv 2, `{1,0}` "X" at lv 3, each parents `[1]` ([`op_log.go:355-368`](../../go/crdt/op_log.go#L355-L368), `:307-311`) — frontier `{2,3}` |
 | 7 | `a.MergeFrom(b)` | a: its own fused op splits the same way — `{0,2}` "C" at lv 2, `{1,0}` "X" at lv 3 — frontier `{2,3}`, `version {0:2, 1:0}` |
-| 8 | `b.Ins(3, "Y")` | b: **fold** into `{1,0}` — "XY", lv 2–3, seq 0–1 ([[`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)](../../go/crdt/op_log.go#L148-L155)) |
-| 9 | `c.MergeFrom(b)` | c: `{1,0}` "**XY**" re-arrives; held prefix is "X" → suffix `SplitAt(1)` = "Y" appended as **NEW** op `{1,1}` lv 4, parents `[3]` = held X's end LV ([[`op_log.go:424-436`](../../go/crdt/op_log.go#L424-L436)](../../go/crdt/op_log.go#L424-L436)) — frontier `{2,4}` |
+| 8 | `b.Ins(3, "Y")` | b: **fold** into `{1,0}` — "XY", lv 2–3, seq 0–1 ([`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)) |
+| 9 | `c.MergeFrom(b)` | c: `{1,0}` "**XY**" re-arrives; held prefix is "X" → suffix `SplitAt(1)` = "Y" appended as **NEW** op `{1,1}` lv 4, parents `[3]` = held X's end LV ([`op_log.go:424-436`](../../go/crdt/op_log.go#L424-L436)) — frontier `{2,4}` |
 | 10 | `a.MergeFrom(b)` | a: same re-arrival split — `{1,1}` "Y" lv 4, parents `[3]` — frontier `{2,4}`, `version {0:2, 1:1}` |
 | 11 | `b.MergeFrom(a)` | b: `{1,0}`/"AB" fully held → skipped; "C" `{0,2}` finally lands at b's tail lv 4, parents `[1]` — frontier `{3,4}` |
 
@@ -715,13 +715,13 @@ graph LR
 are derived from the `push*` branch code as marked in the table. What the
 driver does prove is convergence from both directions: `Check()`, which
 asserts each replica's branch equals a full log replay
-([[`go/crdt/document.go:96-101`](../../go/crdt/document.go#L96-L101)](../../go/crdt/document.go#L96-L101)), passed for all three replicas after every
+([`go/crdt/document.go:96-101`](../../go/crdt/document.go#L96-L101)), passed for all three replicas after every
 step, and version vectors agree at `map[0:2 1:1]`.)
 
 The lv locality is also visible: "C" is lv2 on `a`/`c` but lv4 on `b` —
 `b` drew the X and Y slots (lv 2–3) first and the C op still arrived only
 after both of them (`pushRemoteOpLV` appends at the log tail,
-[[`op_log.go:442`](../../go/crdt/op_log.go#L442)](../../go/crdt/op_log.go#L442)). Convergence is in *ids and version vectors* (all sides
+[`op_log.go:442`](../../go/crdt/op_log.go#L442)). Convergence is in *ids and version vectors* (all sides
 `map[0:2 1:1]`, printed above), never in lv coordinates — a delta's
 `(agent, seq)` references are re-resolved locally through the seq index and
 `resolveParentLV`, so raw lv coordinates never have to agree.
@@ -757,9 +757,9 @@ Why this matters: the prefix entry is untouched (its `start`/`headLV`
 already describe it — the split did not change the prefix's first lv or
 its id seq), and the suffix gets a fresh entry sorted into place so the
 per-agent ascending order survives; the trade is a bounded memmove per
-split vs renumbering everything after it in `opLV` ([[`op_log.go:316`](../../go/crdt/op_log.go#L316)](../../go/crdt/op_log.go#L316)).
+split vs renumbering everything after it in `opLV` ([`op_log.go:316`](../../go/crdt/op_log.go#L316)).
 Runtime invariant checker for the index — oracle-only, not on any
-production path ([[`go/crdt/op_log.go:55-74`](../../go/crdt/op_log.go#L55-L74)](../../go/crdt/op_log.go#L55-L74)):
+production path ([`go/crdt/op_log.go:55-74`](../../go/crdt/op_log.go#L55-L74)):
 
 ```go include go/crdt/op_log.go L55-L74
 // checkSeqIndex validates every index entry: headLV resolves to the op
@@ -785,15 +785,15 @@ func (log *opLog[C]) checkSeqIndex() {
 ```
 
 And the suite exercises it: `TestSeqIndexMatchesScan`
-([[`go/crdt/seq_index_test.go:25-70`](../../go/crdt/seq_index_test.go#L25-L70)](../../go/crdt/seq_index_test.go#L25-L70)) drives local edits, split-forcing
+([`go/crdt/seq_index_test.go:25-70`](../../go/crdt/seq_index_test.go#L25-L70)) drives local edits, split-forcing
 merges, compaction, and deserialization (the columnar `Unmarshal` rebuild
 reconstructs the index — `docs/crdt/05-binary-and-compaction.md`), and after
 each step every per-op `(agent, seq)` pair is cross-checked against the
-linear oracle `seqIndexLinear` ([[`go/crdt/seq_index_test.go:26-40`](../../go/crdt/seq_index_test.go#L26-L40)](../../go/crdt/seq_index_test.go#L26-L40)), with
+linear oracle `seqIndexLinear` ([`go/crdt/seq_index_test.go:26-40`](../../go/crdt/seq_index_test.go#L26-L40)), with
 `log.checkSeqIndex()` called on failure to regenerate full structural
-detail ([[`seq_index_test.go:34`](../../go/crdt/seq_index_test.go#L34)](../../go/crdt/seq_index_test.go#L34)). The fuzz layer covers the same surface:
-`FuzzMergeConvergence` ([[`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)](../../go/crdt/fuzz_test.go#L182)) and
-`FuzzDeltaConvergence` ([[`go/crdt/fuzz_test.go:428`](../../go/crdt/fuzz_test.go#L428)](../../go/crdt/fuzz_test.go#L428)) exercise
+detail ([`seq_index_test.go:34`](../../go/crdt/seq_index_test.go#L34)). The fuzz layer covers the same surface:
+`FuzzMergeConvergence` ([`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)) and
+`FuzzDeltaConvergence` ([`go/crdt/fuzz_test.go:428`](../../go/crdt/fuzz_test.go#L428)) exercise
 resolve-parent-driven logs continuously — the plan that produced the
 index recorded ~3.0M execs across the three targets with 0 crashers
 (`TODO.md:38-40`).
@@ -802,29 +802,29 @@ index recorded ~3.0M execs across the three targets with 0 crashers
 
 1. **Every character lv belongs to exactly one run op, forever** —
    maintained by the `opLV` partition built by `pushLocalOp`
-   ([[`op_log.go:162-172`](../../go/crdt/op_log.go#L162-L172)](../../go/crdt/op_log.go#L162-L172)) and `pushRemoteOpLV` ([[`op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)](../../go/crdt/op_log.go#L442-L450)); splits
-   preserve spans instead of renumbering (`splitRunOp`, [[`op_log.go:279-281`](../../go/crdt/op_log.go#L279-L281)](../../go/crdt/op_log.go#L279-L281));
-   the panic in `opIdxAt` ([[`op_log.go:100-102`](../../go/crdt/op_log.go#L100-L102)](../../go/crdt/op_log.go#L100-L102)) is the loud failure mode.
+   ([`op_log.go:162-172`](../../go/crdt/op_log.go#L162-L172)) and `pushRemoteOpLV` ([`op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)); splits
+   preserve spans instead of renumbering (`splitRunOp`, [`op_log.go:279-281`](../../go/crdt/op_log.go#L279-L281));
+   the panic in `opIdxAt` ([`op_log.go:100-102`](../../go/crdt/op_log.go#L100-L102)) is the loud failure mode.
 2. **A run's first lv is immutable post-append** — the fold path extends the
-   tail op without touching `opLV` ([[`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)](../../go/crdt/op_log.go#L148-L155)).
+   tail op without touching `opLV` ([`op_log.go:148-155`](../../go/crdt/op_log.go#L148-L155)).
 3. **Local pushes reset the frontier to a single tail; remote merges
-   advance it** — `log.frontier = []lv{end}` ([[`op_log.go:169`](../../go/crdt/op_log.go#L169)](../../go/crdt/op_log.go#L169)) vs
-   `advanceFrontier(...)` ([[`op_log.go:447`](../../go/crdt/op_log.go#L447)](../../go/crdt/op_log.go#L447)); a multi-tip frontier is thus
+   advance it** — `log.frontier = []lv{end}` ([`op_log.go:169`](../../go/crdt/op_log.go#L169)) vs
+   `advanceFrontier(...)` ([`op_log.go:447`](../../go/crdt/op_log.go#L447)); a multi-tip frontier is thus
    only ever the *result* of a divergent history, and `advanceFrontier`
-   ([[`op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)](../../go/crdt/op_log.go#L234-L248)) is the sole mutator on the remote path.
+   ([`op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)) is the sole mutator on the remote path.
 4. **Seq numbers are gap-free per agent** — enforced as the `panic("Seq
-   numbers out of order")` in `pushRemoteOpLV` ([[`op_log.go:406-409`](../../go/crdt/op_log.go#L406-L409)](../../go/crdt/op_log.go#L406-L409)) and
-   `indexAppend`'s non-ascending panic ([[`op_log.go:27-29`](../../go/crdt/op_log.go#L27-L29)](../../go/crdt/op_log.go#L27-L29)).
+   numbers out of order")` in `pushRemoteOpLV` ([`op_log.go:406-409`](../../go/crdt/op_log.go#L406-L409)) and
+   `indexAppend`'s non-ascending panic ([`op_log.go:27-29`](../../go/crdt/op_log.go#L27-L29)).
 5. **The per-agent index agrees with a linear rescan, after every shape of
    mutation** — oracle test `TestSeqIndexMatchesScan`
-   ([[`go/crdt/seq_index_test.go:25-70`](../../go/crdt/seq_index_test.go#L25-L70)](../../go/crdt/seq_index_test.go#L25-L70)) over edits, merges, splits,
+   ([`go/crdt/seq_index_test.go:25-70`](../../go/crdt/seq_index_test.go#L25-L70)) over edits, merges, splits,
    compaction, and `Unmarshal`.
 
 Verification: `go test -C go ./...` is the whole gate — it runs
 `TestSeqIndexMatchesScan`’s oracle comparisons after local edits,
 split-forcing merges, compaction, and deserialization, plus the seed
 corpora of the fuzz targets (`FuzzDocumentOps`,
-[[`go/crdt/fuzz_test.go:136`](../../go/crdt/fuzz_test.go#L136)](../../go/crdt/fuzz_test.go#L136); `FuzzMergeConvergence`, `:182`;
+[`go/crdt/fuzz_test.go:136`](../../go/crdt/fuzz_test.go#L136); `FuzzMergeConvergence`, `:182`;
 `FuzzDeltaConvergence`, `:428`) whose deep exploration (`-fuzz`) pummels
 split/merge interleavings far past the recorded ~3.0M execs:
 

@@ -4,8 +4,8 @@
 of the same document — two replicas — can be edited independently while
 disconnected, and must end up with *identical* content after they exchange
 what they did, regardless of who merges into whom and in which order
-([[`go/crdt/document.go:14-26`](../../go/crdt/document.go#L14-L26)](../../go/crdt/document.go#L14-L26), convergence is what the fuzz swarm hunts for,
-[[`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)](../../go/crdt/fuzz_test.go#L182)). Everything else in this package — the op log and
+([`go/crdt/document.go:14-26`](../../go/crdt/document.go#L14-L26), convergence is what the fuzz swarm hunts for,
+[`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)). Everything else in this package — the op log and
 its per-agent sequence index (`docs/crdt/02-op-log.md`), the merge drive
 (`docs/crdt/03-merge-drive.md`), serialization/compaction
 (`docs/crdt/05-binary-and-compaction.md`), delta frames
@@ -21,7 +21,7 @@ speed up this one model:
 There are three exported document types — `RuneDocument` (text),
 `ArrayDocument[T]` (any element type), `MapDocument[K,V]` (last-writer-wins
 key/value) — all layered over one content-generic engine (the `doc` family
-wrapper in [[`go/crdt/document.go:18-26`](../../go/crdt/document.go#L18-L26)](../../go/crdt/document.go#L18-L26)).
+wrapper in [`go/crdt/document.go:18-26`](../../go/crdt/document.go#L18-L26)).
 
 ## One engine, three families
 
@@ -29,7 +29,7 @@ The engine that does the actual CRDT work knows nothing about runes, items,
 or keys: it carries a `C` (content) type parameter standing for one *run* of
 characters, and every operation in the engine counts "characters" — LV slots —
 without ever looking inside a run's payload
-([[`go/crdt/content.go:9-14`](../../go/crdt/content.go#L9-L14)](../../go/crdt/content.go#L9-L14)). This is the same shape of trade as `bxtree`
+([`go/crdt/content.go:9-14`](../../go/crdt/content.go#L9-L14)). This is the same shape of trade as `bxtree`
 taking a `Summarizer`: type-erasure keeps one algorithm serving three shells.
 
 ```go include go/crdt/document.go L14-L26
@@ -53,21 +53,21 @@ in these three fields plus the `op` type — the visible document (`branch`) is
 just a *derived view*, and any time the log changes the view is re-derived,
 which is exactly what `Check()` will assert at the end of this page.
 
-On top of the core sit the three exported families ([[`go/crdt/document.go:125-142`](../../go/crdt/document.go#L125-L142)](../../go/crdt/document.go#L125-L142)):
+On top of the core sit the three exported families ([`go/crdt/document.go:125-142`](../../go/crdt/document.go#L125-L142)):
 
 - **`RuneDocument`** — text. Its run type is `runeText` (a string whose
-  `Len` counts runes, [[`go/crdt/content.go:18-20`](../../go/crdt/content.go#L18-L20)](../../go/crdt/content.go#L18-L20)), rendered through
-  `GetString` with a lazy cache ([[`document.go:150-160`](../../go/crdt/document.go#L150-L160)](../../go/crdt/document.go#L150-L160)).
+  `Len` counts runes, [`go/crdt/content.go:18-20`](../../go/crdt/content.go#L18-L20)), rendered through
+  `GetString` with a lazy cache ([`document.go:150-160`](../../go/crdt/document.go#L150-L160)).
 - **`ArrayDocument[T]`** — a slice of anything; the whole engine story of the
-  page applies with `T` erased under an `itemRun[T]` ([[`go/crdt/content.go:55-81`](../../go/crdt/content.go#L55-L81)](../../go/crdt/content.go#L55-L81)).
+  page applies with `T` erased under an `itemRun[T]` ([`go/crdt/content.go:55-81`](../../go/crdt/content.go#L55-L81)).
 - **`MapDocument[K,V]`** — a key→value map with last-writer-wins resolution
   per key; the *winner* is picked by `(agent, seq)` comparison in `Get`
-  ([[`go/crdt/document.go:525-578`](../../go/crdt/document.go#L525-L578)](../../go/crdt/document.go#L525-L578)), and never gets wall-clock time — that is
+  ([`go/crdt/document.go:525-578`](../../go/crdt/document.go#L525-L578)), and never gets wall-clock time — that is
   the theme of the next section.
 
 The map's LWW pick is not an authority decision a human argued about: it is
 deterministic given the log. Here is the winner scan (cited from
-[[`go/crdt/document.go:550-564`](../../go/crdt/document.go#L550-L564)](../../go/crdt/document.go#L550-L564), the loop inside `Get`):
+[`go/crdt/document.go:550-564`](../../go/crdt/document.go#L550-L564), the loop inside `Get`):
 
 ```go include go/crdt/document.go L556-L564
 	for _, l := range concurrentLVs {
@@ -86,10 +86,10 @@ than an appeal to clocks, which is why two replicas resolving the same race
 can't disagree.
 
 The `T`-typed freedom is never absolute: an element whose type satisfies
-`Mergeable` ([[`go/crdt/types.go:132-135`](../../go/crdt/types.go#L132-L135)](../../go/crdt/types.go#L132-L135)) recurses. `ArrayDocument.Ins` pushes
+`Mergeable` ([`go/crdt/types.go:132-135`](../../go/crdt/types.go#L132-L135)) recurses. `ArrayDocument.Ins` pushes
 one length-1 op per Mergeable element precisely so that the recursive-merge
 pass can later match those ops by id and fold child state into it
-([[`go/crdt/document.go:307-326`](../../go/crdt/document.go#L307-L326)](../../go/crdt/document.go#L307-L326)):
+([`go/crdt/document.go:307-326`](../../go/crdt/document.go#L307-L326)):
 
 ```go include go/crdt/document.go L307-L326
 func (doc *ArrayDocument[T]) Ins(pos int, items []T) {
@@ -115,8 +115,8 @@ func (doc *ArrayDocument[T]) Ins(pos int, items []T) {
 ```
 
 The same recursion appears in `MapDocument.Get`/`MergeFrom`
-([[`document.go:569-575`](../../go/crdt/document.go#L569-L575)](../../go/crdt/document.go#L569-L575), [[`document.go:647-681`](../../go/crdt/document.go#L647-L681)](../../go/crdt/document.go#L647-L681)) and in
-`ArrayDocument.mergeRecursive` ([[`document.go:449-477`](../../go/crdt/document.go#L449-L477)](../../go/crdt/document.go#L449-L477)): a nested value is
+([`document.go:569-575`](../../go/crdt/document.go#L569-L575), [`document.go:647-681`](../../go/crdt/document.go#L647-L681)) and in
+`ArrayDocument.mergeRecursive` ([`document.go:449-477`](../../go/crdt/document.go#L449-L477)): a nested value is
 itself a CRDT, so at each level the losing concurrent value is
 `MergeFromAny`-merged *into* the winner rather than discarded.
 
@@ -124,7 +124,7 @@ itself a CRDT, so at each level the losing concurrent value is
 
 Each document owns one opLog; the struct's fields are the raw append-only
 history plus the derived indexes that make lookups fast
-([[`go/crdt/types.go:47-67`](../../go/crdt/types.go#L47-L67)](../../go/crdt/types.go#L47-L67)):
+([`go/crdt/types.go:47-67`](../../go/crdt/types.go#L47-L67)):
 
 ```go include go/crdt/types.go L47-L67
 type opLog[C content[C]] struct {
@@ -152,22 +152,22 @@ type opLog[C content[C]] struct {
 
 - **`ops` is the replica's entire history** — every op this replica ever made
   or merged, in the order it was appended. Nothing is ever deleted from it
-  until `Compact` ([[`go/crdt/op_log.go:631-661`](../../go/crdt/op_log.go#L631-L661)](../../go/crdt/op_log.go#L631-L661)).
+  until `Compact` ([`go/crdt/op_log.go:631-661`](../../go/crdt/op_log.go#L631-L661)).
 - **`frontier` is this replica's *now*:** the set of log tips (a replica that
   has never seen a merge has exactly one — the last op's end LV,
-  [[`go/crdt/op_log.go:169`](../../go/crdt/op_log.go#L169)](../../go/crdt/op_log.go#L169); after a merge of divergent histories there are
-  several, maintained by `advanceFrontier`, [[`go/crdt/op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)](../../go/crdt/op_log.go#L234-L248)).
+  [`go/crdt/op_log.go:169`](../../go/crdt/op_log.go#L169); after a merge of divergent histories there are
+  several, maintained by `advanceFrontier`, [`go/crdt/op_log.go:234-248`](../../go/crdt/op_log.go#L234-L248)).
 - **`version` is the per-agent sequence vector** the wire handshake compares
-  ([[`go/crdt/types.go:45`](../../go/crdt/types.go#L45)](../../go/crdt/types.go#L45)): `version[agent]` is the highest sequence number we
+  ([`go/crdt/types.go:45`](../../go/crdt/types.go#L45)): `version[agent]` is the highest sequence number we
   hold from that agent, and it is exactly what seals off delivery of an op
-  twice ([[`go/crdt/op_log.go:524-526`](../../go/crdt/op_log.go#L524-L526)](../../go/crdt/op_log.go#L524-L526)).
+  twice ([`go/crdt/op_log.go:524-526`](../../go/crdt/op_log.go#L524-L526)).
 
 What is genuinely clock-like here is *nothing*. Every op carries a logical
 pair: an **id** `(agent, seq)` — the peer that made it and its
 local counter — and an **lv** (*log version*: this op's slice of the replica's
-character-count addressing space, [[`go/crdt/types.go:16-21`](../../go/crdt/types.go#L16-L21)](../../go/crdt/types.go#L16-L21)). lv is the
+character-count addressing space, [`go/crdt/types.go:16-21`](../../go/crdt/types.go#L16-L21)). lv is the
 cross-replica coordinate the ordering machinery uses, and it comes from the
-log's *length*, not from any clock (`totalLV`, [[`go/crdt/types.go:49-50`](../../go/crdt/types.go#L49-L50)](../../go/crdt/types.go#L49-L50)).
+log's *length*, not from any clock (`totalLV`, [`go/crdt/types.go:49-50`](../../go/crdt/types.go#L49-L50)).
 
 ```go include go/crdt/types.go L35-L43
 type op[C content[C]] struct {
@@ -185,10 +185,10 @@ type op[C content[C]] struct {
 
 `parents` in that `op` struct is the crucial field: when a replica appends an
 op, the op's `parents` are the frontier tip(s) it was built on top of
-([[`go/crdt/op_log.go:162-163`](../../go/crdt/op_log.go#L162-L163)](../../go/crdt/op_log.go#L162-L163), [[`go/crdt/op_log.go:447`](../../go/crdt/op_log.go#L447)](../../go/crdt/op_log.go#L447)). Those parent links
+([`go/crdt/op_log.go:162-163`](../../go/crdt/op_log.go#L162-L163), [`go/crdt/op_log.go:447`](../../go/crdt/op_log.go#L447)). Those parent links
 turn `ops` into a **version DAG** — a forest of causal histories in which
 "these two ops were concurrent" is a property you can *query* (`isAncestor`,
-[[`go/crdt/op_log.go:196-225`](../../go/crdt/op_log.go#L196-L225)](../../go/crdt/op_log.go#L196-L225): walk down from the descendant until you find the
+[`go/crdt/op_log.go:196-225`](../../go/crdt/op_log.go#L196-L225): walk down from the descendant until you find the
 candidate parent). Nothing is ever estimated, timestamped, or compared by
 wall clock: descent in this DAG is *the* definition of happened-before.
 
@@ -237,11 +237,11 @@ flowchart LR
 
 - **Local path** — `Ins`/`Del` push exactly one run op and mutate the
   branch content *directly* (`syncRun` / `snapshot.Delete`,
-  [[`go/crdt/document.go:33-58`](../../go/crdt/document.go#L33-L58)](../../go/crdt/document.go#L33-L58)). There is a deliberate fast shortcut here:
+  [`go/crdt/document.go:33-58`](../../go/crdt/document.go#L33-L58)). There is a deliberate fast shortcut here:
   character-adjacent same-agent inserts *fuse* into the previous tail run —
   the run-granular fast path — because merging text usually means appending
   to a burst of typing and there is no reason to mint one op per character
-  ([[`go/crdt/op_log.go:141-160`](../../go/crdt/op_log.go#L141-L160)](../../go/crdt/op_log.go#L141-L160)). The observable proof: two `Ins` calls on a
+  ([`go/crdt/op_log.go:141-160`](../../go/crdt/op_log.go#L141-L160)). The observable proof: two `Ins` calls on a
   fresh `RuneDocument(0)` leave `version()` at `map[0:1]`, i.e. one op
   covering `seq 0..1`, not two:
 
@@ -251,8 +251,8 @@ flowchart LR
 
 - **Remote path** — the merge exchanges the *entire* log (`mergeInto`
   iterates `src.ops` end to end and lets `pushRemoteOpLV` discard ops dest
-  already holds, [[`go/crdt/op_log.go:524-527`](../../go/crdt/op_log.go#L524-L527)](../../go/crdt/op_log.go#L524-L527)), then runs the branch through
-  the checkout drive once (`checkoutFancy`, [[`go/crdt/crdt.go:870-919`](../../go/crdt/crdt.go#L870-L919)](../../go/crdt/crdt.go#L870-L919)) — the
+  already holds, [`go/crdt/op_log.go:524-527`](../../go/crdt/op_log.go#L524-L527)), then runs the branch through
+  the checkout drive once (`checkoutFancy`, [`go/crdt/crdt.go:870-919`](../../go/crdt/crdt.go#L870-L919)) — the
   winding walk that resolves concurrent positions (next page). Delta frames
   are a wire-efficient delivery of the same ingest
   (`docs/crdt/06-deltas-and-checkout.md`; not model-level content).
@@ -261,7 +261,7 @@ So: local edits are structurally "extend the forest below the current tip";
 merging is "graft the peer's whole history in and reconcile content." The
 first is O(run) pointer work; the second costs log traversal plus a rebuilt
 branch, which is why `mergeInto` skips already-held ops before resolving
-anything ([[`go/crdt/op_log.go:519-526`](../../go/crdt/op_log.go#L519-L526)](../../go/crdt/op_log.go#L519-L526)).
+anything ([`go/crdt/op_log.go:519-526`](../../go/crdt/op_log.go#L519-L526)).
 
 ## Worked example: two replicas diverge, then converge
 
@@ -296,14 +296,14 @@ Check() OK
 
 In the final state, both replicas are `"AcBXHi"` — lexicographically, so is
 `"AcBHi"`+`"X"`-inserted-2: the merged `X` is placed by the *same* tie-break
-`apply` uses on the receiving side (`integrate`, [[`go/crdt/crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)](../../go/crdt/crdt.go#L323-L394)),
+`apply` uses on the receiving side (`integrate`, [`go/crdt/crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)),
 which is why a replica can also accept its own ops being re-delivered to it
-(`pushRemoteOpLV`'s version check, [[`go/crdt/op_log.go:401-404`](../../go/crdt/op_log.go#L401-L404)](../../go/crdt/op_log.go#L401-L404)). The
+(`pushRemoteOpLV`'s version check, [`go/crdt/op_log.go:401-404`](../../go/crdt/op_log.go#L401-L404)). The
 first-version printout above also shows the version handshake in action: the
 version *vectors after the second merge are identical* (`agent0=4`, `agent1=0`)
 on both sides. Convergence is therefore not a coincidence of this example's
 order — it is guaranteed by the walk; `FuzzMergeConvergence`
-([[`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)](../../go/crdt/fuzz_test.go#L182)) pummels it with random topologies.
+([`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)) pummels it with random topologies.
 
 ### And the two ids at play
 
@@ -311,14 +311,14 @@ The `version` map the API hands around is *id-space* (per-agent seq), while
 the *log* is indexed in `lv`. They connect only through the log structure:
 `version[1]=0` means "we hold agent 1's op at seq 0", and where it lives in
 *our* log (`lv5`) is *our* log's decision, made inside `pushRemoteOpLV`
-([[`go/crdt/op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)](../../go/crdt/op_log.go#L442-L450)). Ids wire-referencing lvs is what makes the
+([`go/crdt/op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)). Ids wire-referencing lvs is what makes the
 model portable across replicas that may have split runs differently
-(`resolveParentLV`, [[`go/crdt/op_log.go:355-368`](../../go/crdt/op_log.go#L355-L368)](../../go/crdt/op_log.go#L355-L368)); details on the op-log page.
+(`resolveParentLV`, [`go/crdt/op_log.go:355-368`](../../go/crdt/op_log.go#L355-L368)); details on the op-log page.
 
 ## `Check()`: the whole-invariant tool
 
 Every document family exposes a public `Check()` method
-([[`go/crdt/document.go:218-228`](../../go/crdt/document.go#L218-L228)](../../go/crdt/document.go#L218-L228) for `RuneDocument`, [[`document.go:427-437`](../../go/crdt/document.go#L427-L437)](../../go/crdt/document.go#L427-L437) for
+([`go/crdt/document.go:218-228`](../../go/crdt/document.go#L218-L228) for `RuneDocument`, [`document.go:427-437`](../../go/crdt/document.go#L427-L437) for
 `ArrayDocument`). The engine wraps the same property: **a full checkout
 replay of the log must equal the branch's live snapshot.**
 
@@ -338,15 +338,15 @@ func (doc *RuneDocument) Check() {
 
 Why this matters: it is the cheapest complete audit you have — it does not
 trust that `Ins`/`Del`/`MergeFrom` kept the branch in sync; it *recomputes*
-what the log would produce from scratch (`checkout`, [[`go/crdt/crdt.go:598-617`](../../go/crdt/crdt.go#L598-L617)](../../go/crdt/crdt.go#L598-L617))
+what the log would produce from scratch (`checkout`, [`go/crdt/crdt.go:598-617`](../../go/crdt/crdt.go#L598-L617))
 and asserts equality, which is what makes every invariant on this page a
 *called* property rather than an assumed one. The two halves it chains:
 
-1. **`doc.check`** ([[`go/crdt/document.go:96-101`](../../go/crdt/document.go#L96-L101)](../../go/crdt/document.go#L96-L101)) — full `checkout()` replay
+1. **`doc.check`** ([`go/crdt/document.go:96-101`](../../go/crdt/document.go#L96-L101)) — full `checkout()` replay
    compared against `branch.snapshot`; mismatch panics
    (`"Document content out of sync"`). This is a full-log invariant:
    if anyone corrupts `branch`, every subsequent `Check()` trips.
-2. **`checkCompacted`** ([[`go/crdt/op_log.go:682-696`](../../go/crdt/op_log.go#L682-L696)](../../go/crdt/op_log.go#L682-L696)) — only when the log has
+2. **`checkCompacted`** ([`go/crdt/op_log.go:682-696`](../../go/crdt/op_log.go#L682-L696)) — only when the log has
    an anchor: anchor must be ops[0] and carry coverage, no other anchor ops
    may appear, and `anchorCoverage` may never claim seq numbers `version`
    doesn't cover:
@@ -372,9 +372,9 @@ func checkCompacted[C content[C]](log *opLog[C]) {
 Two asymmetries worth knowing before reaching for it:
 
 - `MapDocument` has **no** `Check()` at all (deliberate — see the compaction
-  plan note in its `doc` comment, [[`go/crdt/document.go:740-743`](../../go/crdt/document.go#L740-L743)](../../go/crdt/document.go#L740-L743); its own
+  plan note in its `doc` comment, [`go/crdt/document.go:740-743`](../../go/crdt/document.go#L740-L743); its own
   compaction path runs the log-level `checkCompacted` where it can,
-  [[`document.go:807-809`](../../go/crdt/document.go#L807-L809)](../../go/crdt/document.go#L807-L809)).
+  [`document.go:807-809`](../../go/crdt/document.go#L807-L809)).
 - Deltas get free checking: `ApplyDelta` calls `doc.Check()` en route
   (`go/crdt/document.go:200,400`), so wire corruption surfaces as a panic at
   the merge site, not as a delayed divergence.
@@ -397,33 +397,33 @@ under `-fuzz` for deeper exploration):
 1. **The op log is append-only** — `pushLocalOp` and `pushRemoteOpLV` never
    mutate an existing op's lv span (an op that re-arrives *extended* keeps its
    held prefix untouched and gains only the unknown suffix as a fresh op,
-   [[`go/crdt/op_log.go:411-436`](../../go/crdt/op_log.go#L411-L436)](../../go/crdt/op_log.go#L411-L436)), because
+   [`go/crdt/op_log.go:411-436`](../../go/crdt/op_log.go#L411-L436)), because
    `branch.frontier`, `parents`, and `idToLV` all reference fixed lvs. The
-   only whole-log rewrite is `Compact` ([[`op_log.go:631-661`](../../go/crdt/op_log.go#L631-L661)](../../go/crdt/op_log.go#L631-L661)).
+   only whole-log rewrite is `Compact` ([`op_log.go:631-661`](../../go/crdt/op_log.go#L631-L661)).
 2. **Ops are never dropped: merges must leave a replica holding a superset** —
    `mergeInto` iterates src's ops and lets the version check (`last >=
    seq+length-1`) drop only what dest already fully holds
-   ([[`op_log.go:524-527`](../../go/crdt/op_log.go#L524-L527)](../../go/crdt/op_log.go#L524-L527)); no "loser" op churns away. That is what makes
+   ([`op_log.go:524-527`](../../go/crdt/op_log.go#L524-L527)); no "loser" op churns away. That is what makes
    merge-back (`b.MergeFrom(a)` after `a.MergeFrom(b)`) a no-op on the log
    and a no-op on content, as in the worked example.
 3. **Version vector and frontier agree with the log** — local pushes bump
-   `version[agent]` and reset a single-tip frontier ([[`op_log.go:169-171`](../../go/crdt/op_log.go#L169-L171)](../../go/crdt/op_log.go#L169-L171)),
-   remote pushes use `advanceFrontier` ([[`op_log.go:447`](../../go/crdt/op_log.go#L447)](../../go/crdt/op_log.go#L447)), and `Check()`'s
+   `version[agent]` and reset a single-tip frontier ([`op_log.go:169-171`](../../go/crdt/op_log.go#L169-L171)),
+   remote pushes use `advanceFrontier` ([`op_log.go:447`](../../go/crdt/op_log.go#L447)), and `Check()`'s
    full replay (`code` cited above) panics the moment the branch disagrees.
 4. **Concurrent insert collisions are resolved deterministically** —
    `integrate`'s scan (agent order + insertion-origin comparison,
-   [[`crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)](../../go/crdt/crdt.go#L323-L394)) decides placement for the same two ops identically on
+   [`crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)) decides placement for the same two ops identically on
    every replica — the property `FuzzMergeConvergence` asserts by demanding
-   equal `GetString` after both-way merges ([[`fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)](../../go/crdt/fuzz_test.go#L182)).
+   equal `GetString` after both-way merges ([`fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)).
 5. **Mergeable values recurse by identity** — a Mergeable element's op stays
-   length-1 ([[`content.go:71-81`](../../go/crdt/content.go#L71-L81)](../../go/crdt/content.go#L71-L81) makes such runs non-collapsible) and its
+   length-1 ([`content.go:71-81`](../../go/crdt/content.go#L71-L81) makes such runs non-collapsible) and its
    `id` is what the losing side's state is folded through
-   ([[`document.go:449-477`](../../go/crdt/document.go#L449-L477)](../../go/crdt/document.go#L449-L477)); nothing concurrent breaks the invariant that
+   ([`document.go:449-477`](../../go/crdt/document.go#L449-L477)); nothing concurrent breaks the invariant that
    `Get`/`Set` on any replica converge on the same value.
 6. **`Check()` is the single place** every **structural** panic belongs: byte
    layout bug in the log topology, wrong delTargets stored, even the
    `branch` cache behind `GetString`, are all caught here
-   ([[`document.go:218-228`](../../go/crdt/document.go#L218-L228)](../../go/crdt/document.go#L218-L228)). Like `bxtree`'s test-time `verifyTree`
+   ([`document.go:218-228`](../../go/crdt/document.go#L218-L228)). Like `bxtree`'s test-time `verifyTree`
    (`docs/bxtree/01-bxtree-structure.md`), `Check()` is an *opt-in*
    invariant hinge — cheap enough to call in tests, loud enough to be the
    panic the other tests hinge on.
@@ -444,4 +444,4 @@ log only ever crosses the wire slices of itself is `docs/crdt/06-deltas-and-chec
 
 *Related: `docs/bxtree/01-bxtree-structure.md` (the ordered container under the
 branch), `docs/pheap/01-pairing-heap.md` (the priority queue the diffing
-walks use, e.g. [[`crdt.go:18`](../../go/crdt/crdt.go#L18)](../../go/crdt/crdt.go#L18), `:641`), `docs/index.md` for reading order.*
+walks use, e.g. [`crdt.go:18`](../../go/crdt/crdt.go#L18), `:641`), `docs/index.md` for reading order.*

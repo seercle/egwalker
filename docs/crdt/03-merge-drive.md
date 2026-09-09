@@ -4,7 +4,7 @@
 (`checkoutFancy`); `docs/crdt/02-op-log.md` filled that box with ops, lvs,
 and the seq index. This page opens the drive that turns a grafted log back
 into content — the machinery in `go/crdt/crdt.go` plus the one-call entry
-`doc.mergeFrom` ([[`go/crdt/document.go:66-74`](../../go/crdt/document.go#L66-L74)](../../go/crdt/document.go#L66-L74)). It reuses previous pages'
+`doc.mergeFrom` ([`go/crdt/document.go:66-74`](../../go/crdt/document.go#L66-L74)). It reuses previous pages'
 material — lvs, `(agent, seq)` ids, frontier, parents, run ops — without
 re-explaining it.
 
@@ -19,7 +19,7 @@ invariants that fence all of it.
 
 ## One level down: what a merge actually runs
 
-`doc.mergeFrom` is two calls ([[`go/crdt/document.go:68-74`](../../go/crdt/document.go#L68-L74)](../../go/crdt/document.go#L68-L74)). Why this
+`doc.mergeFrom` is two calls ([`go/crdt/document.go:68-74`](../../go/crdt/document.go#L68-L74)). Why this
 matters: everything this page does happens *after* the log is complete —
 the drive never invents content, it re-derives it from a log whose graft
 mechanics the op-log page already explained.
@@ -59,9 +59,9 @@ flowchart TD
 ```
 
 The interesting top-level fact is the *order* of what `checkoutFancy`
-replays. Shared ops go first with `snapshot = nil` ([[`crdt.go:910-912`](../../go/crdt/crdt.go#L910-L912)](../../go/crdt/crdt.go#L910-L912));
+replays. Shared ops go first with `snapshot = nil` ([`crdt.go:910-912`](../../go/crdt/crdt.go#L910-L912));
 peer-only ops go second, with the branch's real snapshot
-([[`crdt.go:914-918`](../../go/crdt/crdt.go#L914-L918)](../../go/crdt/crdt.go#L914-L918)). One drive, two phases, one flag — that flag is all
+([`crdt.go:914-918`](../../go/crdt/crdt.go#L914-L918)). One drive, two phases, one flag — that flag is all
 the checkout interplay this page needs, and the full replay scheme is
 `docs/crdt/06-deltas-and-checkout.md`'s subject.
 
@@ -98,18 +98,18 @@ func checkoutFancy[C content[C]](log *opLog[C], b *branch[C], mergeFrontier []lv
 ```
 
 Why this matters: a *fresh* `crdtDoc` is built per checkout
-([[`crdt.go:877-886`](../../go/crdt/crdt.go#L877-L886)](../../go/crdt/crdt.go#L877-L886)), optionally anchored at the common ancestor version
+([`crdt.go:877-886`](../../go/crdt/crdt.go#L877-L886)), optionally anchored at the common ancestor version
 and seeded with a *placeholder* sentinel item that keeps b-only ops from
-integrating past the branch's own edge ([[`crdt.go:889-908`](../../go/crdt/crdt.go#L889-L908)](../../go/crdt/crdt.go#L889-L908)); the branch's
+integrating past the branch's own edge ([`crdt.go:889-908`](../../go/crdt/crdt.go#L889-L908)); the branch's
 real contentTree is untouched until the b-only phase. Also notice what a
 fresh doc carries: an **empty `delTargets`** — the ledger is rebuilt by
 replaying, never persisted (§ below).
 
 ## One op per step: `do1Operation`, winding before applying
 
-The per-op step in full ([[`go/crdt/crdt.go:579-596`](../../go/crdt/crdt.go#L579-L596)](../../go/crdt/crdt.go#L579-L596)) — the same step the
+The per-op step in full ([`go/crdt/crdt.go:579-596`](../../go/crdt/crdt.go#L579-L596)) — the same step the
 full-replay drive `checkout` runs for every op of a whole log
-([[`crdt.go:613-615`](../../go/crdt/crdt.go#L613-L615)](../../go/crdt/crdt.go#L613-L615)), which is what `Check()` and `Compact` invoke:
+([`crdt.go:613-615`](../../go/crdt/crdt.go#L613-L615)), which is what `Check()` and `Compact` invoke:
 
 ```go include go/crdt/crdt.go L579-L596
 func do1Operation[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, snapshot *contentTree[C]) {
@@ -137,12 +137,12 @@ on top of the state its own causal `parents` name, and the drive's
 staged state may be at a different tip. The drive therefore maintains a
 **staged state**: characters in the item tree that can be toggled in and
 out via `curState` (`go/crdt/types.go:87,120-123`) without changing the
-item set. `diff` ([[`crdt.go:13-66`](../../go/crdt/crdt.go#L13-L66)](../../go/crdt/crdt.go#L13-L66)) computes which *currently staged* ops
+item set. `diff` ([`crdt.go:13-66`](../../go/crdt/crdt.go#L13-L66)) computes which *currently staged* ops
 are not ancestors of the op about to apply (`aOnly` — wind them back,
-`retreat`, [[`crdt.go:193-198`](../../go/crdt/crdt.go#L193-L198)](../../go/crdt/crdt.go#L193-L198)) and which ancestor ops of the op's parents
+`retreat`, [`crdt.go:193-198`](../../go/crdt/crdt.go#L193-L198)) and which ancestor ops of the op's parents
 are missing from the staged set (`bOnly` — wind them in, `advance`,
-[[`crdt.go:200-207`](../../go/crdt/crdt.go#L200-L207)](../../go/crdt/crdt.go#L200-L207)). Only then does `apply` run, and the staged cursor
-jumps to the op's end LV ([[`crdt.go:595`](../../go/crdt/crdt.go#L595)](../../go/crdt/crdt.go#L595)).
+[`crdt.go:200-207`](../../go/crdt/crdt.go#L200-L207)). Only then does `apply` run, and the staged cursor
+jumps to the op's end LV ([`crdt.go:595`](../../go/crdt/crdt.go#L595)).
 
 The state vocabulary the rest of the page leans on
 (`go/crdt/types.go:82-95,100,120-123`):
@@ -156,9 +156,9 @@ The state vocabulary the rest of the page leans on
   counts items whose `curState == stateInserted` — the *staged* space,
   the position key during replay winding — and `liveLen` counts
   not-deleted items — the *visible* space the snapshot is rendered from
-  ([[`crdt.go:74-87`](../../go/crdt/crdt.go#L74-L87)](../../go/crdt/crdt.go#L74-L87); the two only coincide when nothing is wound back).
+  ([`crdt.go:74-87`](../../go/crdt/crdt.go#L74-L87); the two only coincide when nothing is wound back).
 
-The toggle primitive ([[`go/crdt/crdt.go:158-188`](../../go/crdt/crdt.go#L158-L188)](../../go/crdt/crdt.go#L158-L188)) is worth reading whole,
+The toggle primitive ([`go/crdt/crdt.go:158-188`](../../go/crdt/crdt.go#L158-L188)) is worth reading whole,
 because delete runs' character slots resolve through `delTargets` — the
 next section's subject — right here:
 
@@ -204,14 +204,14 @@ func toggleRunChar[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, delta int
 (For an insert-op char the target is the char itself; a delete-op char
 has *no item of its own* — a delete op owns lv slots but no content — so
 its `opLV` resolves through the map, and `ensureAtomized`
-([[`crdt.go:131-151`](../../go/crdt/crdt.go#L131-L151)](../../go/crdt/crdt.go#L131-L151)) splits the underlying item into single characters
+([`crdt.go:131-151`](../../go/crdt/crdt.go#L131-L151)) splits the underlying item into single characters
 when needed. The per-op bookkeeping and summary updates both ride the
 `bxtree` summaries rather than a recount — the subject of
 `docs/crdt/04-content-tree.md`.)
 
 ## The insert path
 
-What `apply` does for a length-L insert (`opTypeIns`) run ([[`go/crdt/crdt.go:540-577`](../../go/crdt/crdt.go#L540-L577)](../../go/crdt/crdt.go#L540-L577)):
+What `apply` does for a length-L insert (`opTypeIns`) run ([`go/crdt/crdt.go:540-577`](../../go/crdt/crdt.go#L540-L577)):
 
 ```go include go/crdt/crdt.go L540-L577
 	posIdx, endPos := findByCurrentPos(doc, o.pos)
@@ -257,9 +257,9 @@ What `apply` does for a length-L insert (`opTypeIns`) run ([[`go/crdt/crdt.go:54
 What the code does, in this codebase's own terms, step by step:
 
 1. **Position resolve + atomization.** `findByCurrentPos(o.pos)`
-   ([[`crdt.go:396-423`](../../go/crdt/crdt.go#L396-L423)](../../go/crdt/crdt.go#L396-L423)) descends the `bxtree` against the `presentLen`
+   ([`crdt.go:396-423`](../../go/crdt/crdt.go#L396-L423)) descends the `bxtree` against the `presentLen`
    summary and, when the position falls *inside* a multi-character item,
-   splits that item on the spot ([[`crdt.go:415-420`](../../go/crdt/crdt.go#L415-L420)](../../go/crdt/crdt.go#L415-L420)) so the insert lands
+   splits that item on the spot ([`crdt.go:415-420`](../../go/crdt/crdt.go#L415-L420)) so the insert lands
    exactly at a boundary between two items:
 
 ```go include go/crdt/crdt.go L396-L423
@@ -296,31 +296,31 @@ func findByCurrentPos(doc *crdtDoc, targetPos int) (int, int) {
    Why this matters: the same function serves both op types and returns
    *two* indexes — `posIdx`, the item index after the resolved position
    (the *staged* axis), and `endPos`, the *live* (snapshot) axis
-   (`acc.liveLen + m.liveLen`, [[`crdt.go:422`](../../go/crdt/crdt.go#L422)](../../go/crdt/crdt.go#L422)) the snapshot needs. The
+   (`acc.liveLen + m.liveLen`, [`crdt.go:422`](../../go/crdt/crdt.go#L422)) the snapshot needs. The
    split it may perform is the atomization: a run is only ever cut when
    something legitimately has to reference *between* two of its
    characters, never to renumber anything (`docs/crdt/02-op-log.md`'s
    lv-immutability rule).
 2. **The two origin anchors.** `originLeft` is the would-be left
-   neighbour item's last character LV ([[`crdt.go:549-553`](../../go/crdt/crdt.go#L549-L553)](../../go/crdt/crdt.go#L549-L553)); `originRight`
+   neighbour item's last character LV ([`crdt.go:549-553`](../../go/crdt/crdt.go#L549-L553)); `originRight`
    is found by scanning forward past `stateNotYetInserted` neighbours to
-   the next *currently staged* item ([[`crdt.go:555-563`](../../go/crdt/crdt.go#L555-L563)](../../go/crdt/crdt.go#L555-L563)). These anchors
+   the next *currently staged* item ([`crdt.go:555-563`](../../go/crdt/crdt.go#L555-L563)). These anchors
    are the item's permanent identity — later replicas that integrate this
    op from a *different* log shape still place it identically relative
    to them.
-3. **The integrating scan.** `integrate` ([[`crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)](../../go/crdt/crdt.go#L323-L394)) re-resolves
+3. **The integrating scan.** `integrate` ([`crdt.go:323-394`](../../go/crdt/crdt.go#L323-L394)) re-resolves
    the two anchors into current positions (`getLogicalPos`,
-   [[`crdt.go:312-321`](../../go/crdt/crdt.go#L312-L321)](../../go/crdt/crdt.go#L312-L321)), then scans neighbours around that spot: the
+   [`crdt.go:312-321`](../../go/crdt/crdt.go#L312-L321)), then scans neighbours around that spot: the
    concurrency decision. When all settled neighbours have been walked,
    the item is inserted at the slot where it clears the break condition;
    the scan may shift `endPos` if it passes live items
-   ([[`crdt.go:366-367`](../../go/crdt/crdt.go#L366-L367)](../../go/crdt/crdt.go#L366-L367)).
+   ([`crdt.go:366-367`](../../go/crdt/crdt.go#L366-L367)).
 4. **The snapshot.** If the snapshot parameter is non-nil, the run's
    content joins the rope at `endPos`
-   ([[`crdt.go:390-392`](../../go/crdt/crdt.go#L390-L392)](../../go/crdt/crdt.go#L390-L392)) — the visible/live axis, adjusted for the items
+   ([`crdt.go:390-392`](../../go/crdt/crdt.go#L390-L392)) — the visible/live axis, adjusted for the items
    that were wound back during this step's wind.
 5. **Fusion.** After every successful insert, `tryMergeAt` is called at
-   the inserted position ([[`crdt.go:576`](../../go/crdt/crdt.go#L576)](../../go/crdt/crdt.go#L576)): re-fusion made
+   the inserted position ([`crdt.go:576`](../../go/crdt/crdt.go#L576)): re-fusion made
    possible by integrating a run in the middle of another run's span is
    undone immediately (see § `delTargets`+`tryMergeAt`).
 
@@ -343,7 +343,7 @@ flowchart TD
 
 Every delete op is replayed as *independent per-character deletes*; the
 _run_ is a concession to logging efficiency, not to a concurrency
-primitive. From `apply`'s delete branch ([[`go/crdt/crdt.go:524-538`](../../go/crdt/crdt.go#L524-L538)](../../go/crdt/crdt.go#L524-L538)):
+primitive. From `apply`'s delete branch ([`go/crdt/crdt.go:524-538`](../../go/crdt/crdt.go#L524-L538)):
 
 ```go include go/crdt/crdt.go L524-L538
 	if o.opType == opTypeDel {
@@ -363,7 +363,7 @@ primitive. From `apply`'s delete branch ([[`go/crdt/crdt.go:524-538`](../../go/c
 	}
 ```
 
-And `deleteOne` itself ([[`go/crdt/crdt.go:467-517`](../../go/crdt/crdt.go#L467-L517)](../../go/crdt/crdt.go#L467-L517)), shown in two slices:
+And `deleteOne` itself ([`go/crdt/crdt.go:467-517`](../../go/crdt/crdt.go#L467-L517)), shown in two slices:
 
 ```go include go/crdt/crdt.go L467-L490
 func deleteOne[C content[C]](doc *crdtDoc, log *opLog[C], opLV lv, pos int) int {
@@ -425,30 +425,30 @@ Walkthrough, top to bottom:
 
 - **`o.pos` is re-passed constant for the whole loop.** Every character
   of the run deletes at *the same* visible position `o.pos`
-  ([[`crdt.go:532`](../../go/crdt/crdt.go#L532)](../../go/crdt/crdt.go#L532)), because each successful `deleteOne` shrinks the
+  ([`crdt.go:532`](../../go/crdt/crdt.go#L532)), because each successful `deleteOne` shrinks the
   staged state by exactly one — so the next victim of the run is again
   visible at position `o.pos` in the shrunk state. The run's op `pos`
   is author-side information; the per-character resolution does all the
   target selection work locally.
-- **The skip loop** ([[`crdt.go:471-490`](../../go/crdt/crdt.go#L471-L490)](../../go/crdt/crdt.go#L471-L490)): `findByCurrentPos` gives the
+- **The skip loop** ([`crdt.go:471-490`](../../go/crdt/crdt.go#L471-L490)): `findByCurrentPos` gives the
   boundary item in *present* space, but what the delete really needs to
   confirm is that the target item is *settled* (`stateInserted`) rather
   than one of the wound-back/delete-claimed items whose char slots sit
   in between. The loop advances item-by-item until it finds a settled
   one, counting into `endPos` only the live ones it steps past
-  ([[`crdt.go:477-479`](../../go/crdt/crdt.go#L477-L479)](../../go/crdt/crdt.go#L477-L479)).
+  ([`crdt.go:477-479`](../../go/crdt/crdt.go#L477-L479)).
 - **Atomize the kill target.** A run hit at a multi-char item splits it
-  to length 1 first ([[`crdt.go:495-499`](../../go/crdt/crdt.go#L495-L499)](../../go/crdt/crdt.go#L495-L499)) — delete runs toggle/settle
-  characters *individually* (the comment at [[`crdt.go:153-157`](../../go/crdt/crdt.go#L153-L157)](../../go/crdt/crdt.go#L153-L157) is the
+  to length 1 first ([`crdt.go:495-499`](../../go/crdt/crdt.go#L495-L499)) — delete runs toggle/settle
+  characters *individually* (the comment at [`crdt.go:153-157`](../../go/crdt/crdt.go#L153-L157) is the
   10,000-foot description).
-- **The live commit** ([[`crdt.go:509-516`](../../go/crdt/crdt.go#L509-L516)](../../go/crdt/crdt.go#L509-L516)): `deleted=true` (a permanent
+- **The live commit** ([`crdt.go:509-516`](../../go/crdt/crdt.go#L509-L516)): `deleted=true` (a permanent
   boolean — it is never reset anywhere in the drive), both summary
   counters are dropped by one, `curState = Deleted(1)` (a delete claim
   rides `curState` like any staging counter), `delTargets[opLV] =
   item.lv`, and `tryMergeAt` — then the loop's `snapshot.Delete(endPos,
   1)` removes exactly one visible cell of the rope
-  ([[`crdt.go:533-536`](../../go/crdt/crdt.go#L533-L536)](../../go/crdt/crdt.go#L533-L536)).
-- **The `-1` skip** ([[`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)](../../go/crdt/crdt.go#L501-L507)): the item is already `deleted` —
+  ([`crdt.go:533-536`](../../go/crdt/crdt.go#L533-L536)).
+- **The `-1` skip** ([`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)): the item is already `deleted` —
   a different run got there first. The drive *still reclaims the delete*
   in the bookkeeping sense: it re-asserts the delete claim
   (`curState = Deleted(1)`, presentLen −1: this run, too, currently
@@ -456,7 +456,7 @@ Walkthrough, top to bottom:
   `delTargets[opLV] = item.lv` *for its own slot* — so every char of
   every overlapping delete run knows exactly which item it meant.
   Then it returns `-1`, which is why `apply`'s snapshot update is
-  guarded with `endPos >= 0` ([[`crdt.go:533`](../../go/crdt/crdt.go#L533)](../../go/crdt/crdt.go#L533)) — the receiver's own
+  guarded with `endPos >= 0` ([`crdt.go:533`](../../go/crdt/crdt.go#L533)) — the receiver's own
   concurrent delete already removed that char from its rope.
 
 ```mermaid
@@ -485,7 +485,7 @@ inside the drive state, both get rebuilt on every checkout.
 
 ### The ledger: `delTargets`
 
-The field ([[`go/crdt/types.go:100`](../../go/crdt/types.go#L100)](../../go/crdt/types.go#L100)) carries one line of prose:
+The field ([`go/crdt/types.go:100`](../../go/crdt/types.go#L100)) carries one line of prose:
 
 ```go include go/crdt/types.go L97-L102
 type crdtDoc struct {
@@ -499,9 +499,9 @@ type crdtDoc struct {
 Why this matters: a delete run occupies real LV slots (each deletion truly
 costs one lv in `docs/crdt/02-op-log.md`'s address space) but carries no
 content, so none of its char slots name an item. `delTargets[opLV] =
-item.lv` (written at [[`crdt.go:504`](../../go/crdt/crdt.go#L504)](../../go/crdt/crdt.go#L504), `:514`) is the only bridge from a
+item.lv` (written at [`crdt.go:504`](../../go/crdt/crdt.go#L504), `:514`) is the only bridge from a
 delete-run character slot to the item it (or a concurrent twin) actually
-deleted. The consumer is `toggleRunChar`'s else-branch ([[`crdt.go:163-168`](../../go/crdt/crdt.go#L163-L168)](../../go/crdt/crdt.go#L163-L168),
+deleted. The consumer is `toggleRunChar`'s else-branch ([`crdt.go:163-168`](../../go/crdt/crdt.go#L163-L168),
 shown in § `do1Operation`): without the map, winding a delete op in or out
 would not know *which* single character toggles.
 
@@ -520,7 +520,7 @@ Running properties:
   inside this replica's own winding — targets were recorded during this
   replica's replay (`docs/crdt/01-replica-model.md`'s lv-locality note).
 - **Rebuild-on-checkout:** the map resets anew in every drive
-  ([[`crdt.go:607`](../../go/crdt/crdt.go#L607)](../../go/crdt/crdt.go#L607) for full checkout, [[`crdt.go:885`](../../go/crdt/crdt.go#L885)](../../go/crdt/crdt.go#L885) for the fancy
+  ([`crdt.go:607`](../../go/crdt/crdt.go#L607) for full checkout, [`crdt.go:885`](../../go/crdt/crdt.go#L885) for the fancy
   one) and re-fills inside `deleteOne` — no serialization, no `Compact`
   preservation (`docs/crdt/05-binary-and-compaction.md`).
 - **Concurrent overlap is idempotent in the map itself:** a second run's
@@ -551,8 +551,8 @@ func tryMergeAt[C content[C]](doc *crdtDoc, log *opLog[C], idx int) {
 
 Every atomization (a `split` at `findByCurrentPos`, or a `split(...,1)`
 before a targeted delete) leaves neighbours that *could* be one run
-again. `tryMergeAt` ([[`go/crdt/crdt.go:294-310`](../../go/crdt/crdt.go#L294-L310)](../../go/crdt/crdt.go#L294-L310)) is the call both paths
-make right after touching an item (`apply` insert at [[`crdt.go:576`](../../go/crdt/crdt.go#L576)](../../go/crdt/crdt.go#L576),
+again. `tryMergeAt` ([`go/crdt/crdt.go:294-310`](../../go/crdt/crdt.go#L294-L310)) is the call both paths
+make right after touching an item (`apply` insert at [`crdt.go:576`](../../go/crdt/crdt.go#L576),
 `deleteOne` at `:505` and `:515`), and — per the checks — each fusion
 attempt compares against the *log*, not just neighbors:
 
@@ -599,9 +599,9 @@ flowchart TD
     M5 -->|"all pass"| YES["true"]
 ```
 
-`mergeLeft` ([[`crdt.go:273-292`](../../go/crdt/crdt.go#L273-L292)](../../go/crdt/crdt.go#L273-L292)) completes the fusion: grow left's
+`mergeLeft` ([`crdt.go:273-292`](../../go/crdt/crdt.go#L273-L292)) completes the fusion: grow left's
 length, adopt right's `originRight`, splice right's entry out of the LV
-index ([[`crdt.go:107-112`](../../go/crdt/crdt.go#L107-L112)](../../go/crdt/crdt.go#L107-L112)) and back in updated, delete the right item from
+index ([`crdt.go:107-112`](../../go/crdt/crdt.go#L107-L112)) and back in updated, delete the right item from
 the tree, and refresh the tree summary. The recurrence in a picture:
 
 ```mermaid
@@ -616,30 +616,30 @@ flowchart TD
 
 Why this matters: `tryMergeAt` is the drive's self-repair — a
 concurrent insert or a carve-to-length-1 delete may split a run
-([[`crdt.go:415-420`](../../go/crdt/crdt.go#L415-L420)](../../go/crdt/crdt.go#L415-L420), `:495-499`); after every such event the recurrence
+([`crdt.go:415-420`](../../go/crdt/crdt.go#L415-L420), `:495-499`); after every such event the recurrence
 re-fuses the split-off characters whenever
 `canMerge`'s conditions still hold. A re-fused run keeps the original
 run's lvs and origins intact, so LV-index lookups (`addItemLV`/
-`removeItemLV`, [[`crdt.go:95-112`](../../go/crdt/crdt.go#L95-L112)](../../go/crdt/crdt.go#L95-L112)) and the re-merge guard (`log.covers`,
-[[`crdt.go:242-244`](../../go/crdt/crdt.go#L242-L244)](../../go/crdt/crdt.go#L242-L244) — the checkout placeholder sentinel can never merge
+`removeItemLV`, [`crdt.go:95-112`](../../go/crdt/crdt.go#L95-L112)) and the re-merge guard (`log.covers`,
+[`crdt.go:242-244`](../../go/crdt/crdt.go#L242-L244) — the checkout placeholder sentinel can never merge
 into real items) never see any fraying.
 
 ## Snapshot or nil: the model-level interplay
 
-- The replay's shared/b-only phase ([[`crdt.go:910-918`](../../go/crdt/crdt.go#L910-L918)](../../go/crdt/crdt.go#L910-L918)) uses the same
+- The replay's shared/b-only phase ([`crdt.go:910-918`](../../go/crdt/crdt.go#L910-L918)) uses the same
   `do1Operation` with a single external difference: the `snapshot`
   pointer. `nil` means "rebuild intermediate staged states, never touch
   real content" (the branch's contentTree — the API-visible one —
   stays unmodified); non-nil means "mutate" — only then do `apply`'s
   `snapshot.Insert`/`snapshot.Delete` fire, behind the `endPos >= 0`
-  and `!= nil` guards ([[`crdt.go:391`](../../go/crdt/crdt.go#L391)](../../go/crdt/crdt.go#L391), `:533-534`).
-- Conversely the full-replay `checkout` ([[`crdt.go:598-617`](../../go/crdt/crdt.go#L598-L617)](../../go/crdt/crdt.go#L598-L617)) runs the same
+  and `!= nil` guards ([`crdt.go:391`](../../go/crdt/crdt.go#L391), `:533-534`).
+- Conversely the full-replay `checkout` ([`crdt.go:598-617`](../../go/crdt/crdt.go#L598-L617)) runs the same
   step one op at a time, over a snapshot it *builds* from nothing: that
-  is the drive that Check() (page 01) and `Compact` ([[`document.go:115`](../../go/crdt/document.go#L115)](../../go/crdt/document.go#L115))
+  is the drive that Check() (page 01) and `Compact` ([`document.go:115`](../../go/crdt/document.go#L115))
   lease. The asymmetry is worth naming: a nil-snapshot replay builds the
   staged state graph; a live-snapshot replay builds *content*, each
   content-producing edit positioned by `endPos` (`apply`'s two
-  insert/delete exits at [[`crdt.go:391`](../../go/crdt/crdt.go#L391)](../../go/crdt/crdt.go#L391), `:534`).
+  insert/delete exits at [`crdt.go:391`](../../go/crdt/crdt.go#L391), `:534`).
 
 `docs/crdt/06-deltas-and-checkout.md` carries the checkout-side replay
 details and how this drive is also retraced from batch deltas.
@@ -684,16 +684,16 @@ What to watch in this example:
   **`x`**. When each replica merges the other's run, *one* of
   its characters hits an item that its own local run already deleted.
   That is exactly `deleteOne`'s already-deleted path
-  ([[`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)](../../go/crdt/crdt.go#L501-L507)): the deletions are *re-claimed bookkeeping-wise*
+  ([`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)): the deletions are *re-claimed bookkeeping-wise*
   — a `curState = Deleted(1)` bump and the `delTargets` map entry for
   that slot — and `return -1` → `apply`'s `endPos >= 0` guard
-  ([[`crdt.go:533`](../../go/crdt/crdt.go#L533)](../../go/crdt/crdt.go#L533)) keeps the snapshot untouched, because the shared
+  ([`crdt.go:533`](../../go/crdt/crdt.go#L533)) keeps the snapshot untouched, because the shared
   char is already invisible *on whichever replica*.
 - **Closing state:** only `Z` — the one character neither delete run
   covers — survives, on both replicas (`a == b` and both versions
   print `map[0:9 1:5]` — agent 1's last op is its own length-2 del run
   at seqs 4-5, so `version[1]` is fixed at 5 regardless of how many
-  merges land afterwards; [[`op_log.go:171`](../../go/crdt/op_log.go#L171)](../../go/crdt/op_log.go#L171)). Nothing here relies on the
+  merges land afterwards; [`op_log.go:171`](../../go/crdt/op_log.go#L171)). Nothing here relies on the
   merge order or on a replica winning a race: the same drive, run on
   whichever side, gives the same content.
 
@@ -703,16 +703,16 @@ the cited lines pin each row):
 
 | # | Call | Log state after |
 |---|------|-----------------|
-| 1 | `a.Ins(0,"ABCDE")` | a: `{0,0}` "ABCDE" lv 0-4, parents `[]`, version `{0:4}` ([[`op_log.go:162-172`](../../go/crdt/op_log.go#L162-L172)](../../go/crdt/op_log.go#L162-L172)) |
-| 2 | `b.MergeFrom(a)` | b: appends the same op at lv 0-4 ([[`op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)](../../go/crdt/op_log.go#L442-L450)), version `{0:4}` |
-| 3 | `a.Ins(2,"xy")` | a: **no fold** (fold tail pos would be 0+5, this is pos 2) → mint `{0,5}` "xy" lv 5-6, version `{0:6}` ([[`op_log.go:141-149`](../../go/crdt/op_log.go#L141-L149)](../../go/crdt/op_log.go#L141-L149)) |
+| 1 | `a.Ins(0,"ABCDE")` | a: `{0,0}` "ABCDE" lv 0-4, parents `[]`, version `{0:4}` ([`op_log.go:162-172`](../../go/crdt/op_log.go#L162-L172)) |
+| 2 | `b.MergeFrom(a)` | b: appends the same op at lv 0-4 ([`op_log.go:442-450`](../../go/crdt/op_log.go#L442-L450)), version `{0:4}` |
+| 3 | `a.Ins(2,"xy")` | a: **no fold** (fold tail pos would be 0+5, this is pos 2) → mint `{0,5}` "xy" lv 5-6, version `{0:6}` ([`op_log.go:141-149`](../../go/crdt/op_log.go#L141-L149)) |
 | 4 | `b.Ins(5,"Z")` | b: tail op is agent 0's → no fold → mint `{1,0}` "Z" lv 5, parents `[4]`, version `{0:4,1:0}` |
-| 5 | `b.Del(1,3)` | b: `localDelete` ([[`op_log.go:178-187`](../../go/crdt/op_log.go#L178-L187)](../../go/crdt/op_log.go#L178-L187)) → del run `{1,1}` len 3, lv 6-8, no content — version `{0:4,1:3}` |
+| 5 | `b.Del(1,3)` | b: `localDelete` ([`op_log.go:178-187`](../../go/crdt/op_log.go#L178-L187)) → del run `{1,1}` len 3, lv 6-8, no content — version `{0:4,1:3}` |
 | 6 | `a.MergeFrom(b)` | a: append `{1,0}` at lv 6 (parents `[4]`), `{1,1}` run at lv 7-9 (parents `[6]`) — version `{0:6,1:3}`; `checkoutFancy` walk: b's del chars find their targets live on a, `xy` integrates inside the deleted B|C span → "AxyEZ" |
 | 7 | `b.MergeFrom(a)` | b: append `{0,5}` at lv 9-10 — same shape, version `{0:6,1:3}` → "AxyEZ" |
 | 8 | `b.Del(0,2)` | b: del run `{1,4}` len 2, lv 11-12, version `{0:6,1:5}` → "yEZ" (deleted A, x) |
 | 9 | `a.Del(1,3)` | a: del run `{0,7}` len 3, lv 10-12, version `{0:9,1:3}` → "AZ" (deleted x, y, E — the visible 1…3 span) |
-| 10 | `a.MergeFrom(b)` | a: append `{1,4}` at lv 13-14, version `{0:9,1:5}` (b's run spans seqs 4-5, [[`op_log.go:448`](../../go/crdt/op_log.go#L448)](../../go/crdt/op_log.go#L448)); replaying b's run: `A` live → deleted; `x` already deleted (a's own step-9 run) → the **-1** path ([[`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)](../../go/crdt/crdt.go#L501-L507)); → "Z" |
+| 10 | `a.MergeFrom(b)` | a: append `{1,4}` at lv 13-14, version `{0:9,1:5}` (b's run spans seqs 4-5, [`op_log.go:448`](../../go/crdt/op_log.go#L448)); replaying b's run: `A` live → deleted; `x` already deleted (a's own step-9 run) → the **-1** path ([`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)); → "Z" |
 | 11 | `b.MergeFrom(a)` | b: append `{0,7}` at lv 13-15, version `{0:9,1:5}` — agent 1's max seq stays 5 (its own del run ends there); replaying a's run: `x` → **-1** (b's own step-8 run); `y` and `E` live → deleted → "Z" |
 
 ```mermaid
@@ -732,36 +732,36 @@ internals; what it does print is each replica's `GetString()` and
 
 1. **The delete run is total — every character is either committed or
    `-1`-skipped, never silently dropped.** `apply`'s loop runs exactly
-   `o.length` iterations ([[`crdt.go:531-536`](../../go/crdt/crdt.go#L531-L536)](../../go/crdt/crdt.go#L531-L536)) and `deleteOne` has two
-   exits — live commit ([[`crdt.go:509-516`](../../go/crdt/crdt.go#L509-L516)](../../go/crdt/crdt.go#L509-L516)) and already-gone re-claim
-   ([[`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)](../../go/crdt/crdt.go#L501-L507)) — with the interior length-1 split ([[`crdt.go:495-499`](../../go/crdt/crdt.go#L495-L499)](../../go/crdt/crdt.go#L495-L499))
+   `o.length` iterations ([`crdt.go:531-536`](../../go/crdt/crdt.go#L531-L536)) and `deleteOne` has two
+   exits — live commit ([`crdt.go:509-516`](../../go/crdt/crdt.go#L509-L516)) and already-gone re-claim
+   ([`crdt.go:501-507`](../../go/crdt/crdt.go#L501-L507)) — with the interior length-1 split ([`crdt.go:495-499`](../../go/crdt/crdt.go#L495-L499))
    making sure a multi-char item is never partially claimed.
 2. **`deleted` never flips back; `curState` is the only toggle.** The
-   permanent boolean ([[`crdt.go:509`](../../go/crdt/crdt.go#L509)](../../go/crdt/crdt.go#L509)) is the convergence-level fact; the
-   staged counter ([[`crdt.go:158-188`](../../go/crdt/crdt.go#L158-L188)](../../go/crdt/crdt.go#L158-L188), the `retreat`/`advance`
+   permanent boolean ([`crdt.go:509`](../../go/crdt/crdt.go#L509)) is the convergence-level fact; the
+   staged counter ([`crdt.go:158-188`](../../go/crdt/crdt.go#L158-L188), the `retreat`/`advance`
    primitive) is the only mechanism that "undoes" something during a
-   replay — and a concurrent re-claim (`Deleted(1)` rebumps, [[`crdt.go:502`](../../go/crdt/crdt.go#L502)](../../go/crdt/crdt.go#L502))
+   replay — and a concurrent re-claim (`Deleted(1)` rebumps, [`crdt.go:502`](../../go/crdt/crdt.go#L502))
    still cannot resurrect content.
 3. **Both delete runs' slots map to the same target — convergence in the
    ledger, too.** When `-1` fires, the receiving index re-records
    `delTargets[opLV] = item.lv` exactly as the first run's char did
-   ([[`crdt.go:504`](../../go/crdt/crdt.go#L504)](../../go/crdt/crdt.go#L504), `:514` — both exits write it), so the per-char winding
+   ([`crdt.go:504`](../../go/crdt/crdt.go#L504), `:514` — both exits write it), so the per-char winding
    machinery after any later re-merge behaves identically on every
    replica; no double-deletion happens at rope level (guard
-   `endPos >= 0`, [[`crdt.go:533`](../../go/crdt/crdt.go#L533)](../../go/crdt/crdt.go#L533)).
+   `endPos >= 0`, [`crdt.go:533`](../../go/crdt/crdt.go#L533)).
 4. **Position integrity survives splits** — after `findByCurrentPos` or
    `deleteOne` cuts a run, `tryMergeAt` re-fuses the seam only when
-   `canMerge`'s five conditions ([[`crdt.go:236-267`](../../go/crdt/crdt.go#L236-L267)](../../go/crdt/crdt.go#L236-L267): deleted/curState
+   `canMerge`'s five conditions ([`crdt.go:236-267`](../../go/crdt/crdt.go#L236-L267): deleted/curState
    equality, the sentinel-lv guards, agent, seq- and lv-adjacency,
    origin ties) all agree — a deterministic, ancestry-backed
    re-merge-guard, not a neighbour guess.
 5. **Branch content must be exactly the drive's output.** The local
-   branch content equals full replay ([[`document.go:96-101`](../../go/crdt/document.go#L96-L101)](../../go/crdt/document.go#L96-L101) /
-   `Check()`'s docs at [[`document.go:217-228`](../../go/crdt/document.go#L217-L228)](../../go/crdt/document.go#L217-L228)) — and,
+   branch content equals full replay ([`document.go:96-101`](../../go/crdt/document.go#L96-L101) /
+   `Check()`'s docs at [`document.go:217-228`](../../go/crdt/document.go#L217-L228)) — and,
    across arbitrarily interleaved replicas, `FuzzMergeConvergence`
-   keeps hammering exactly that ([[`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)](../../go/crdt/fuzz_test.go#L182)); a real
+   keeps hammering exactly that ([`go/crdt/fuzz_test.go:182`](../../go/crdt/fuzz_test.go#L182)); a real
    editing trace is replayed by the very same drive in `TestTrace`
-   ([[`go/crdt/trace_test.go:121-123`](../../go/crdt/trace_test.go#L121-L123)](../../go/crdt/trace_test.go#L121-L123)).
+   ([`go/crdt/trace_test.go:121-123`](../../go/crdt/trace_test.go#L121-L123)).
 
 Verification:
 

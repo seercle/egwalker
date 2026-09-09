@@ -6,13 +6,18 @@
 Bare filenames resolve against the page's package dir (docs/crdt → go/crdt …);
 full paths are repo-root-relative. .go citations only — non-Go cites stay as-is.
 The text inside the citation is not altered.
+
+Idempotent: a citation already inside `` [`…`](…) `` link syntax is skipped.
 """
 import re
 import sys
 from pathlib import Path
 
+# Negative lookbehind on `[` immediately before the citation's opening backtick,
+# so an already-linkified citation (its backtick span is link label text) is
+# never wrapped again. Re-running on processed docs is a byte-identical no-op.
 CITATION_RE = re.compile(
-    r"`((?:[a-zA-Z0-9_/.-]+/)?[a-zA-Z0-9_-]+\.go):(\d+)(?:-(\d+))?`")
+    r"(?<!\[)`((?:[a-zA-Z0-9_/.-]+/)?[a-zA-Z0-9_-]+\.go):(\d+)(?:-(\d+))?`")
 PKG_DIRS = {"pheap": "pheap", "bxtree": "bxtree", "crdt": "crdt"}
 
 
