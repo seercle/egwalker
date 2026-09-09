@@ -72,12 +72,8 @@ func FuzzBxTree(f *testing.F) {
 					pos = int(data[i]) % (length + 1)
 					i++
 				}
-				if pos+bulkLen > length {
-					bulkLen = length - pos
-				}
-				if bulkLen == 0 {
-					continue
-				}
+				// pos == length (append) is valid for InsertRange, including
+				// the empty-tree case; never clamp bulkLen.
 
 				bulk := make([]int, bulkLen)
 				for j := 0; j < bulkLen; j++ {
