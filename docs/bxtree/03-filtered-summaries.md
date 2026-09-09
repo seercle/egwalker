@@ -104,7 +104,7 @@ flowchart TD
 The descent loop in source — the state (`acc`, `first`) and the descent
 decision, [`go/bxtree/bxtree.go:1022-1047`](../../go/bxtree/bxtree.go#L1022-L1047):
 
-```go include go/bxtree/bxtree.go L1022-L1047
+```go include go/bxtree/bxtree.go L1038-L1063
 	var acc S
 	first := true
 	curr := tree.root
@@ -225,7 +225,7 @@ per-item retention semantics on the item stream.
 `UpdateSummary` / `UpdateSummaryUpward` rebuild exact summaries from children
 / items — this is [`go/bxtree/bxtree.go:909-927`](../../go/bxtree/bxtree.go#L909-L927):
 
-```go include go/bxtree/bxtree.go L909-L927
+```go include go/bxtree/bxtree.go L925-L943
 // UpdateSummary recomputes the summary for this node based on its children or items.
 func (n *Node[T, S]) UpdateSummary(tree *BxTree[T, S]) {
 	if tree.summarizer == nil {
@@ -258,7 +258,7 @@ the root ([`go/bxtree/bxtree.go:929-936`](../../go/bxtree/bxtree.go#L929-L936) �
 `SummaryBefore` walks the *left-sibling* sums — its definition plus spine walk,
 [`go/bxtree/bxtree.go:939-963`](../../go/bxtree/bxtree.go#L939-L963):
 
-```go include go/bxtree/bxtree.go L943-L962
+```go include go/bxtree/bxtree.go L959-L978
 	var s S
 	first := true
 

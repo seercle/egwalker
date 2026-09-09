@@ -464,6 +464,10 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 		}
 
 		tree.onItemsMoved(leaf, leaf.items)
+
+		for len(leaf.items) > tree.leafMaxSize {
+			tree.split(leaf)
+		}
 		return nil
 	}
 
@@ -483,7 +487,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 		tree.onItemsMoved(leaf, newItems)
 
-		if len(leaf.items) > tree.leafMaxSize {
+		for len(leaf.items) > tree.leafMaxSize {
 			tree.split(leaf)
 		}
 		return nil
@@ -507,7 +511,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 	tree.onItemsMoved(leaf, newItems)
 
-	if len(leaf.items) > tree.leafMaxSize {
+	for len(leaf.items) > tree.leafMaxSize {
 		tree.split(leaf)
 	}
 
@@ -612,6 +616,18 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 
 	if len(parent.children) > tree.internalMaxSize {
 		tree.split(parent)
+	}
+
+	// A single split may not fully rebalance after a bulk insert overfilled n
+	// (or its parent); repeatedly split the right sibling until it fits.
+	if right.isLeaf {
+		for len(right.items) > tree.leafMaxSize {
+			tree.split(right)
+		}
+	} else {
+		for len(right.children) > tree.internalMaxSize {
+			tree.split(right)
+		}
 	}
 }
 

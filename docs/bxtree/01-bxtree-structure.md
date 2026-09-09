@@ -271,7 +271,7 @@ caller predicate over `(accumulated summary, current summary)` is false
 ([`bxtree.go:1050-1061`](../../go/bxtree/bxtree.go#L1050-L1061)). It is how "jump to the first position where the
 aggregate up to it crosses k" costs a root-to-leaf walk:
 
-```go include go/bxtree/bxtree.go L1026-L1043
+```go include go/bxtree/bxtree.go L1042-L1059
 	for !curr.isLeaf {
 		found := false
 		for _, child := range curr.children {
@@ -338,7 +338,7 @@ The trick that makes the summary *cheap* is that mutations advance it
 that one delta along the whole ancestor chain — no re-fold from scratch
 ([`go/bxtree/bxtree.go:878-890`](../../go/bxtree/bxtree.go#L878-L890)):
 
-```go include go/bxtree/bxtree.go L878-L890
+```go include go/bxtree/bxtree.go L894-L906
 func (n *Node[T, S]) addUpward(deltaSize int, deltaSummary S, tree *BxTree[T, S]) {
 	if tree == nil {
 		panic("bxtree: addUpward called with nil tree")

@@ -14,6 +14,8 @@ func FuzzBxTree(f *testing.F) {
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		{2, 10, 20, 30, 40, 50, 60, 70, 80, 90},
 		{1, 5, 3, 9, 7, 2, 8, 4, 6, 0, 1, 2, 3, 4, 5},
+		{0, 2, 5, 0, 9, 9, 9, 9, 9, 9},
+		{1, 2, 12, 3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 0, 4},
 	} {
 		f.Add(s)
 	}
@@ -43,13 +45,62 @@ func FuzzBxTree(f *testing.F) {
 		var reference []int
 
 		for i := 0; i < len(data); {
-			op := data[i] % 2
+			op := data[i] % 3
 			i++
 			if i >= len(data) {
 				break
 			}
 
 			length := len(reference)
+
+			if op == 2 {
+				// Bulk insert: skip oversized inputs to keep the deterministic
+				// (seed-corpus) run fast.
+				if len(data) > 500 {
+					return
+				}
+				if i >= len(data) {
+					break
+				}
+				bulkLen := (int(data[i]) % 40) + 1
+				i++
+				pos := 0
+				if length > 0 {
+					if i >= len(data) {
+						break
+					}
+					pos = int(data[i]) % (length + 1)
+					i++
+				}
+				if pos+bulkLen > length {
+					bulkLen = length - pos
+				}
+				if bulkLen == 0 {
+					continue
+				}
+
+				bulk := make([]int, bulkLen)
+				for j := 0; j < bulkLen; j++ {
+					if i < len(data) {
+						bulk[j] = int(data[i])
+						i++
+					} else {
+						bulk[j] = pos + j
+					}
+				}
+
+				if err := tree.InsertRange(pos, bulk); err != nil {
+					t.Fatalf("InsertRange(%d) failed: %v", pos, err)
+				}
+
+				reference = append(reference, make([]int, bulkLen)...)
+				copy(reference[pos+bulkLen:], reference[pos:])
+				copy(reference[pos:], bulk)
+				if len(reference)%10 == 0 {
+					verifyTree(t, tree, reference)
+				}
+				continue
+			}
 
 			if op == 0 || length == 0 {
 				val := int(data[i])

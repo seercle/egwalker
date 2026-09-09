@@ -122,7 +122,7 @@ The leaf branch, with the summary maintenance in context — this is
 [`go/bxtree/bxtree.go:543-556`](../../go/bxtree/bxtree.go#L543-L556), where `n` shrinks and is re-based
 differentially while `right` gets a fresh fold ([`go/bxtree/bxtree.go:544-556`](../../go/bxtree/bxtree.go#L544-L556)):
 
-```go include go/bxtree/bxtree.go L543-L556
+```go include go/bxtree/bxtree.go L547-L560
 	if n.isLeaf {
 		mid := len(n.items) / 2
 		right.items = make([]T, len(n.items)-mid)
@@ -149,7 +149,7 @@ The branch-node case does the same partition for `children`, with both sides
 re-folded per child and the gained children re-pointed at `right`
 ([`go/bxtree/bxtree.go:574-603`](../../go/bxtree/bxtree.go#L574-L603)), and then the parent splice plus recursion:
 
-```go include go/bxtree/bxtree.go L607-L615
+```go include go/bxtree/bxtree.go L611-L619
 	parent := n.parent
 	idx := n.getParentIndex()
 	parent.children = append(parent.children, nil)
@@ -229,7 +229,7 @@ underfull.
 The `deltaSummary` expression is a negation trick, not a mystery — the lines
 below ([`go/bxtree/bxtree.go:653-662`](../../go/bxtree/bxtree.go#L653-L662)) are the deletion path's bookkeeping:
 
-```go include go/bxtree/bxtree.go L653-L662
+```go include go/bxtree/bxtree.go L669-L678
 		// Update summary before deleting
 		var deltaSummary S
 		if tree.summarizer != nil {
@@ -251,7 +251,7 @@ from every ancestor. Crucially, this runs *before* the `items` splice
 
 And the guards at the top of the loop ([`go/bxtree/bxtree.go:638-651`](../../go/bxtree/bxtree.go#L638-L651)):
 
-```go include go/bxtree/bxtree.go L638-L651
+```go include go/bxtree/bxtree.go L654-L667
 	if length == 0 {
 		return nil
 	}
@@ -281,7 +281,7 @@ before touching anything.
 branch nodes). The whole sibling-pick-and-decide block
 ([`go/bxtree/bxtree.go:721-752`](../../go/bxtree/bxtree.go#L721-L752)):
 
-```go include go/bxtree/bxtree.go L721-L752
+```go include go/bxtree/bxtree.go L737-L768
 	var nb *Node[T, S]
 	if idx > 0 {
 		nb = parent.children[idx-1]
@@ -465,7 +465,7 @@ idx`, so `merge(nb, n)` — the left leaf absorbs the right leaf's items. In
 `merge` itself ([`go/bxtree/bxtree.go:833-876`](../../go/bxtree/bxtree.go#L833-L876)) the absorbing left node appends
 `right.items` and fixes the leaf chain ([`go/bxtree/bxtree.go:853-858`](../../go/bxtree/bxtree.go#L853-L858)):
 
-```go include go/bxtree/bxtree.go L850-L859
+```go include go/bxtree/bxtree.go L866-L875
 		if tree.summarizer != nil {
 			left.summary = tree.summarizer.Add(left.summary, right.summary)
 		}
@@ -485,7 +485,7 @@ chain changed at the ends.
 
 `merge` then removes `right` from the parent and recurses:
 
-```go include go/bxtree/bxtree.go L871-L876
+```go include go/bxtree/bxtree.go L887-L892
 	idx := right.getParentIndex()
 	copy(parent.children[idx:], parent.children[idx+1:])
 	parent.children = parent.children[:len(parent.children)-1]
@@ -591,7 +591,7 @@ the entire bookkeeping contract, each row citing real code:
 This is the code [`go/bxtree/bxtree.go:878-890`](../../go/bxtree/bxtree.go#L878-L890) — `addUpward`, the spine walk
 every leaf-level carry rides:
 
-```go include go/bxtree/bxtree.go L878-L890
+```go include go/bxtree/bxtree.go L894-L906
 func (n *Node[T, S]) addUpward(deltaSize int, deltaSummary S, tree *BxTree[T, S]) {
 	if tree == nil {
 		panic("bxtree: addUpward called with nil tree")
