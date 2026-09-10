@@ -465,6 +465,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 		tree.onItemsMoved(leaf, leaf.items)
 
+		tree.borrowOverflow(leaf)
 		for len(leaf.items) > tree.leafMaxSize {
 			tree.split(leaf)
 		}
@@ -487,6 +488,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 		tree.onItemsMoved(leaf, newItems)
 
+		tree.borrowOverflow(leaf)
 		for len(leaf.items) > tree.leafMaxSize {
 			tree.split(leaf)
 		}
@@ -511,6 +513,7 @@ func (tree *BxTree[T, S]) insert(index int, newItems []T) error {
 
 	tree.onItemsMoved(leaf, newItems)
 
+	tree.borrowOverflow(leaf)
 	for len(leaf.items) > tree.leafMaxSize {
 		tree.split(leaf)
 	}
@@ -614,6 +617,7 @@ func (tree *BxTree[T, S]) split(n *Node[T, S]) {
 	copy(parent.children[idx+2:], parent.children[idx+1:])
 	parent.children[idx+1] = right
 
+	tree.borrowOverflow(parent)
 	if len(parent.children) > tree.internalMaxSize {
 		tree.split(parent)
 	}
@@ -768,6 +772,137 @@ func (tree *BxTree[T, S]) rebalance(n *Node[T, S]) {
 	} else {
 		tree.merge(n, nb)
 	}
+}
+
+// borrowOverflow relieves an overflowing node (count > max) by balancing it
+// with its adjacent sibling that has the most headroom (least occupancy, tie
+// resolved to the left sibling). Only boundary items/children cross over, so
+// global order is preserved. The pair is equalised one-shot: n ends at
+// target = ceil((count(n)+count(nb))/2) boundary items/children moved into
+// the sibling. When even that average exceeds the maximum (combined size
+// overflows two maxima), the sibling fills to max and n splits off what
+// remains — the same settle-and-split path as before. It returns without
+// doing anything when the node is not overflowing, has no sibling, or every
+// sibling is full — the caller's split then proceeds unchanged.
+//
+// The receiving sibling cannot have been underfull (every non-root node stays
+// at or above its minimum), and after the transfer n is at least its minimum
+// (combined/2 >= min) while nb is at most its maximum, so no rebalance is
+// needed after the transfer. Parent size and summary are unchanged: the
+// items/children only moved sideways between its children.
+func (tree *BxTree[T, S]) borrowOverflow(n *Node[T, S]) {
+	if n.parent == nil {
+		return
+	}
+	count := func(nd *Node[T, S]) int {
+		if nd.isLeaf {
+			return len(nd.items)
+		}
+		return len(nd.children)
+	}
+	var excess, hi int
+	if n.isLeaf {
+		excess, hi = len(n.items)-tree.leafMaxSize, tree.leafMaxSize
+	} else {
+		excess, hi = len(n.children)-tree.internalMaxSize, tree.internalMaxSize
+	}
+	if excess <= 0 {
+		return
+	}
+
+	// Prefer the sibling with the most headroom, so the transfer is as large
+	// as possible and the poorest sibling (most room) absorbs the overflow.
+	// On a tie the left sibling wins.
+	idx := n.getParentIndex()
+	var nb *Node[T, S]
+	var headroom int
+	if idx > 0 {
+		nb = n.parent.children[idx-1]
+		headroom = hi - count(nb)
+	}
+	if idx+1 < len(n.parent.children) {
+		if h := hi - count(n.parent.children[idx+1]); nb == nil || h > headroom {
+			nb = n.parent.children[idx+1]
+			headroom = h
+		}
+	}
+	if nb == nil || headroom <= 0 {
+		return
+	}
+
+	// Balance the overflowing node n against the poorest neighbour: one-shot
+	// equalise the pair so n keeps ~half the load (chunk frequency near the
+	// boundary drops accordingly). If even the equal point exceeds the
+	// maximum, fill the neighbour to max first and let the caller split off
+	// what still overflows.
+	//
+	// When target <= hi the move is always within nb's headroom:
+	// count(n) - ceil((count(n)+count(nb))/2) <= hi - count(nb) reduces
+	// exactly to count(n)+count(nb) <= 2*hi.
+	target := (count(n) + count(nb) + 1) / 2
+	move := count(n) - target
+	if target > hi {
+		move = headroom
+	}
+	if n.isLeaf {
+		tree.transferLeafItems(n, nb, move, idx > 0 && nb == n.parent.children[idx-1])
+	} else {
+		tree.redistributeChildren(nb, n, move)
+	}
+}
+
+// transferLeafItems moves `move` boundary items from a leaf donor into its
+// adjacent sibling receiver. borrowOverflow runs on nearly every insert near
+// a full boundary, so unlike redistributeLeaves this must not allocate:
+// items are sliced off the donor in place, and the receiver grows into its
+// retained capacity where possible. Donor and receiver are siblings sharing
+// a parent; receiverIsLeft tells which side of the donor the receiver is on,
+// so item order across the shared boundary is preserved. The summary deltas
+// stay O(move) instead of re-folding both nodes (O(len)).
+func (tree *BxTree[T, S]) transferLeafItems(donor, receiver *Node[T, S], move int, receiverIsLeft bool) {
+	if move <= 0 {
+		return
+	}
+
+	var moved []T
+	if receiverIsLeft {
+		// Receiver is immediately left of donor: donor's leading items go
+		// onto the receiver's back (zero-shift order-preserving append).
+		moved = donor.items[:move]
+		if cap(receiver.items) >= len(receiver.items)+move {
+			receiver.items = receiver.items[:len(receiver.items)+move]
+			copy(receiver.items[len(receiver.items)-move:], moved)
+		} else {
+			receiver.items = append(receiver.items, moved...)
+		}
+		donor.items = donor.items[move:]
+	} else {
+		// Receiver is immediately right of donor: donor's trailing items go
+		// onto the receiver's front (order-preserving front insert).
+		cut := len(donor.items) - move
+		moved = donor.items[cut:]
+		if cap(receiver.items) >= len(receiver.items)+move {
+			old := receiver.items
+			receiver.items = old[:len(receiver.items)+move]
+			copy(receiver.items[move:], old)
+			copy(receiver.items[:move], moved)
+		} else {
+			grown := make([]T, len(receiver.items)+move)
+			copy(grown, moved)
+			copy(grown[move:], receiver.items)
+			receiver.items = grown
+		}
+		donor.items = donor.items[:len(donor.items)-move]
+	}
+	receiver.size = len(receiver.items)
+	donor.size = len(donor.items)
+
+	if tree.summarizer != nil {
+		d := tree.summarizeItems(moved)
+		receiver.summary = tree.summarizer.Add(receiver.summary, d)
+		donor.summary = tree.summarizer.Sub(donor.summary, d)
+	}
+	tree.onItemsMoved(receiver, moved)
 }
 
 // redistributeLeaves moves `move` items from leaf nb (the selected neighbour)
