@@ -783,14 +783,35 @@ func (tree *BxTree[T, S]) redistributeLeaves(n, nb *Node[T, S], move int) {
 	if nb.getParentIndex() < n.getParentIndex() {
 		// nb is immediately left of n: take nb's trailing items into n's front.
 		cut := len(nb.items) - move
-		moved = append([]T(nil), nb.items[cut:]...)
-		nb.items = nb.items[:cut:cut]
-		n.items = append(moved, n.items...)
+		moved = nb.items[cut:]
+		if cap(n.items) >= len(n.items)+move {
+			// Grow in place: shift n's items right by `move` within the
+			// existing backing array instead of re-allocating. Shares of
+			// redistribution fire on nearly every insert near a full
+			// boundary, so the copy path benefits from the retained capacity
+			// of previously borrowed nodes.
+			old := n.items
+			n.items = n.items[:len(n.items)+move]
+			copy(n.items[move:], old)
+			copy(n.items[:move], moved)
+		} else {
+			grown := make([]T, len(n.items)+move)
+			copy(grown, moved)
+			copy(grown[move:], n.items)
+			n.items = grown
+		}
+		nb.items = nb.items[:cut]
 	} else {
 		// nb is immediately right of n: take nb's leading items onto n's back.
-		moved = append([]T(nil), nb.items[:move]...)
+		moved = nb.items[:move]
+		if cap(n.items) >= len(n.items)+move {
+			old := n.items
+			n.items = n.items[:len(n.items)+move]
+			copy(n.items[len(old):], moved)
+		} else {
+			n.items = append(n.items, moved...)
+		}
 		nb.items = nb.items[move:]
-		n.items = append(n.items, moved...)
 	}
 	n.size = len(n.items)
 	nb.size = len(nb.items)
