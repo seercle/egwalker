@@ -9,5 +9,5 @@ go/**/*.csv
 .envrc
 
 # AI
-docs/superpowers/plans
+docs/superpowers
 .superpowers
